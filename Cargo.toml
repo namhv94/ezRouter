@@ -1,0 +1,36 @@
+[package]
+name = "ezrouter"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance, memory-safe LLM proxy & router in Rust with intelligent load balancing, quota pooling, and token optimization"
+repository = "https://github.com/namhv94/ezRouter"
+license = "MIT"
+keywords = ["llm", "proxy", "ai", "openai", "router"]
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+axum = "0.7"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+bytes = "1"
+futures-util = "0.3"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+uuid = { version = "1.26.1", features = ["v4", "serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
+base64 = "0.22"
+ring = "0.17"
+regex = "1.10"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

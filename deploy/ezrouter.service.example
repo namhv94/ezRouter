@@ -1,0 +1,21 @@
+[Unit]
+Description=ezRouter Service
+After=network.target
+
+[Service]
+Type=simple
+User=ezrouter
+WorkingDirectory=/opt/ezrouter
+EnvironmentFile=-/opt/ezrouter/.env
+Environment=AG_PORT=20229
+Environment=AG_DATA_DIR=/var/lib/ezrouter
+Environment=RUST_LOG=ezrouter=info,tower_http=info
+ExecStart=/opt/ezrouter/ezrouter
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

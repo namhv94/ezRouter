@@ -1,0 +1,23 @@
+{
+  "name": "ezrouter-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "node scripts/verify-mobile-css.cjs && node scripts/verify-overview-metrics.cjs && node scripts/verify-model-dropdown.cjs && node scripts/verify-token-saver-tab.cjs && node scripts/verify-pipeline-flow.cjs && node scripts/verify-quota-formatting.cjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1"
+  }
+}
