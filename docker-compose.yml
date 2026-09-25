@@ -1,0 +1,19 @@
+services:
+  ezrouter:
+    build: .
+    image: ezrouter:latest
+    container_name: ezrouter
+    restart: unless-stopped
+    ports:
+      - "20229:20229"
+    environment:
+      - AG_HOST=0.0.0.0
+      - AG_PORT=20229
+      - AG_DATA_DIR=/data
+      - AG_API_KEY=your-admin-master-key
+      - RUST_LOG=ezrouter=info,tower_http=info
+    volumes:
+      - ezrouter_data:/data
+
+volumes:
+  ezrouter_data:

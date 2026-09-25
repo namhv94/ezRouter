@@ -8,6 +8,10 @@
 
 Built with Tokio + Axum, ezRouter provides sub-millisecond local routing overhead, native Server-Sent Events (SSE) streaming, and an intuitive, mobile-ready live web management dashboard.
 
+<p align="center">
+  <img src="ui/docs/screenshots/pipeline_flow_desktop_after.png" alt="ezRouter Live Request Pipeline Flow" width="850">
+</p>
+
 ---
 
 ## Key Features
@@ -52,7 +56,28 @@ Built with Tokio + Axum, ezRouter provides sub-millisecond local routing overhea
 
 ## Quick Start
 
-### 1. Clone & Build
+### Option A: 1-Line Quick Install (Linux x86_64)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/namhv94/ezRouter/main/install.sh | bash
+ezrouter
+```
+
+### Option B: Docker / Docker Compose
+
+```bash
+# Run with Docker
+docker run -d \
+  --name ezrouter \
+  -p 20229:20229 \
+  -v ezrouter_data:/data \
+  -e AG_API_KEY=your-admin-master-key \
+  ghcr.io/namhv94/ezrouter:latest
+```
+
+Or using `docker compose up -d` with the included `docker-compose.yml`.
+
+### Option C: Clone & Build from Source
 
 ```bash
 git clone https://github.com/namhv94/ezRouter.git
@@ -61,8 +86,8 @@ cd ezRouter
 # Copy example environment configuration
 cp .env.example .env
 
-# Build and run in debug mode
-cargo run
+# Build and run
+cargo run --release
 ```
 
 The server binds to `127.0.0.1:20229` by default.
