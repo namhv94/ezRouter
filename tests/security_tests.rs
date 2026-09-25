@@ -1,9 +1,9 @@
-use ezrouter::{app_router, config::Config, db::Database, state::AppState};
 use axum::{
     body::Body,
     http::{header::AUTHORIZATION, Request, StatusCode},
     response::IntoResponse,
 };
+use ezrouter::{app_router, config::Config, db::Database, state::AppState};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;

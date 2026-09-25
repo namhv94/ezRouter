@@ -3905,8 +3905,8 @@ async fn test_phase4b_antigravity_transport_mock_http_non_streaming() {
 
 #[tokio::test]
 async fn test_phase4b_antigravity_transport_auto_token_refresh_mock_http() {
-    use ezrouter::GoogleTokenRefresher;
     use axum::response::IntoResponse;
+    use ezrouter::GoogleTokenRefresher;
     use tokio::net::TcpListener;
 
     std::env::set_var("AG_GOOGLE_CLIENT_SECRET", "mock-secret");

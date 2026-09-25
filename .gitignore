@@ -12,6 +12,8 @@ node_modules/
 *.sqlite-*
 *.db
 *.log
+*.tar.gz
+*.sha256
 .ag-proxy-rust-staging/
 .ezrouter-staging/
 data/
