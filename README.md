@@ -9,7 +9,7 @@
 Built with Tokio + Axum, ezRouter provides sub-millisecond local routing overhead, native Server-Sent Events (SSE) streaming, and an intuitive, mobile-ready live web management dashboard.
 
 <p align="center">
-  <img src="ui/docs/screenshots/pipeline_flow_desktop_after.png" alt="ezRouter Live Request Pipeline Flow" width="850">
+  <img src="docs/assets/ezrouter-twitter-banner.png" alt="ezRouter Hero Banner" width="850">
 </p>
 
 ---
@@ -195,9 +195,17 @@ curl http://127.0.0.1:20229/v1/chat/completions \
 
 ---
 
-## Web UI Development
+## Live Web Management Console
 
-The web console is built using React, TypeScript, and Vite. Assets are automatically bundled into the Rust binary at compile time.
+The built-in management console provides real-time visibility into request routing, account quota health, and token compression stats:
+
+<p align="center">
+  <img src="ui/docs/screenshots/pipeline_flow_desktop_after.png" alt="ezRouter Live Request Pipeline Flow" width="850">
+</p>
+
+### UI Development
+
+The web console is built using React, TypeScript, and Vite. Production assets are automatically bundled into the Rust binary at compile time.
 
 ```bash
 cd ui
