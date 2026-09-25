@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@800;900&display=swap');
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    width: 512px;
+    height: 512px;
+    background-color: #06080F;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .ambient-glow {
+    position: absolute;
+    width: 360px;
+    height: 360px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(247, 76, 0, 0.35) 0%, rgba(0, 210, 255, 0.15) 50%, transparent 75%);
+    filter: blur(40px);
+  }
+
+  .squircle {
+    width: 390px;
+    height: 390px;
+    background: linear-gradient(145deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%);
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 96px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    box-shadow: 
+      0 30px 60px rgba(0, 0, 0, 0.8),
+      0 0 50px rgba(247, 76, 0, 0.25),
+      inset 0 2px 4px rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(20px);
+  }
+
+  .icon-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .brand-text {
+    margin-top: 14px;
+    font-size: 34px;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+    display: flex;
+    align-items: baseline;
+  }
+
+  .brand-text .ez {
+    background: linear-gradient(135deg, #FF7A00 0%, #FFA800 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-style: italic;
+    margin-right: 2px;
+  }
+
+  .brand-text .router {
+    color: #F8FAFC;
+  }
+</style>
+</head>
+<body>
+
+<div class="ambient-glow"></div>
+
+<div class="squircle">
+  <div class="icon-wrapper">
+    <svg width="180" height="180" viewBox="0 0 100 100" fill="none">
+      <defs>
+        <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#FF7A00" />
+          <stop offset="50%" stop-color="#FF4D00" />
+          <stop offset="100%" stop-color="#00D2FF" />
+        </linearGradient>
+        <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="8" result="blur" />
+          <feComposite in="SourceGraphic" in2="blur" operator="over" />
+        </filter>
+      </defs>
+      <!-- Concentric circuit ring -->
+      <circle cx="50" cy="50" r="42" stroke="url(#logoGrad)" stroke-width="2" stroke-dasharray="10 6" opacity="0.35" />
+      <circle cx="50" cy="50" r="34" stroke="rgba(255,255,255,0.15)" stroke-width="1.5" />
+      <!-- Routing spokes -->
+      <path d="M 50 8 L 50 36 M 50 64 L 50 92 M 8 50 L 36 50 M 64 50 L 92 50" stroke="url(#logoGrad)" stroke-width="4.5" stroke-linecap="round" />
+      <path d="M 22 22 L 38 38 M 78 78 L 62 62 M 78 22 L 62 38 M 22 78 L 38 62" stroke="url(#logoGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6" />
+      <!-- Outer routing nodes -->
+      <circle cx="50" cy="8" r="4.5" fill="#FF7A00" />
+      <circle cx="92" cy="50" r="4.5" fill="#00D2FF" />
+      <circle cx="50" cy="92" r="4.5" fill="#00D2FF" />
+      <circle cx="8" cy="50" r="4.5" fill="#FF7A00" />
+      <!-- Central Hub Core -->
+      <circle cx="50" cy="50" r="16" fill="url(#logoGrad)" filter="url(#glow)" />
+      <polygon points="50,38 60,56 40,56" fill="#FFFFFF" />
+      <circle cx="50" cy="50" r="4" fill="#0F172A" />
+    </svg>
+  </div>
+  <div class="brand-text">
+    <span class="ez">ez</span><span class="router">Router</span>
+  </div>
+</div>
+
+</body>
+</html>
