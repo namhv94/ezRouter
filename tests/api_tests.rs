@@ -8406,3 +8406,235 @@ async fn test_codex_latency_endpoint_returns_json() {
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+#[tokio::test]
+async fn test_embeddings_endpoint_auth_and_validation() {
+    let app = app_router(test_state());
+
+    // 1. Missing Authorization header -> 401
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"text-embedding-004","input":"hello"}"#,
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Invalid API key -> 401
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer wrong-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"text-embedding-004","input":"hello"}"#,
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // 3. Empty input string -> 400
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"model":"text-embedding-004","input":""}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // 4. Empty input array -> 400
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"model":"text-embedding-004","input":[]}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // 5. Empty model -> 400
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"model":"","input":"hello"}"#))
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_embeddings_endpoint_mock_provider_success() {
+    let app = app_router(test_state());
+
+    // Test 1: Single string input + dimensions=768
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{
+                "model": "text-embedding-004",
+                "input": "Sếp NamHV thích uống cà phê đen không đường",
+                "encoding_format": "float",
+                "dimensions": 768
+            }"#,
+        ))
+        .unwrap();
+
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    assert_eq!(json["object"], "list");
+    assert_eq!(json["model"], "text-embedding-004");
+    let data = json["data"].as_array().expect("data should be array");
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["index"], 0);
+    assert_eq!(data[0]["object"], "embedding");
+    let embedding = data[0]["embedding"].as_array().expect("embedding array");
+    assert_eq!(embedding.len(), 768);
+    assert!(json["usage"]["prompt_tokens"].as_i64().unwrap_or(0) > 0);
+
+    // Test 2: Array of strings batch input
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{
+                "model": "openrouter/google/gemini-embedding-001",
+                "input": ["fact 1", "fact 2", "fact 3"],
+                "dimensions": 768
+            }"#,
+        ))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    assert_eq!(json["object"], "list");
+    let data = json["data"].as_array().unwrap();
+    assert_eq!(data.len(), 3);
+    for (i, item) in data.iter().enumerate() {
+        assert_eq!(item["index"], i);
+        assert_eq!(item["embedding"].as_array().unwrap().len(), 768);
+    }
+}
+
+#[tokio::test]
+async fn test_embeddings_endpoint_upstream_http_routing() {
+    use axum::routing::post;
+    use tokio::net::TcpListener;
+
+    // 1. Spawn a mock upstream HTTP server
+    let mock_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mock_port = mock_listener.local_addr().unwrap().port();
+
+    let mock_upstream = axum::Router::new().route(
+        "/v1/embeddings",
+        post(|headers: axum::http::HeaderMap, body: String| async move {
+            let auth = headers.get(AUTHORIZATION).and_then(|h| h.to_str().ok());
+            assert_eq!(auth, Some("Bearer mock-key-999"));
+
+            let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+            // Prefix should be stripped: "embtest/google/gemini-embedding-001" -> "google/gemini-embedding-001"
+            assert_eq!(parsed["model"], "google/gemini-embedding-001");
+            assert_eq!(parsed["dimensions"], 768);
+
+            let input_arr = parsed["input"].as_array().unwrap();
+            let mut data = vec![];
+            for (i, _) in input_arr.iter().enumerate() {
+                data.push(serde_json::json!({
+                    "object": "embedding",
+                    "index": i,
+                    "embedding": vec![0.123f32; 768]
+                }));
+            }
+
+            axum::Json(serde_json::json!({
+                "object": "list",
+                "data": data,
+                "model": "google/gemini-embedding-001",
+                "usage": {
+                    "prompt_tokens": 12,
+                    "total_tokens": 12
+                }
+            }))
+        }),
+    );
+
+    tokio::spawn(async move {
+        axum::serve(mock_listener, mock_upstream).await.unwrap();
+    });
+
+    // 2. Set up ezRouter state with real HTTP provider pointing to mock server
+    let test_dir = std::env::temp_dir().join(format!("ezrouter-emb-test-{}", uuid::Uuid::new_v4()));
+    let config = Config::parse(
+        Some("127.0.0.1".to_string()),
+        Some("20229".to_string()),
+        Some(test_dir.to_str().unwrap().to_string()),
+        Some("test-secret-key".to_string()),
+    )
+    .unwrap();
+    let state = AppState::new(config);
+
+    // Register provider in SQLite
+    state
+        .db
+        .create_provider(
+            "Embedding Provider",
+            "embtest",
+            "openrouter",
+            &format!("http://127.0.0.1:{mock_port}/v1"),
+            "mock-key-999",
+            &serde_json::json!(["google/gemini-embedding-001"]),
+            true,
+        )
+        .unwrap();
+
+    let app = app_router(state);
+
+    // 3. Send embedding request through ezRouter
+    let req = Request::builder()
+        .uri("/v1/embeddings")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{
+                "model": "embtest/google/gemini-embedding-001",
+                "input": ["fact A", "fact B"],
+                "dimensions": 768
+            }"#,
+        ))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+    assert_eq!(json["object"], "list");
+    let data = json["data"].as_array().unwrap();
+    assert_eq!(data.len(), 2);
+    assert_eq!(data[0]["embedding"].as_array().unwrap().len(), 768);
+    assert_eq!(data[1]["embedding"].as_array().unwrap().len(), 768);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

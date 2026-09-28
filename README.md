@@ -16,7 +16,7 @@ Built with Tokio + Axum, ezRouter provides sub-millisecond local routing overhea
 
 ## Key Features
 
-- **OpenAI-Compatible Gateway:** Drop-in replacement for OpenAI endpoints (`/v1/chat/completions`, `/v1/models`). Works out of the box with Hermes Agent, Claude Code, Cursor, Continue, LangChain, LlamaIndex, etc.
+- **OpenAI-Compatible Gateway:** Drop-in replacement for OpenAI endpoints (`/v1/chat/completions`, `/v1/models`, `/v1/embeddings`). Works out of the box with Hermes Agent, Mem0, Claude Code, Cursor, Continue, LangChain, LlamaIndex, etc.
 - **Provider & Account Pooling:**
   - Multi-account Google OAuth rotation with automated token refresh.
   - Multi-account OpenAI Codex pool with PKCE OAuth flow.

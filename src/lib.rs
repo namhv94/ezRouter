@@ -53,11 +53,12 @@ pub use live_monitor::{
     mask_account_email, ActiveRequestItem, ActiveRequestRegistry, ActiveRequestsResponse,
 };
 pub use provider::{
-    build_antigravity_payload, resolve_chat_completions_url, AntigravityProvider, BoxChatStream,
-    ChatChoice, ChatChoiceMessage, ChatChunkChoice, ChatChunkDelta, ChatCompletionChunk,
-    ChatCompletionRequest, ChatCompletionResponse, ChatMessage, GeminiSseStream,
-    HttpUpstreamProvider, MockProvider, Provider, UsageInfo, AG_PROJECT, AG_STREAM_URL_PATH,
-    MAX_RESPONSE_BYTES,
+    build_antigravity_payload, resolve_chat_completions_url, resolve_embeddings_url,
+    AntigravityProvider, BoxChatStream, ChatChoice, ChatChoiceMessage, ChatChunkChoice,
+    ChatChunkDelta, ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse,
+    ChatMessage, EmbeddingData, EmbeddingInput, EmbeddingRequest, EmbeddingResponse,
+    EmbeddingUsage, GeminiSseStream, HttpUpstreamProvider, MockProvider, Provider, UsageInfo,
+    AG_PROJECT, AG_STREAM_URL_PATH, MAX_RESPONSE_BYTES,
 };
 pub use quota_refresh::{
     sanitize_error_message, QuotaRefreshStatusResponse, QuotaRefreshSummary, QuotaRefreshWorker,
@@ -81,6 +82,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/v1/models", get(routes::models::list_models))
         .route("/v1/models/*model_id", get(routes::models::retrieve_model))
         .route("/v1/chat/completions", post(routes::chat::chat_completions))
+        .route("/v1/embeddings", post(routes::embeddings::embeddings))
         .route(
             "/admin/api-keys",
             get(routes::admin::list_api_keys).post(routes::admin::create_api_key),

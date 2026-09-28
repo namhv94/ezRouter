@@ -301,6 +301,73 @@ pub struct ChatCompletionChunk {
     pub usage: Option<UsageInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum EmbeddingInput {
+    String(String),
+    StringArray(Vec<String>),
+}
+
+impl EmbeddingInput {
+    pub fn to_vec(&self) -> Vec<String> {
+        match self {
+            Self::String(s) => vec![s.clone()],
+            Self::StringArray(arr) => arr.clone(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::String(_) => 1,
+            Self::StringArray(arr) => arr.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::String(s) => s.trim().is_empty(),
+            Self::StringArray(arr) => arr.is_empty() || arr.iter().all(|s| s.trim().is_empty()),
+        }
+    }
+}
+
+fn default_encoding_format() -> String {
+    "float".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingRequest {
+    pub input: EmbeddingInput,
+    pub model: String,
+    #[serde(default = "default_encoding_format")]
+    pub encoding_format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimensions: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingData {
+    pub object: String,
+    pub index: usize,
+    pub embedding: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct EmbeddingUsage {
+    pub prompt_tokens: usize,
+    pub total_tokens: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EmbeddingResponse {
+    pub object: String,
+    pub data: Vec<EmbeddingData>,
+    pub model: String,
+    pub usage: EmbeddingUsage,
+}
+
 #[axum::async_trait]
 pub trait Provider: Send + Sync + std::fmt::Debug {
     async fn complete(
@@ -317,6 +384,13 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
             "Streaming is not supported by this provider".to_string(),
         ))
     }
+
+    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse, AppError> {
+        let _ = request;
+        Err(AppError::BadRequest(
+            "Embeddings are not supported by this provider".to_string(),
+        ))
+    }
 }
 
 /// Resolves the upstream endpoint for chat completions, avoiding duplicate `/v1`.
@@ -326,6 +400,16 @@ pub fn resolve_chat_completions_url(base_url: &str) -> String {
         format!("{trimmed}/chat/completions")
     } else {
         format!("{trimmed}/v1/chat/completions")
+    }
+}
+
+/// Resolves the upstream endpoint for embeddings, avoiding duplicate `/v1`.
+pub fn resolve_embeddings_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{trimmed}/embeddings")
+    } else {
+        format!("{trimmed}/v1/embeddings")
     }
 }
 
@@ -645,6 +729,105 @@ impl Provider for HttpUpstreamProvider {
 
         Ok(Box::pin(stream))
     }
+
+    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse, AppError> {
+        let base_url = self
+            .base_url
+            .as_deref()
+            .ok_or_else(|| AppError::Internal("Upstream base URL is not configured".to_string()))?;
+
+        let url = resolve_embeddings_url(base_url);
+
+        let mut req_to_send = request.clone();
+        // Strip provider prefix for external upstreams only (not ag/ or cx/).
+        {
+            let m = &req_to_send.model;
+            if !m.starts_with("ag/") && !m.starts_with("cx/") {
+                if let Some(pos) = m.find('/') {
+                    req_to_send.model = m[pos + 1..].to_string();
+                }
+            }
+        }
+
+        tracing::info!(
+            upstream_url = %url,
+            model = %req_to_send.model,
+            items_count = req_to_send.input.len(),
+            dimensions = ?req_to_send.dimensions,
+            "Dispatching embedding request to upstream provider"
+        );
+
+        let mut req_builder = self.client.post(&url).json(&req_to_send);
+
+        if let Some(ref key) = self.api_key {
+            if !key.trim().is_empty() {
+                req_builder =
+                    req_builder.header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"));
+            }
+        }
+
+        let response = match req_builder.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                if err.is_timeout() {
+                    return Err(AppError::GatewayTimeout(format!(
+                        "Upstream embedding request timed out: {err}"
+                    )));
+                }
+                if err.is_connect() {
+                    return Err(AppError::BadGateway(format!(
+                        "Upstream embedding connection failed: {err}"
+                    )));
+                }
+                return Err(AppError::BadGateway(format!(
+                    "Upstream embedding request failed: {err}"
+                )));
+            }
+        };
+
+        let status = response.status();
+        let body_bytes = match response.bytes().await {
+            Ok(b) => b,
+            Err(err) => {
+                return Err(AppError::BadGateway(format!(
+                    "Failed to read upstream embedding response body: {err}"
+                )));
+            }
+        };
+
+        if !status.is_success() {
+            let body_str = String::from_utf8_lossy(&body_bytes);
+            let error_msg = format!("Upstream embedding error (status {status}): {body_str}");
+            tracing::warn!(status = %status, body = %body_str, "Upstream embedding returned error");
+
+            return match status.as_u16() {
+                400 => Err(AppError::BadRequest(error_msg)),
+                401 => Err(AppError::Unauthorized(error_msg)),
+                403 => Err(AppError::Forbidden(error_msg)),
+                404 => Err(AppError::NotFound(error_msg)),
+                429 | 402 => Err(AppError::BadRequest(error_msg)),
+                504 => Err(AppError::GatewayTimeout(error_msg)),
+                _ => Err(AppError::BadGateway(error_msg)),
+            };
+        }
+
+        let mut parsed: EmbeddingResponse = serde_json::from_slice(&body_bytes).map_err(|err| {
+            let snippet = String::from_utf8_lossy(&body_bytes[..body_bytes.len().min(500)]);
+            AppError::BadGateway(format!(
+                "Failed to parse upstream embedding response as EmbeddingResponse: {err}. Body: {snippet}"
+            ))
+        })?;
+
+        if let Some(requested_dims) = request.dimensions {
+            for item in &mut parsed.data {
+                if item.embedding.len() > requested_dims {
+                    item.embedding.truncate(requested_dims);
+                }
+            }
+        }
+
+        Ok(parsed)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -866,6 +1049,38 @@ impl Provider for MockProvider {
         ];
 
         Ok(Box::pin(futures_util::stream::iter(sse_events)))
+    }
+
+    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse, AppError> {
+        let dims = request.dimensions.unwrap_or(768);
+        let texts = request.input.to_vec();
+        let mut data = Vec::with_capacity(texts.len());
+        let mut total_chars = 0;
+
+        for (idx, text) in texts.iter().enumerate() {
+            total_chars += text.len();
+            let mut embedding = Vec::with_capacity(dims);
+            for d in 0..dims {
+                let val = (((d + idx * 7) as f32) * 0.001).sin();
+                embedding.push(val);
+            }
+            data.push(EmbeddingData {
+                object: "embedding".to_string(),
+                index: idx,
+                embedding,
+            });
+        }
+
+        let prompt_tokens = (total_chars / 4).max(1);
+        Ok(EmbeddingResponse {
+            object: "list".to_string(),
+            data,
+            model: request.model.clone(),
+            usage: EmbeddingUsage {
+                prompt_tokens,
+                total_tokens: prompt_tokens,
+            },
+        })
     }
 }
 
@@ -2733,6 +2948,84 @@ mod tests {
             resolve_chat_completions_url("http://127.0.0.1:8080/v1"),
             "http://127.0.0.1:8080/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn test_resolve_embeddings_url() {
+        assert_eq!(
+            resolve_embeddings_url("https://api.openai.com"),
+            "https://api.openai.com/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("https://api.openai.com/"),
+            "https://api.openai.com/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("https://api.openai.com/v1/"),
+            "https://api.openai.com/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("http://127.0.0.1:11434"),
+            "http://127.0.0.1:11434/v1/embeddings"
+        );
+        assert_eq!(
+            resolve_embeddings_url("http://127.0.0.1:11434/v1"),
+            "http://127.0.0.1:11434/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_embedding_serde_single_and_batch() {
+        let single_json = r#"{
+            "model": "text-embedding-004",
+            "input": "hello world",
+            "dimensions": 768
+        }"#;
+        let req1: EmbeddingRequest = serde_json::from_str(single_json).unwrap();
+        assert_eq!(req1.model, "text-embedding-004");
+        assert_eq!(req1.dimensions, Some(768));
+        assert_eq!(req1.encoding_format, "float");
+        assert_eq!(req1.input.to_vec(), vec!["hello world".to_string()]);
+
+        let batch_json = r#"{
+            "model": "openrouter/google/gemini-embedding-001",
+            "input": ["item 1", "item 2", "item 3"]
+        }"#;
+        let req2: EmbeddingRequest = serde_json::from_str(batch_json).unwrap();
+        assert_eq!(req2.model, "openrouter/google/gemini-embedding-001");
+        assert_eq!(req2.dimensions, None);
+        assert_eq!(req2.input.len(), 3);
+        assert_eq!(req2.input.to_vec(), vec!["item 1", "item 2", "item 3"]);
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_embed() {
+        let mock = MockProvider::new();
+        let req = EmbeddingRequest {
+            model: "text-embedding-004".to_string(),
+            input: EmbeddingInput::StringArray(vec!["text A".to_string(), "text B".to_string()]),
+            encoding_format: "float".to_string(),
+            dimensions: Some(768),
+            user: None,
+        };
+
+        let resp = mock.embed(&req).await.unwrap();
+        assert_eq!(resp.object, "list");
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].index, 0);
+        assert_eq!(resp.data[0].embedding.len(), 768);
+        assert_eq!(resp.data[1].index, 1);
+        assert_eq!(resp.data[1].embedding.len(), 768);
+        assert_eq!(resp.model, "text-embedding-004");
+        assert!(resp.usage.prompt_tokens > 0);
     }
 
     #[tokio::test]
