@@ -157,6 +157,8 @@ async fn test_models_list_canonical_and_unique() {
     assert!(ids.contains(&"cx/gpt-6-astra"));
     assert!(ids.contains(&"cx/gpt-reserve"));
     assert!(ids.contains(&"cx/codex-auto-review"));
+    assert!(ids.contains(&"ag/claude-opus-5-5-high"));
+    assert!(ids.contains(&"ag/claude-sonnet-5-5-high"));
     assert!(!ids.contains(&"gemini-3.8-flash-high"));
     assert!(!ids.contains(&"gpt-5.6-sol"));
     assert!(!ids.contains(&"gpt-6.1-sol"));

@@ -829,6 +829,8 @@ export const vi: TranslationSchema = {
     modelOptGeminiFlash: 'Google Antigravity - Tốc độ cao & Ngữ cảnh rộng',
     modelOptGeminiProAgent: 'Google Antigravity - Gemini Pro Agent 9router',
     modelOptGeminiProLow: 'Google Antigravity - Gemini Pro Low Quota',
+    modelOptClaudeOpus55: 'Google Antigravity - Claude Opus 5.5 High Thinking (1M Context)',
+    modelOptClaudeSonnet55: 'Google Antigravity - Claude Sonnet 5.5 High Thinking (1M Context)',
     modelOptCodexSol: 'OpenAI Codex (GPT-5.6 Sol) - Chuyên sâu Logic Lập Trình',
     modelOptCodex61Sol: 'OpenAI Codex (GPT-6.1 Sol) - Flagship Agentic Coding Mới',
     modelOptCodexAstra: 'OpenAI Codex (GPT-6 Astra) - Siêu Trí Tuệ Reasoning & Computer Use',

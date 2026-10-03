@@ -23,6 +23,8 @@ const DEFAULT_AG_MODELS = [
   'ag/gemini-3.1-pro-low',
   'ag/claude-sonnet-4-6',
   'ag/claude-opus-4-6-thinking',
+  'ag/claude-opus-5-5-high',
+  'ag/claude-sonnet-5-5-high',
 ];
 
 const DEFAULT_CX_MODELS = [

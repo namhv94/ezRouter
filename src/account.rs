@@ -105,6 +105,8 @@ pub const AG_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 pub const AG_BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com";
 pub const AG_QUOTA_URL: &str =
     "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
+pub const AG_MODELS_URL: &str =
+    "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 pub const AG_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
 pub const AG_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const AG_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
@@ -277,6 +279,7 @@ pub trait GoogleQuotaFetcher: Send + Sync + std::fmt::Debug {
 pub struct DefaultGoogleQuotaFetcher {
     client: reqwest::Client,
     quota_url: String,
+    models_url: String,
 }
 
 impl Default for DefaultGoogleQuotaFetcher {
@@ -288,16 +291,25 @@ impl Default for DefaultGoogleQuotaFetcher {
 impl DefaultGoogleQuotaFetcher {
     pub fn new() -> Self {
         let quota_url = std::env::var("AG_QUOTA_URL").unwrap_or_else(|_| AG_QUOTA_URL.to_string());
-        Self::with_url(quota_url)
+        let models_url =
+            std::env::var("AG_MODELS_URL").unwrap_or_else(|_| AG_MODELS_URL.to_string());
+        Self::with_urls(quota_url, models_url)
     }
 
     pub fn with_url(quota_url: impl Into<String>) -> Self {
+        let models_url =
+            std::env::var("AG_MODELS_URL").unwrap_or_else(|_| AG_MODELS_URL.to_string());
+        Self::with_urls(quota_url, models_url)
+    }
+
+    pub fn with_urls(quota_url: impl Into<String>, models_url: impl Into<String>) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
                 .build()
                 .expect("Failed to build DefaultGoogleQuotaFetcher client"),
             quota_url: quota_url.into(),
+            models_url: models_url.into(),
         }
     }
 }
@@ -403,7 +415,36 @@ impl GoogleQuotaFetcher for DefaultGoogleQuotaFetcher {
         let raw: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse Google quota response JSON: {e}"))?;
 
-        Ok(parse_google_quota_summary(&raw))
+        let mut normalized = parse_google_quota_summary(&raw);
+
+        // Best-effort fetch of available models for per-account model feature routing
+        let models_res = self
+            .client
+            .post(&self.models_url)
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {access_token}"),
+            )
+            .header(reqwest::header::USER_AGENT, AG_USER_AGENT)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&serde_json::json!({}))
+            .send()
+            .await;
+
+        if let Ok(m_resp) = models_res {
+            if m_resp.status().is_success() {
+                if let Ok(m_body) = m_resp.text().await {
+                    if let Ok(m_json) = serde_json::from_str::<serde_json::Value>(&m_body) {
+                        if let Some(models_obj) = m_json.get("models").and_then(|m| m.as_object()) {
+                            let model_keys: Vec<String> = models_obj.keys().cloned().collect();
+                            normalized["models"] = serde_json::json!(model_keys);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(normalized)
     }
 }
 
@@ -1490,6 +1531,32 @@ impl AccountPool {
 
         if let Some(model) = model_id {
             let m_lower = model.to_lowercase();
+            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
+            let mapped_model =
+                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
+
+            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
+            let mut with_model = Vec::new();
+            for item in &candidates {
+                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
+                {
+                    let has_m = models_arr.iter().any(|val| {
+                        val.as_str()
+                            .map(|s| {
+                                let s_low = s.to_lowercase();
+                                s_low == mapped_model || s_low == clean_model.to_lowercase()
+                            })
+                            .unwrap_or(false)
+                    });
+                    if has_m {
+                        with_model.push(item.clone());
+                    }
+                }
+            }
+            if !with_model.is_empty() {
+                candidates = with_model;
+            }
+
             if m_lower.contains("claude") || m_lower.contains("gpt") {
                 let mut with_quota = Vec::new();
                 for item in &candidates {
@@ -1565,6 +1632,32 @@ impl AccountPool {
 
         if let Some(model) = model_id {
             let m_lower = model.to_lowercase();
+            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
+            let mapped_model =
+                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
+
+            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
+            let mut with_model = Vec::new();
+            for item in &sorted {
+                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
+                {
+                    let has_m = models_arr.iter().any(|val| {
+                        val.as_str()
+                            .map(|s| {
+                                let s_low = s.to_lowercase();
+                                s_low == mapped_model || s_low == clean_model.to_lowercase()
+                            })
+                            .unwrap_or(false)
+                    });
+                    if has_m {
+                        with_model.push(item.clone());
+                    }
+                }
+            }
+            if !with_model.is_empty() {
+                sorted = with_model;
+            }
+
             if m_lower.contains("claude") || m_lower.contains("gpt") {
                 let mut with_quota = Vec::new();
                 let mut without_quota = Vec::new();
@@ -1674,6 +1767,26 @@ impl AccountPool {
                     if item.in_flight.load(Ordering::SeqCst) >= self.max_concurrency {
                         continue;
                     }
+                    if let Some(m) = model_id {
+                        let clean_m = m.strip_prefix("ag/").unwrap_or(m);
+                        let mapped_m =
+                            crate::provider::map_antigravity_upstream_model(clean_m).to_lowercase();
+                        if let Some(models_arr) =
+                            item.quota_cache.get("models").and_then(|v| v.as_array())
+                        {
+                            let has_m = models_arr.iter().any(|val| {
+                                val.as_str()
+                                    .map(|s| {
+                                        let s_low = s.to_lowercase();
+                                        s_low == mapped_m || s_low == clean_m.to_lowercase()
+                                    })
+                                    .unwrap_or(false)
+                            });
+                            if !has_m {
+                                continue;
+                            }
+                        }
+                    }
                     let gap_rem = self.min_gap_secs - (now - item.record.last_used_at);
                     if gap_rem > 0.0 && gap_rem <= self.min_gap_secs.max(2.0) {
                         min_w = Some(min_w.map(|w: f64| w.min(gap_rem)).unwrap_or(gap_rem));
@@ -1731,6 +1844,32 @@ impl AccountPool {
         // Model-specific quota filtering (e.g. claude / gpt)
         if let Some(model) = model_id {
             let m_lower = model.to_lowercase();
+            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
+            let mapped_model =
+                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
+
+            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
+            let mut with_model = Vec::new();
+            for item in &sorted {
+                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
+                {
+                    let has_m = models_arr.iter().any(|val| {
+                        val.as_str()
+                            .map(|s| {
+                                let s_low = s.to_lowercase();
+                                s_low == mapped_model || s_low == clean_model.to_lowercase()
+                            })
+                            .unwrap_or(false)
+                    });
+                    if has_m {
+                        with_model.push(item.clone());
+                    }
+                }
+            }
+            if !with_model.is_empty() {
+                sorted = with_model;
+            }
+
             if m_lower.contains("claude") || m_lower.contains("gpt") {
                 let mut with_quota = Vec::new();
                 let mut without_quota = Vec::new();

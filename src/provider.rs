@@ -1239,6 +1239,8 @@ pub fn map_antigravity_upstream_model(model: &str) -> &str {
     match clean {
         "gemini-3.1-pro" | "gemini-3.1-pro-high" | "gemini-pro-agent" => "gemini-pro-agent",
         "gemini-3.1-pro-low" | "gemini-pro-low" => "gemini-3.1-pro-low",
+        "claude-opus-5-5" | "claude-opus-5.5" => "claude-opus-5-5-high",
+        "claude-sonnet-5-5" | "claude-sonnet-5.5" => "claude-sonnet-5-5-high",
         other => other,
     }
 }

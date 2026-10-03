@@ -61,6 +61,48 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["claude-opus-4-6-thinking"],
     },
     StaticModelDef {
+        canonical_id: "ag/claude-opus-5-5-high",
+        owned_by: "antigravity",
+        aliases: &[
+            "claude-opus-5-5-high",
+            "ag/claude-opus-5-5",
+            "claude-opus-5-5",
+            "ag/claude-opus-5.5",
+            "claude-opus-5.5",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/claude-opus-5-5-medium",
+        owned_by: "antigravity",
+        aliases: &["claude-opus-5-5-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "ag/claude-opus-5-5-low",
+        owned_by: "antigravity",
+        aliases: &["claude-opus-5-5-low"],
+    },
+    StaticModelDef {
+        canonical_id: "ag/claude-sonnet-5-5-high",
+        owned_by: "antigravity",
+        aliases: &[
+            "claude-sonnet-5-5-high",
+            "ag/claude-sonnet-5-5",
+            "claude-sonnet-5-5",
+            "ag/claude-sonnet-5.5",
+            "claude-sonnet-5.5",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/claude-sonnet-5-5-medium",
+        owned_by: "antigravity",
+        aliases: &["claude-sonnet-5-5-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "ag/claude-sonnet-5-5-low",
+        owned_by: "antigravity",
+        aliases: &["claude-sonnet-5-5-low"],
+    },
+    StaticModelDef {
         canonical_id: "ag/gemini-pro-agent",
         owned_by: "antigravity",
         aliases: &[
@@ -291,7 +333,7 @@ mod tests {
         let list_resp = registry.list_models();
 
         assert_eq!(list_resp.object, "list");
-        assert_eq!(list_resp.data.len(), 18);
+        assert_eq!(list_resp.data.len(), 24);
 
         let mut seen_ids = HashSet::new();
         for entry in &list_resp.data {
@@ -327,6 +369,8 @@ mod tests {
         assert!(ids.contains(&"cx/gpt-6-astra"));
         assert!(ids.contains(&"cx/gpt-reserve"));
         assert!(ids.contains(&"cx/codex-auto-review"));
+        assert!(ids.contains(&"ag/claude-opus-5-5-high"));
+        assert!(ids.contains(&"ag/claude-sonnet-5-5-high"));
         assert!(!ids.contains(&"gemini-3.8-flash-high"));
         assert!(!ids.contains(&"gemini-pro-agent"));
         assert!(!ids.contains(&"ag/gemini-3.1-pro"));
@@ -387,6 +431,33 @@ mod tests {
         assert!(registry.get_model("gpt-reserve").is_some());
         assert!(registry.get_model("cx/codex-auto-review").is_some());
         assert!(registry.get_model("codex-auto-review").is_some());
+
+        // Claude 5.5 lookups
+        let m_opus55 = registry.get_model("ag/claude-opus-5-5-high");
+        assert!(m_opus55.is_some());
+        assert_eq!(m_opus55.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("claude-opus-5-5-high").is_some());
+        assert!(registry.get_model("ag/claude-opus-5-5").is_some());
+        assert!(registry.get_model("claude-opus-5-5").is_some());
+        assert!(registry.get_model("ag/claude-opus-5.5").is_some());
+        assert!(registry.get_model("claude-opus-5.5").is_some());
+        assert!(registry.get_model("ag/claude-opus-5-5-medium").is_some());
+        assert!(registry.get_model("claude-opus-5-5-medium").is_some());
+        assert!(registry.get_model("ag/claude-opus-5-5-low").is_some());
+        assert!(registry.get_model("claude-opus-5-5-low").is_some());
+
+        let m_sonnet55 = registry.get_model("ag/claude-sonnet-5-5-high");
+        assert!(m_sonnet55.is_some());
+        assert_eq!(m_sonnet55.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("claude-sonnet-5-5-high").is_some());
+        assert!(registry.get_model("ag/claude-sonnet-5-5").is_some());
+        assert!(registry.get_model("claude-sonnet-5-5").is_some());
+        assert!(registry.get_model("ag/claude-sonnet-5.5").is_some());
+        assert!(registry.get_model("claude-sonnet-5.5").is_some());
+        assert!(registry.get_model("ag/claude-sonnet-5-5-medium").is_some());
+        assert!(registry.get_model("claude-sonnet-5-5-medium").is_some());
+        assert!(registry.get_model("ag/claude-sonnet-5-5-low").is_some());
+        assert!(registry.get_model("claude-sonnet-5-5-low").is_some());
 
         // Gemini Pro agent canonical and alias lookup
         let m_agent = registry.get_model("ag/gemini-pro-agent");

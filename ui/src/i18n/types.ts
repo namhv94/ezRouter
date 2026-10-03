@@ -831,6 +831,8 @@ export interface TranslationSchema {
     modelOptGeminiFlash: string;
     modelOptGeminiProAgent: string;
     modelOptGeminiProLow: string;
+    modelOptClaudeOpus55: string;
+    modelOptClaudeSonnet55: string;
     modelOptCodexSol: string;
     modelOptCodex61Sol: string;
     modelOptCodexAstra: string;

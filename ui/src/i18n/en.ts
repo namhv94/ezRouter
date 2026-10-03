@@ -829,6 +829,8 @@ export const en: TranslationSchema = {
     modelOptGeminiFlash: 'Google Antigravity - High Speed & Large Context',
     modelOptGeminiProAgent: 'Google Antigravity - Gemini Pro Agent 9router',
     modelOptGeminiProLow: 'Google Antigravity - Gemini Pro Low Quota',
+    modelOptClaudeOpus55: 'Google Antigravity - Claude Opus 5.5 High Thinking (1M Context)',
+    modelOptClaudeSonnet55: 'Google Antigravity - Claude Sonnet 5.5 High Thinking (1M Context)',
     modelOptCodexSol: 'OpenAI Codex (GPT-5.6 Sol) - Deep Programming Logic',
     modelOptCodex61Sol: 'OpenAI Codex (GPT-6.1 Sol) - New Flagship Agentic Coding',
     modelOptCodexAstra: 'OpenAI Codex (GPT-6 Astra) - Frontier Reasoning & Computer Use',

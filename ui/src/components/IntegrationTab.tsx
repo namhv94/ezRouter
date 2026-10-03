@@ -340,6 +340,8 @@ callRouter();
               <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high ({t('integration.modelOptGeminiFlash')})</option>
               <option value="ag/gemini-pro-agent">ag/gemini-pro-agent ({t('integration.modelOptGeminiProAgent')})</option>
               <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low ({t('integration.modelOptGeminiProLow')})</option>
+              <option value="ag/claude-opus-5-5-high">ag/claude-opus-5-5-high ({t('integration.modelOptClaudeOpus55')})</option>
+              <option value="ag/claude-sonnet-5-5-high">ag/claude-sonnet-5-5-high ({t('integration.modelOptClaudeSonnet55')})</option>
               <option value="cx/gpt-6.1-sol">cx/gpt-6.1-sol ({t('integration.modelOptCodex61Sol')})</option>
               <option value="cx/gpt-6-astra">cx/gpt-6-astra ({t('integration.modelOptCodexAstra')})</option>
               <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol ({t('integration.modelOptCodexSol')})</option>
