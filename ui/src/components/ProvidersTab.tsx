@@ -8,6 +8,7 @@ import {
   QuotaRefreshStatus,
 } from '../types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlus,
   IconCheck,
@@ -21,6 +22,10 @@ import {
   IconGoogle,
   IconOpenAI,
   IconChevronDown,
+  IconOpenRouter,
+  IconKey,
+  IconZap,
+  IconSearch,
 } from '../icons';
 
 interface ProvidersTabProps {
@@ -38,6 +43,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   error: parentError,
   onRefresh,
 }) => {
+  const { locale, t } = useI18n();
   // Accordion drawer states
   const [showGoogleDetails, setShowGoogleDetails] = useState<boolean>(false);
   const [showCodexDetails, setShowCodexDetails] = useState<boolean>(false);
@@ -60,6 +66,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     quota: any;
     onRefreshQuota?: () => void;
   } | null>(null);
+
+  // Codex Reset Credit Modal state
+  const [resetCreditModalAccount, setResetCreditModalAccount] = useState<CodexAccountRecord | null>(null);
+  const [resetCreditsList, setResetCreditsList] = useState<any[]>([]);
+  const [resetCreditsLoading, setResetCreditsLoading] = useState(false);
+  const [selectedCreditId, setSelectedCreditId] = useState<string>('');
+  const [consumingCredit, setConsumingCredit] = useState(false);
 
   // Upstream Form fields
   const [name, setName] = useState('');
@@ -102,6 +115,216 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     text: string;
   } | null>(null);
 
+  // OpenRouter Provider separation & state
+  const openrouterProv = providers.find((p) => p.type === 'openrouter' || p.prefix === 'openrouter');
+  const otherProviders = providers.filter((p) => p.type !== 'openrouter' && p.prefix !== 'openrouter');
+
+  const CURATED_OPENROUTER_MODELS = [
+    'deepseek/deepseek-r1',
+    'deepseek/deepseek-chat',
+    'meta-llama/llama-3.3-70b-instruct',
+    'openai/gpt-4o',
+    'openai/gpt-4o-mini',
+    'google/gemini-2.5-pro',
+    'google/gemini-2.5-flash',
+    'qwen/qwen-2.5-coder-32b-instruct',
+    'anthropic/claude-3.5-sonnet',
+    'anthropic/claude-3.7-sonnet',
+  ];
+
+  const [openrouterCredits, setOpenrouterCredits] = useState<{ total_credits?: number; total_usage?: number; updated_at?: number } | null>(null);
+  const [openrouterCreditsLoading, setOpenrouterCreditsLoading] = useState(false);
+  const [showOpenRouterKeyModal, setShowOpenRouterKeyModal] = useState(false);
+  const [openrouterKeyInput, setOpenrouterKeyInput] = useState('');
+  const [openrouterKeySaving, setOpenrouterKeySaving] = useState(false);
+  const [showOpenRouterModelModal, setShowOpenRouterModelModal] = useState(false);
+  const [selectedOpenRouterModels, setSelectedOpenRouterModels] = useState<string[]>([]);
+  const [allOpenRouterModels, setAllOpenRouterModels] = useState<Array<{ id: string; name?: string; context_length?: number }>>([]);
+  const [allModelsLoading, setAllModelsLoading] = useState(false);
+  const [openrouterModelSearch, setOpenrouterModelSearch] = useState('');
+  const [showOpenRouterDetails, setShowOpenRouterDetails] = useState(true);
+
+  const fetchOpenRouterCredits = async () => {
+    setOpenrouterCreditsLoading(true);
+    try {
+      // 1. Fetch from server static cache (auto-synced by cron/refresh worker)
+      try {
+        const res = await fetch(`/assets/openrouter-credits.json?t=${Date.now()}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data.total_credits === 'number') {
+            setOpenrouterCredits(data);
+          }
+        }
+      } catch (_) {}
+
+      // 2. Trigger test provider to ensure connection is live and get updated stats
+      if (openrouterProv) {
+        const testRes = (await api.testProvider(openrouterProv.id)) as any;
+        if (testRes && testRes.credits) {
+          setOpenrouterCredits(testRes.credits);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch openrouter credits:', e);
+    } finally {
+      setOpenrouterCreditsLoading(false);
+    }
+  };
+
+  const loadAllOpenRouterModels = async () => {
+    setAllModelsLoading(true);
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/models');
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json.data)) {
+          setAllOpenRouterModels(
+            json.data.map((m: any) => ({
+              id: m.id,
+              name: m.name || m.id,
+              context_length: m.context_length,
+            }))
+          );
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load OpenRouter models:', e);
+    } finally {
+      setAllModelsLoading(false);
+    }
+  };
+
+  const handleToggleOpenRouterActive = async (prov: ProviderResponse) => {
+    setActionLoading(true);
+    try {
+      await api.updateProvider(prov.id, {
+        is_active: !prov.is_active,
+      });
+      setActionMessage({
+        type: 'success',
+        text: prov.is_active ? 'Đã tạm tắt OpenRouter.' : 'Đã kích hoạt OpenRouter.',
+      });
+      onRefresh();
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Lỗi cập nhật trạng thái: ${err.message || err}`,
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTestOpenRouter = async () => {
+    if (!openrouterProv) return;
+    setActionLoading(true);
+    try {
+      const res = await api.testProvider(openrouterProv.id);
+      if (res.success) {
+        setActionMessage({
+          type: 'success',
+          text: `Test kết nối OpenRouter thành công! Độ trễ: ${res.latency_ms.toFixed(1)}ms`,
+        });
+        fetchOpenRouterCredits();
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: `Kết nối OpenRouter thất bại: ${res.message || 'Lỗi không xác định'}`,
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Lỗi test kết nối: ${err.message || err}`,
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSaveOpenRouterKey = async () => {
+    if (!openrouterKeyInput.trim()) return;
+    setOpenrouterKeySaving(true);
+    try {
+      const cleanKey = openrouterKeyInput.trim();
+      localStorage.setItem('ag_openrouter_raw_key', cleanKey);
+      if (openrouterProv) {
+        await api.updateProvider(openrouterProv.id, {
+          api_key: cleanKey,
+        });
+      } else {
+        await api.createProvider({
+          name: 'OpenRouter',
+          prefix: 'openrouter',
+          type: 'openrouter',
+          base_url: 'https://openrouter.ai/api/v1',
+          api_key: cleanKey,
+          models: CURATED_OPENROUTER_MODELS,
+          is_active: true,
+        });
+      }
+      setShowOpenRouterKeyModal(false);
+      setActionMessage({
+        type: 'success',
+        text: 'Đã lưu API Key OpenRouter thành công!',
+      });
+      onRefresh();
+      fetchOpenRouterCredits();
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Lỗi lưu API Key: ${err.message || err}`,
+      });
+    } finally {
+      setOpenrouterKeySaving(false);
+    }
+  };
+
+  const handleSaveSelectedModels = async () => {
+    if (!openrouterProv) return;
+    setActionLoading(true);
+    try {
+      await api.updateProvider(openrouterProv.id, {
+        models: selectedOpenRouterModels,
+      });
+      setShowOpenRouterModelModal(false);
+      setActionMessage({
+        type: 'success',
+        text: `Đã lưu danh sách hiển thị: ${selectedOpenRouterModels.length} model OpenRouter!`,
+      });
+      onRefresh();
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Lỗi lưu model: ${err.message || err}`,
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRemoveSingleModel = async (modelId: string) => {
+    if (!openrouterProv) return;
+    const current = Array.isArray(openrouterProv.models) ? openrouterProv.models : [];
+    const updated = current.filter((m: string) => m !== modelId);
+    try {
+      await api.updateProvider(openrouterProv.id, {
+        models: updated,
+      });
+      setActionMessage({
+        type: 'success',
+        text: `Đã gỡ model ${modelId} khỏi danh sách hiển thị!`,
+      });
+      onRefresh();
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: `Lỗi gỡ model: ${err.message || err}`,
+      });
+    }
+  };
+
   // Load Codex data
   const loadCodexData = async () => {
     setCodexLoading(true);
@@ -128,6 +351,19 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     try {
       const res = await api.getQuotaRefreshStatus();
       setQuotaRefresh(res);
+      if (res.openrouter_credits) {
+        setOpenrouterCredits(res.openrouter_credits);
+      } else {
+        try {
+          const cRes = await fetch(`/assets/openrouter-credits.json?t=${Date.now()}`);
+          if (cRes.ok) {
+            const data = await cRes.json();
+            if (data && typeof data.total_credits === 'number') {
+              setOpenrouterCredits(data);
+            }
+          }
+        } catch (_) {}
+      }
     } catch {
       // Keep silent on background poll
     }
@@ -143,13 +379,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       setActionMessage({
         type: 'success',
         text: newEnabled
-          ? 'Đã bật tự động làm mới Quota định kỳ.'
-          : 'Đã tắt tự động làm mới Quota.',
+          ? t('providers.msgAutoRefreshEnabled')
+          : t('providers.msgAutoRefreshDisabled'),
       });
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Lỗi cập nhật cấu hình tự động làm mới quota.',
+        text: err?.message || t('providers.msgAutoRefreshUpdateError'),
       });
     } finally {
       setQuotaRefreshLoading(false);
@@ -163,12 +399,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       setQuotaRefresh(res);
       setActionMessage({
         type: 'success',
-        text: `Đã đổi chu kỳ làm mới Quota thành ${intervalSecs / 60} phút.`,
+        text: t('providers.msgIntervalChanged', { min: intervalSecs / 60 }),
       });
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Lỗi đổi chu kỳ làm mới quota.',
+        text: err?.message || t('providers.msgIntervalError'),
       });
     } finally {
       setQuotaRefreshLoading(false);
@@ -183,14 +419,18 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       setQuotaRefresh(res);
       setActionMessage({
         type: 'success',
-        text: `Làm mới quota hoàn tất (${res.last_summary?.duration_ms || 0}ms): Google +${res.last_summary?.google_refreshed || 0}, Codex +${res.last_summary?.codex_refreshed || 0}`,
+        text: t('providers.msgManualRefreshSuccess', {
+          duration: res.last_summary?.duration_ms || 0,
+          google: res.last_summary?.google_refreshed || 0,
+          codex: res.last_summary?.codex_refreshed || 0,
+        }),
       });
       onRefresh();
       loadCodexData();
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Lỗi làm mới quota.',
+        text: err?.message || t('providers.msgManualRefreshError'),
       });
     } finally {
       setQuotaRefreshLoading(false);
@@ -198,24 +438,25 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   };
 
   const formatTimestamp = (ts: number | null) => {
-    if (!ts) return 'Chưa thực hiện';
+    if (!ts) return t('providers.neverRun');
     const date = new Date(ts * 1000);
-    return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return date.toLocaleTimeString(locale === 'vi' ? 'vi-VN' : 'en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
   const formatCountdown = (nextTs: number | null) => {
     if (!nextTs || !quotaRefresh?.enabled) return '-';
     const diff = Math.round(nextTs - Date.now() / 1000);
-    if (diff <= 0) return 'Đang đến hạn...';
-    if (diff < 60) return `trong ${diff}s`;
+    if (diff <= 0) return t('providers.autoRefreshDue');
+    if (diff < 60) return t('providers.autoRefreshInSec', { sec: diff });
     const m = Math.floor(diff / 60);
     const s = diff % 60;
-    return `trong ${m}m ${s}s`;
+    return t('providers.autoRefreshInMinSec', { min: m, sec: s });
   };
 
   useEffect(() => {
     loadCodexData();
     loadQuotaRefreshStatus();
+    fetchOpenRouterCredits();
     const interval = setInterval(() => {
       loadQuotaRefreshStatus();
       loadCodexData();
@@ -232,8 +473,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         setActionMessage({
           type: isNew ? 'success' : 'warning',
           text: isNew
-            ? `Đăng nhập Google thành công cho tài khoản mới ${addedEmail}!`
-            : `Tài khoản Google ${addedEmail} đã có sẵn trong pool — đã làm mới token (không tạo trùng)!`,
+            ? t('providers.msgGoogleAccountAdded', { email: addedEmail })
+            : t('providers.msgGoogleAccountRefreshed', { email: addedEmail }),
         });
         setShowGoogleOAuthModal(false);
         setGoogleOAuthCode('');
@@ -243,7 +484,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     };
     window.addEventListener('message', handleWindowMessage);
     return () => window.removeEventListener('message', handleWindowMessage);
-  }, [onRefresh]);
+  }, [onRefresh, t]);
 
   // Poll Codex OAuth ticket status if modal is open and pending
   useEffect(() => {
@@ -263,7 +504,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             clearInterval(interval);
             setActionMessage({
               type: 'success',
-              text: `Tài khoản Codex ${res.email || ''} đã xác thực thành công!`,
+              text: t('providers.msgCodexOAuthSuccess', { email: res.email || '' }),
             });
             setShowCodexOAuthModal(false);
             setCodexOAuthTicket(null);
@@ -273,7 +514,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             clearInterval(interval);
             setActionMessage({
               type: 'error',
-              text: `Lỗi OAuth Codex: ${res.error || res.message || 'Thất bại'}`,
+              text: t('providers.msgCodexOAuthError', { error: res.error || res.message || 'Thất bại' }),
             });
           }
         }
@@ -286,7 +527,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       stopped = true;
       clearInterval(interval);
     };
-  }, [showCodexOAuthModal, codexOAuthTicket]);
+  }, [showCodexOAuthModal, codexOAuthTicket, t]);
 
   // Google Handlers
   const handleStartGoogleOAuth = async () => {
@@ -309,14 +550,14 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         if (popup) {
           setActionMessage({
             type: 'success',
-            text: 'Đã mở cửa sổ đăng nhập Google OAuth. Hoàn tất trên cửa sổ đó hoặc dán URL callback bên dưới.',
+            text: t('providers.msgGoogleOAuthPopupOpened'),
           });
         }
       }
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Không thể khởi tạo đăng nhập Google.',
+        text: err?.message || t('providers.msgGoogleOAuthInitError'),
       });
     } finally {
       setActionLoading(false);
@@ -338,8 +579,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       setActionMessage({
         type: isNew ? 'success' : 'warning',
         text: isNew
-          ? `Đã kết nối tài khoản Google mới ${res.email} thành công!`
-          : `Tài khoản Google ${res.email} đã có sẵn trong pool — đã làm mới token (không tạo trùng)!`,
+          ? t('providers.msgGoogleOAuthExchangeSuccess', { email: res.email })
+          : t('providers.msgGoogleOAuthExchangeRefreshed', { email: res.email }),
       });
       setShowGoogleOAuthModal(false);
       setGoogleOAuthCode('');
@@ -348,7 +589,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Đổi mã xác thực Google OAuth thất bại.',
+        text: err?.message || t('providers.msgGoogleOAuthExchangeError'),
       });
     } finally {
       setActionLoading(false);
@@ -358,7 +599,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   const handleAddGoogleAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!googleRefreshToken.trim()) {
-      setActionMessage({ type: 'error', text: 'Vui lòng cung cấp Refresh Token.' });
+      setActionMessage({ type: 'error', text: t('providers.msgGoogleTokenRequired') });
       return;
     }
     setActionLoading(true);
@@ -368,13 +609,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         email: googleEmail.trim() || undefined,
         refresh_token: googleRefreshToken.trim(),
       });
-      setActionMessage({ type: 'success', text: 'Đã thêm tài khoản Google Antigravity mới.' });
+      setActionMessage({ type: 'success', text: t('providers.msgGoogleAddSuccess') });
       setShowGoogleAddModal(false);
       setGoogleEmail('');
       setGoogleRefreshToken('');
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể thêm tài khoản.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgGoogleAddError') });
     } finally {
       setActionLoading(false);
     }
@@ -385,10 +626,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     setActionMessage(null);
     try {
       await api.resetAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã reset cooldown cho "${acc.email}".` });
+      setActionMessage({ type: 'success', text: t('providers.msgGoogleResetSuccess', { email: acc.email }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi khi reset cooldown.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgGoogleResetError') });
     } finally {
       setActionLoading(false);
     }
@@ -401,16 +642,16 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const res = await api.refreshAccountQuota(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Đã cập nhật hạn mức quota cho "${acc.email}".`,
+        text: t('providers.msgGoogleQuotaUpdated', { email: acc.email }),
       });
       setSelectedQuota((prev) => ({
-        title: `Hạn Mức Quota Google (${acc.email})`,
+        title: t('providers.quotaModalTitleGoogle', { email: acc.email }),
         quota: res.quota,
         onRefreshQuota: prev?.onRefreshQuota || (() => handleRefreshGoogleQuota(acc)),
       }));
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi làm mới hạn mức quota.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgGoogleQuotaError') });
     } finally {
       setActionLoading(false);
     }
@@ -428,11 +669,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       }
       setActionMessage({
         type: 'success',
-        text: 'Đã làm mới quota cho tất cả tài khoản Google trong pool.',
+        text: t('providers.msgGoogleAllQuotaSuccess'),
       });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi làm mới quota toàn pool.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgGoogleAllQuotaError') });
     } finally {
       setActionLoading(false);
     }
@@ -445,12 +686,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const res = await api.testAccount(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Kiểm tra token "${acc.email}": Thành công (${JSON.stringify(res)})`,
+        text: t('providers.msgGoogleTestSuccess', { email: acc.email, detail: JSON.stringify(res) }),
       });
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: `Kiểm tra "${acc.email}" thất bại: ${err?.message || 'Lỗi xác thực'}`,
+        text: t('providers.msgGoogleTestError', { email: acc.email, error: err?.message || 'Lỗi xác thực' }),
       });
     } finally {
       setActionLoading(false);
@@ -458,15 +699,15 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   };
 
   const handleDeleteGoogleAccount = async (acc: AccountResponse) => {
-    if (!window.confirm(`Xác nhận xóa tài khoản Google "${acc.email}"?`)) return;
+    if (!window.confirm(t('providers.confirmGoogleDelete', { email: acc.email }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã xóa tài khoản Google "${acc.email}".` });
+      setActionMessage({ type: 'success', text: t('providers.msgGoogleDeleteSuccess', { email: acc.email }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa tài khoản.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgGoogleDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -492,7 +733,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Không thể khởi tạo luồng OAuth Codex.',
+        text: err?.message || t('providers.msgCodexOAuthInitError'),
       });
     } finally {
       setActionLoading(false);
@@ -509,7 +750,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       await api.exchangeCodexOAuth(ticketId, codexOAuthCode.trim());
       setActionMessage({
         type: 'success',
-        text: 'Xác thực OAuth Codex hoàn tất và đã thêm vào pool.',
+        text: t('providers.msgCodexOAuthExchangeSuccess'),
       });
       setShowCodexOAuthModal(false);
       setCodexOAuthTicket(null);
@@ -518,7 +759,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Đổi mã xác thực OAuth Codex thất bại.',
+        text: err?.message || t('providers.msgCodexOAuthExchangeError'),
       });
     } finally {
       setActionLoading(false);
@@ -530,7 +771,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     if (!codexAuthPath.trim()) {
       setActionMessage({
         type: 'error',
-        text: 'Vui lòng cung cấp đường dẫn tệp auth (auth_path).',
+        text: t('providers.msgCodexAuthPathRequired'),
       });
       return;
     }
@@ -541,13 +782,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         auth_path: codexAuthPath.trim(),
         email: codexEmail.trim() || undefined,
       });
-      setActionMessage({ type: 'success', text: 'Đã thêm tài khoản Codex thành công.' });
+      setActionMessage({ type: 'success', text: t('providers.msgCodexAddSuccess') });
       setShowCodexAddModal(false);
       setCodexAuthPath('');
       setCodexEmail('');
       loadCodexData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi thêm tài khoản Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgCodexAddError') });
     } finally {
       setActionLoading(false);
     }
@@ -561,13 +802,16 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const isCurrentlyActive = acc.is_active ?? acc.active ?? true;
       setActionMessage({
         type: 'success',
-        text: `Đã ${isCurrentlyActive ? 'tắt' : 'bật'} tài khoản Codex "${acc.email || acc.id}".`,
+        text: t('providers.msgCodexToggleSuccess', {
+          action: isCurrentlyActive ? t('providers.statusOff').toLowerCase() : t('providers.statusOn').toLowerCase(),
+          name: acc.email || acc.id,
+        }),
       });
       loadCodexData();
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: err?.message || 'Lỗi thay đổi trạng thái tài khoản Codex.',
+        text: err?.message || t('providers.msgCodexToggleError'),
       });
     } finally {
       setActionLoading(false);
@@ -581,11 +825,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       await api.resetCodexAccount(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Đã reset cooldown tài khoản Codex "${acc.email || acc.id}".`,
+        text: t('providers.msgCodexResetSuccess', { name: acc.email || acc.id }),
       });
       loadCodexData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi reset cooldown Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgCodexResetError') });
     } finally {
       setActionLoading(false);
     }
@@ -598,18 +842,73 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const res = await api.refreshCodexAccountQuota(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Đã cập nhật hạn mức quota cho "${acc.email || acc.id}".`,
+        text: t('providers.msgCodexAccountQuotaUpdated', { name: acc.email || acc.id }),
       });
       setSelectedQuota((prev) => ({
-        title: `Hạn Mức Quota Codex (${acc.email || acc.id})`,
+        title: t('providers.quotaModalTitleCodex', { email: acc.email || acc.id }),
         quota: res.quota,
         onRefreshQuota: prev?.onRefreshQuota || (() => handleRefreshCodexAccountQuota(acc)),
       }));
       loadCodexData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi làm mới hạn mức quota Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgCodexAccountQuotaError') });
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleOpenResetCreditModal = async (acc: CodexAccountRecord) => {
+    setResetCreditModalAccount(acc);
+    setSelectedCreditId('');
+    setResetCreditsLoading(true);
+    try {
+      const res = await api.getCodexResetCredits(acc.id);
+      if (res.ok && Array.isArray(res.data?.credits)) {
+        const availableCredits = res.data.credits.filter(
+          (c: any) => c && (!c.status || c.status === 'available')
+        );
+        setResetCreditsList(availableCredits);
+        if (availableCredits.length > 0) {
+          setSelectedCreditId(availableCredits[0].id);
+        }
+      } else {
+        setResetCreditsList([]);
+      }
+    } catch {
+      setResetCreditsList([]);
+    } finally {
+      setResetCreditsLoading(false);
+    }
+  };
+
+  const handleConfirmConsumeResetCredit = async () => {
+    if (!resetCreditModalAccount) return;
+    setConsumingCredit(true);
+    try {
+      const res = await api.consumeCodexResetCredit(
+        resetCreditModalAccount.id,
+        selectedCreditId || undefined
+      );
+      if (res.ok) {
+        setActionMessage({
+          type: 'success',
+          text: t('providers.consumeTicketSuccess'),
+        });
+        setResetCreditModalAccount(null);
+        loadCodexData();
+      } else {
+        setActionMessage({
+          type: 'error',
+          text: res.error || t('providers.consumeTicketError'),
+        });
+      }
+    } catch (err: any) {
+      setActionMessage({
+        type: 'error',
+        text: err?.message || t('providers.consumeTicketError'),
+      });
+    } finally {
+      setConsumingCredit(false);
     }
   };
 
@@ -620,26 +919,26 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       await api.refreshCodexQuota();
       setActionMessage({
         type: 'success',
-        text: 'Đã làm mới quota toàn bộ pool OpenAI Codex.',
+        text: t('providers.msgCodexAllQuotaSuccess'),
       });
       loadCodexData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi làm mới quota Codex pool.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgCodexAllQuotaError') });
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDeleteCodex = async (acc: CodexAccountRecord) => {
-    if (!window.confirm(`Xác nhận xóa tài khoản Codex "${acc.email || acc.id}"?`)) return;
+    if (!window.confirm(t('providers.confirmCodexDelete', { name: acc.email || acc.id }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteCodexAccount(acc.id);
-      setActionMessage({ type: 'success', text: 'Đã xóa tài khoản Codex khỏi hệ thống.' });
+      setActionMessage({ type: 'success', text: t('providers.msgCodexDeleteSuccess') });
       loadCodexData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa tài khoản Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgCodexDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -676,16 +975,16 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       });
       const models = Array.isArray(res.models) ? res.models.filter(Boolean) : [];
       if (models.length === 0) {
-        setActionMessage({ type: 'warning', text: 'Upstream không trả về model nào.' });
+        setActionMessage({ type: 'warning', text: t('providers.msgUpstreamNoModels') });
       } else {
         setModelsInput(JSON.stringify(models, null, 2));
-        setActionMessage({ type: 'success', text: `Đã tự tải ${models.length} model từ upstream.` });
+        setActionMessage({ type: 'success', text: t('providers.msgUpstreamModelsFetched', { count: models.length }) });
       }
       setModelsLoadedFor(url);
     } catch (err: any) {
       setActionMessage({
         type: 'warning',
-        text: `Không tự tải được models: ${err?.message || 'Lỗi kết nối upstream'}. Bạn vẫn có thể nhập thủ công.`,
+        text: t('providers.msgUpstreamFetchError', { error: err?.message || 'Lỗi kết nối upstream' }),
       });
     } finally {
       setModelsLoading(false);
@@ -713,7 +1012,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     if (!name.trim() || !baseUrl.trim() || (!editingProvider && !prefix.trim())) {
       setActionMessage({
         type: 'error',
-        text: 'Vui lòng điền đầy đủ Tên, Tiền tố và Base URL.',
+        text: t('providers.msgUpstreamFieldsRequired'),
       });
       return;
     }
@@ -745,7 +1044,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         });
         setActionMessage({
           type: 'success',
-          text: `Đã cập nhật nhà cung cấp "${name}" thành công.`,
+          text: t('providers.msgUpstreamUpdateSuccess', { name }),
         });
       } else {
         const payload: CreateProviderRequest = {
@@ -760,29 +1059,29 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         await api.createProvider(payload);
         setActionMessage({
           type: 'success',
-          text: `Đã thêm nhà cung cấp "${name}" thành công.`,
+          text: t('providers.msgUpstreamCreateSuccess', { name }),
         });
       }
       setShowAddProviderModal(false);
       resetUpstreamForm();
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi khi lưu nhà cung cấp.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgUpstreamSaveError') });
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDeleteUpstream = async (p: ProviderResponse) => {
-    if (!window.confirm(`Xác nhận xóa nhà cung cấp "${p.name}" (${p.prefix})?`)) return;
+    if (!window.confirm(t('providers.confirmUpstreamDelete', { name: p.name, prefix: p.prefix }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteProvider(p.id);
-      setActionMessage({ type: 'success', text: `Đã xóa nhà cung cấp "${p.name}".` });
+      setActionMessage({ type: 'success', text: t('providers.msgUpstreamDeleteSuccess', { name: p.name }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa nhà cung cấp.' });
+      setActionMessage({ type: 'error', text: err?.message || t('providers.msgUpstreamDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -795,12 +1094,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const res = await api.testProvider(p.id);
       setActionMessage({
         type: 'success',
-        text: `Kiểm tra "${p.name}": ${JSON.stringify(res)}`,
+        text: t('providers.msgUpstreamTestSuccess', { name: p.name, detail: JSON.stringify(res) }),
       });
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: `Kiểm tra "${p.name}" thất bại: ${err?.message || 'Lỗi upstream'}`,
+        text: t('providers.msgUpstreamTestError', { name: p.name, error: err?.message || 'Lỗi upstream' }),
       });
     } finally {
       setActionLoading(false);
@@ -814,31 +1113,39 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       const res = await api.syncModels(p.id);
       setActionMessage({
         type: 'success',
-        text: `Đồng bộ "${p.name}": ${JSON.stringify(res)}`,
+        text: t('providers.msgUpstreamSyncSuccess', { name: p.name, detail: JSON.stringify(res) }),
       });
       onRefresh();
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: `Đồng bộ "${p.name}" thất bại: ${err?.message || 'Lỗi đồng bộ'}`,
+        text: t('providers.msgUpstreamSyncError', { name: p.name, error: err?.message || 'Lỗi đồng bộ' }),
       });
     } finally {
       setActionLoading(false);
     }
   };
 
-  const formatResetTime = (isoString?: string) => {
-    if (!isoString) return null;
+  const formatResetTime = (input?: string | number) => {
+    if (input == null || input === '') return null;
     try {
-      const d = new Date(isoString);
+      let d: Date;
+      if (typeof input === 'number') {
+        d = new Date(input < 1e11 ? input * 1000 : input);
+      } else if (!isNaN(Number(input))) {
+        const num = Number(input);
+        d = new Date(num < 1e11 ? num * 1000 : num);
+      } else {
+        d = new Date(input);
+      }
       if (isNaN(d.getTime())) return null;
-      const diffSec = Math.round((d.getTime() - Date.now()) / 1000);
-      if (diffSec <= 0) return 'sắp reset';
+      const diffSec = Math.max(0, Math.floor((d.getTime() - Date.now()) / 1000));
+      if (diffSec <= 0) return t('providers.resetSoon');
       if (diffSec < 60) return `${diffSec}s`;
-      if (diffSec < 3600) return `${Math.round(diffSec / 60)}m`;
-      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.round((diffSec % 3600) / 60)}m`;
+      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.floor((diffSec % 3600) / 60)}m`;
       const days = Math.floor(diffSec / 86400);
-      const hours = Math.round((diffSec % 86400) / 3600);
+      const hours = Math.floor((diffSec % 86400) / 3600);
       return `${days}d ${hours}h`;
     } catch {
       return null;
@@ -850,22 +1157,52 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       return {
         primaryUsed: null,
         primaryRemaining: null,
+        primaryResetTime: null,
         weeklyUsed: null,
         weeklyRemaining: null,
+        weeklyResetTime: null,
+        availableTickets: 0,
         isStopped: false,
       };
     }
+    const pWindow = acc.quota.primary_window;
     const pUsed =
-      acc.quota.primary_window?.used_percent ??
+      pWindow?.used_percent ??
       (acc.quota.primary_percent !== undefined ? 100 - acc.quota.primary_percent : null);
     const pRem = pUsed !== null ? Math.max(0, Math.min(100, Math.round(100 - pUsed))) : null;
+    const pReset =
+      pWindow?.reset_time ||
+      pWindow?.reset_at ||
+      (typeof pWindow?.reset_after_seconds === 'number'
+        ? Date.now() / 1000 + pWindow.reset_after_seconds
+        : null);
+
+    const wWindow = acc.quota.weekly_window ?? acc.quota.secondary_window;
     const wUsed =
-      acc.quota.weekly_window?.used_percent ??
-      acc.quota.secondary_window?.used_percent ??
+      wWindow?.used_percent ??
       (acc.quota.secondary_percent !== undefined ? 100 - acc.quota.secondary_percent : null);
     const wRem = wUsed !== null ? Math.max(0, Math.min(100, Math.round(100 - wUsed))) : null;
+    const wReset =
+      wWindow?.reset_time ||
+      wWindow?.reset_at ||
+      (typeof wWindow?.reset_after_seconds === 'number'
+        ? Date.now() / 1000 + wWindow.reset_after_seconds
+        : null);
+
+    const resetCredits = acc.quota.rate_limit_reset_credits;
+    const availableTickets = resetCredits?.available_count ?? 0;
+
     const isStopped = pUsed !== null && pUsed >= 98.0;
-    return { primaryUsed: pUsed, primaryRemaining: pRem, weeklyUsed: wUsed, weeklyRemaining: wRem, isStopped };
+    return {
+      primaryUsed: pUsed,
+      primaryRemaining: pRem,
+      primaryResetTime: pReset,
+      weeklyUsed: wUsed,
+      weeklyRemaining: wRem,
+      weeklyResetTime: wReset,
+      availableTickets,
+      isStopped,
+    };
   };
 
   // Google account counts & metrics
@@ -907,23 +1244,23 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   ).length;
 
   const googleStopState = (() => {
-    if (accounts.length === 0) return { label: 'Chưa có tài khoản', badge: 'badge-neutral', status: 'neutral' };
+    if (accounts.length === 0) return { label: t('providers.stopStateNoAccounts'), badge: 'badge-neutral', status: 'neutral' };
     const activeAccounts = accounts.filter((a) => a.is_active);
-    if (activeAccounts.length === 0) return { label: 'Đang tắt', badge: 'badge-neutral', status: 'neutral' };
-    if (googleActiveCount === 0 && googleCooldownCount > 0) return { label: 'Đang Cooldown', badge: 'badge-warning', status: 'cooldown' };
+    if (activeAccounts.length === 0) return { label: t('providers.stopStateDisabled'), badge: 'badge-neutral', status: 'neutral' };
+    if (googleActiveCount === 0 && googleCooldownCount > 0) return { label: t('providers.stopStateCooldown'), badge: 'badge-warning', status: 'cooldown' };
     if (claude5hAccs.length > 0 && googleClaudeStoppedCount >= activeAccounts.length) {
-      return { label: 'Dừng Quota Claude', badge: 'badge-error', status: 'stopped' };
+      return { label: t('providers.stopStateClaudeStopped'), badge: 'badge-error', status: 'stopped' };
     }
     if (gemini5hAccs.length > 0 && googleGeminiStoppedCount >= activeAccounts.length) {
-      return { label: 'Dừng Quota Gemini', badge: 'badge-error', status: 'stopped' };
+      return { label: t('providers.stopStateGeminiStopped'), badge: 'badge-error', status: 'stopped' };
     }
     if (googleClaudeStoppedCount > 0) {
-      return { label: `${googleClaudeStoppedCount} TK hết Claude`, badge: 'badge-warning', status: 'cooldown' };
+      return { label: t('providers.stopStateClaudeDepleted', { count: googleClaudeStoppedCount }), badge: 'badge-warning', status: 'cooldown' };
     }
     if (googleGeminiStoppedCount > 0) {
-      return { label: `${googleGeminiStoppedCount} TK hết Gemini`, badge: 'badge-warning', status: 'cooldown' };
+      return { label: t('providers.stopStateGeminiDepleted', { count: googleGeminiStoppedCount }), badge: 'badge-warning', status: 'cooldown' };
     }
-    return { label: 'Sẵn sàng hoạt động', badge: 'badge-success', status: 'active' };
+    return { label: t('providers.stopStateReady'), badge: 'badge-success', status: 'active' };
   })();
 
   // Average google quota for ring
@@ -965,17 +1302,17 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   ).length;
 
   const codexStopState = (() => {
-    if (codexTotalCount === 0) return { label: 'Chưa có tài khoản', badge: 'badge-neutral', status: 'neutral' };
+    if (codexTotalCount === 0) return { label: t('providers.stopStateNoAccounts'), badge: 'badge-neutral', status: 'neutral' };
     const activeAccounts = codexAccounts.filter((a) => (a.is_active ?? a.active ?? true));
-    if (activeAccounts.length === 0 && codexAccounts.length > 0) return { label: 'Đang tắt', badge: 'badge-neutral', status: 'neutral' };
-    if (codexActiveCount === 0 && codexCooldownCount > 0) return { label: 'Đang Cooldown', badge: 'badge-warning', status: 'cooldown' };
+    if (activeAccounts.length === 0 && codexAccounts.length > 0) return { label: t('providers.stopStateDisabled'), badge: 'badge-neutral', status: 'neutral' };
+    if (codexActiveCount === 0 && codexCooldownCount > 0) return { label: t('providers.stopStateCooldown'), badge: 'badge-warning', status: 'cooldown' };
     if (codexPrimaryAccs.length > 0 && codexStoppedCount >= (activeAccounts.length || 1)) {
-      return { label: 'Dừng Quota (>=98%)', badge: 'badge-error', status: 'stopped' };
+      return { label: t('providers.stopStateCodexStopped'), badge: 'badge-error', status: 'stopped' };
     }
     if (codexStoppedCount > 0) {
-      return { label: `${codexStoppedCount} TK dừng quota`, badge: 'badge-warning', status: 'cooldown' };
+      return { label: t('providers.stopStateCodexDepleted', { count: codexStoppedCount }), badge: 'badge-warning', status: 'cooldown' };
     }
-    return { label: 'Sẵn sàng hoạt động', badge: 'badge-success', status: 'active' };
+    return { label: t('providers.stopStateReady'), badge: 'badge-success', status: 'active' };
   })();
 
   const totalActivePools = googleActiveCount + codexActiveCount;
@@ -1051,7 +1388,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             {label}
           </span>
           <span className="health-ring-desc">
-            {percent !== null ? (subLabel || 'Hạn mức khả dụng') : 'Chưa có Quota'}
+            {percent !== null ? (subLabel || t('providers.quotaAvailable')) : t('providers.quotaNotLoaded')}
           </span>
         </div>
       </div>
@@ -1070,13 +1407,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     return (
       <div
         className="sparkline-container"
-        title={`${label} (Activity Indicator - không biểu thị lịch sử thực tế)`}
-        aria-label={`${label} (Activity Indicator)`}
+        title={t('providers.pulseTitle', { label })}
+        aria-label={`${label} ${t('providers.pulseIndicator')}`}
       >
         <div className="activity-indicator-badge">
           <span className="activity-pulse-dot" style={{ backgroundColor: strokeColor }} />
           <span>{label}</span>
-          <span className="activity-indicator-sub">(Activity Indicator)</span>
+          <span className="activity-indicator-sub">{t('providers.pulseIndicator')}</span>
         </div>
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -1112,10 +1449,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       <div className="providers-compact-header">
         <div className="providers-header-info">
           <h2 className="providers-header-title">
-            <span>Nhà Cung Cấp & Pools</span>
+            <span>{t('providers.headerTitle')}</span>
           </h2>
           <span className="providers-header-sub">
-            Hạ tầng upstream Google Antigravity & OpenAI Codex
+            {t('providers.headerSub')}
           </span>
         </div>
         <div className="section-actions">
@@ -1126,10 +1463,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               loadCodexData();
             }}
             disabled={actionLoading || parentLoading || codexLoading}
-            title="Làm mới trạng thái toàn bộ nhà cung cấp"
+            title={t('providers.refreshTitle')}
           >
             <IconRefresh size={15} />
-            <span>Làm Mới</span>
+            <span>{t('providers.refreshBtn')}</span>
           </button>
         </div>
       </div>
@@ -1144,13 +1481,16 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           />
           <span>
             {totalActivePools > 0
-              ? 'Hệ thống định tuyến sẵn sàng'
+              ? t('providers.routingReady')
               : totalCooling > 0
-              ? 'Đang chờ cooldown'
-              : 'Chưa có tài khoản hoạt động'}
+              ? t('providers.waitingCooldown')
+              : t('providers.noActiveAccounts')}
           </span>
           <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>
-            ({googleActiveCount + codexActiveCount}/{accounts.length + codexTotalCount} sẵn sàng)
+            {t('providers.readyCount', {
+              active: googleActiveCount + codexActiveCount,
+              total: accounts.length + codexTotalCount,
+            })}
           </span>
         </div>
 
@@ -1159,7 +1499,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             type="button"
             className="status-segment-chip"
             onClick={() => document.getElementById('provider-google')?.scrollIntoView({ behavior: 'smooth' })}
-            title="Cuộn tới Google Antigravity"
+            title={t('providers.scrollToGoogle')}
           >
             <IconGoogle size={14} />
             <span>
@@ -1173,7 +1513,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             type="button"
             className="status-segment-chip"
             onClick={() => document.getElementById('provider-codex')?.scrollIntoView({ behavior: 'smooth' })}
-            title="Cuộn tới OpenAI Codex"
+            title={t('providers.scrollToCodex')}
           >
             <IconOpenAI size={14} />
             <span>
@@ -1186,12 +1526,26 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           <button
             type="button"
             className="status-segment-chip"
+            onClick={() => document.getElementById('provider-openrouter')?.scrollIntoView({ behavior: 'smooth' })}
+            title="Cuộn tới OpenRouter"
+          >
+            <IconOpenRouter size={14} />
+            <span>
+              OpenRouter: <strong>{openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0} models</strong>
+              {typeof openrouterCredits?.total_credits === 'number' && ` • $${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}`}
+            </span>
+            <span className={`status-dot-mini ${openrouterProv?.is_active ? 'active' : 'neutral'}`} />
+          </button>
+
+          <button
+            type="button"
+            className="status-segment-chip"
             onClick={() => document.getElementById('provider-upstream')?.scrollIntoView({ behavior: 'smooth' })}
-            title="Cuộn tới Upstream Tùy Biến"
+            title={t('providers.scrollToUpstream')}
           >
             <IconServer size={14} />
             <span>
-              Upstream: <strong>{providers.filter((p) => p.is_active).length}/{providers.length}</strong>
+              Upstream: <strong>{otherProviders.filter((p) => p.is_active).length}/{otherProviders.length}</strong>
             </span>
             <span className="status-dot-mini active" />
           </button>
@@ -1200,19 +1554,19 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         <div className="status-legend-items">
           <span className="status-legend-item">
             <span className="status-dot-mini active" />
-            <span>Hoạt động</span>
+            <span>{t('providers.legendActive')}</span>
           </span>
           <span className="status-legend-item">
             <span className="status-dot-mini cooldown" />
-            <span>Cooldown</span>
+            <span>{t('providers.legendCooldown')}</span>
           </span>
           <span className="status-legend-item">
             <span className="status-dot-mini stopped" />
-            <span>Dừng Quota</span>
+            <span>{t('providers.legendStopped')}</span>
           </span>
           <span className="status-legend-item">
             <span className="status-dot-mini neutral" />
-            <span>Tắt</span>
+            <span>{t('providers.legendDisabled')}</span>
           </span>
         </div>
       </div>
@@ -1252,30 +1606,30 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             <IconRefresh size={15} className={quotaRefresh?.is_refreshing ? 'spinner' : ''} />
           </div>
           <div className="auto-quota-strip-title-wrap">
-            <span className="auto-quota-strip-title">Tự Động Làm Mới Quota</span>
+            <span className="auto-quota-strip-title">{t('providers.autoRefreshTitle')}</span>
             <span className="auto-quota-strip-meta">
               {quotaRefresh?.is_refreshing ? (
-                <span className="highlight-refreshing">Đang làm mới...</span>
+                <span className="highlight-refreshing">{t('providers.autoRefreshRefreshing')}</span>
               ) : quotaRefresh?.enabled ? (
                 <>
-                  <span>Lần cuối: <strong>{formatTimestamp(quotaRefresh?.last_refresh ?? null)}</strong></span>
+                  <span>{t('providers.autoRefreshLast', { time: formatTimestamp(quotaRefresh?.last_refresh ?? null) })}</span>
                   <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>•</span>
-                  <span>Kế tiếp: <strong className="highlight">{formatCountdown(quotaRefresh?.next_refresh ?? null)}</strong></span>
+                  <span>{t('providers.autoRefreshNext', { time: formatCountdown(quotaRefresh?.next_refresh ?? null) })}</span>
                 </>
               ) : (
-                <span style={{ color: 'var(--text-muted)' }}>Đang tắt</span>
+                <span style={{ color: 'var(--text-muted)' }}>{t('providers.autoRefreshDisabled')}</span>
               )}
             </span>
           </div>
         </div>
 
         <div className="auto-quota-strip-right">
-          <div className="auto-quota-interval-group" role="radiogroup" aria-label="Chu kỳ làm mới">
+          <div className="auto-quota-interval-group" role="radiogroup" aria-label={t('providers.toggleAutoRefreshAria')}>
             {[
-              { label: '1m', val: 60, title: '1 phút' },
-              { label: '5m', val: 300, title: '5 phút (Mặc định)' },
-              { label: '15m', val: 900, title: '15 phút' },
-              { label: '30m', val: 1800, title: '30 phút' },
+              { label: '1m', val: 60, title: t('providers.interval1m') },
+              { label: '5m', val: 300, title: t('providers.interval5m') },
+              { label: '15m', val: 900, title: t('providers.interval15m') },
+              { label: '30m', val: 1800, title: t('providers.interval30m') },
             ].map(({ label, val, title }) => (
               <button
                 key={val}
@@ -1296,12 +1650,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             onClick={handleToggleAutoRefresh}
             disabled={quotaRefreshLoading}
             aria-pressed={quotaRefresh?.enabled}
-            title={quotaRefresh?.enabled ? 'Nhấn để tắt tự động làm mới' : 'Nhấn để bật tự động làm mới'}
+            title={quotaRefresh?.enabled ? t('providers.turnOffAutoRefresh') : t('providers.turnOnAutoRefresh')}
           >
             <span className="toggle-switch-track">
               <span className="toggle-switch-thumb" />
             </span>
-            <span className="toggle-switch-text">{quotaRefresh?.enabled ? 'BẬT' : 'TẮT'}</span>
+            <span className="toggle-switch-text">{quotaRefresh?.enabled ? t('providers.toggleOn') : t('providers.toggleOff')}</span>
           </button>
 
           <button
@@ -1309,17 +1663,17 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             className="action-icon-btn primary manual-refresh-btn"
             onClick={handleManualRunRefresh}
             disabled={quotaRefreshLoading || quotaRefresh?.is_refreshing}
-            title="Kích hoạt làm mới Quota an toàn ngay bây giờ"
+            title={t('providers.manualRefreshTitle')}
           >
             <IconRefresh size={13} className={quotaRefreshLoading || quotaRefresh?.is_refreshing ? 'spinner' : ''} />
-            <span>Làm mới</span>
+            <span>{t('providers.manualRefreshBtn')}</span>
           </button>
         </div>
 
         {quotaRefresh?.last_error && (
           <div className="auto-quota-error-notice" style={{ width: '100%', marginTop: 4 }}>
             <IconAlertCircle size={14} />
-            <span>Lưu ý lần làm mới trước: {quotaRefresh.last_error}</span>
+            <span>{t('providers.lastRefreshNotice', { error: quotaRefresh.last_error })}</span>
           </div>
         )}
       </div>
@@ -1361,21 +1715,21 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             {/* Health Ring & Big Numbers */}
             <div className="visual-metrics-row">
-              {renderHealthRing(googleQuotaAvg, 'Hạn mức TB', 'Quota khả dụng')}
+              {renderHealthRing(googleQuotaAvg, t('providers.quotaAvgLabel'), t('providers.quotaAvailable'))}
               <div className="visual-stat-numbers">
                 <div className="stat-num-box">
                   <span className="stat-num-val active">{googleActiveCount}</span>
-                  <span className="stat-num-lbl">Hoạt động</span>
+                  <span className="stat-num-lbl">{t('providers.statActive')}</span>
                 </div>
                 <div className="stat-num-box">
                   <span className={`stat-num-val ${googleCooldownCount > 0 ? 'cooldown' : ''}`}>
                     {googleCooldownCount}
                   </span>
-                  <span className="stat-num-lbl">Cooldown</span>
+                  <span className="stat-num-lbl">{t('providers.statCooldown')}</span>
                 </div>
                 <div className="stat-num-box">
                   <span className="stat-num-val total">{accounts.length}</span>
-                  <span className="stat-num-lbl">Tổng số</span>
+                  <span className="stat-num-lbl">{t('providers.statTotal')}</span>
                 </div>
               </div>
             </div>
@@ -1383,7 +1737,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             {/* Micro Quota Bars & Sparkline */}
             <div className="visual-quota-bars">
               <div className="micro-bar-row">
-                <span className="micro-bar-label">Gemini 5h:</span>
+                <span className="micro-bar-label">{/* Gemini 5h: */}{t('providers.quotaGemini5h')}:</span>
                 <div className="micro-bar-track">
                   <div
                     className="micro-bar-fill"
@@ -1403,7 +1757,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               {geminiWeeklyAvg !== null && (
                 <div className="micro-bar-row">
-                  <span className="micro-bar-label">Gemini Tuần:</span>
+                  <span className="micro-bar-label">{/* Gemini Tuần: */}{t('providers.quotaGeminiWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
                       className="micro-bar-fill"
@@ -1423,7 +1777,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               )}
 
               <div className="micro-bar-row">
-                <span className="micro-bar-label">Claude 5h:</span>
+                <span className="micro-bar-label">{t('providers.quotaClaude5h')}:</span>
                 <div className="micro-bar-track">
                   <div
                     className="micro-bar-fill"
@@ -1443,7 +1797,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               {claudeWeeklyAvg !== null && (
                 <div className="micro-bar-row">
-                  <span className="micro-bar-label">Claude Tuần:</span>
+                  <span className="micro-bar-label">{t('providers.quotaClaudeWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
                       className="micro-bar-fill"
@@ -1462,7 +1816,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 </div>
               )}
 
-              {renderActivityPulse('#4285F4', 'Nhịp hoạt động Google')}
+              {renderActivityPulse('#4285F4', t('providers.pulseGoogle'))}
             </div>
 
             {/* Consolidated Action Bar */}
@@ -1472,31 +1826,31 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="action-icon-btn"
                   onClick={handleRefreshAllGoogleQuota}
                   disabled={actionLoading || accounts.length === 0}
-                  title="Làm mới Quota toàn pool Google"
-                  aria-label="Làm mới Quota toàn pool Google"
+                  title={t('providers.refreshGooglePoolQuota')}
+                  aria-label={t('providers.refreshGooglePoolQuota')}
                 >
                   <IconRefresh size={14} />
-                  <span>Quota</span>
+                  <span>{t('providers.quotaActionBtn')}</span>
                 </button>
                 <button
                   className="action-icon-btn"
                   onClick={handleStartGoogleOAuth}
                   disabled={actionLoading}
-                  title="Đăng nhập Google qua OAuth 1-Click"
-                  aria-label="Đăng nhập Google qua OAuth 1-Click"
+                  title={t('providers.loginGoogleOAuth')}
+                  aria-label={t('providers.loginGoogleOAuth')}
                 >
                   <IconShield size={14} />
-                  <span>OAuth Google</span>
+                  <span>{t('providers.oauthGoogleBtn')}</span>
                 </button>
                 <button
                   className="action-icon-btn primary"
                   onClick={() => setShowGoogleAddModal(true)}
                   disabled={actionLoading}
-                  title="Thêm tài khoản thủ công qua Refresh Token"
-                  aria-label="Thêm tài khoản thủ công qua Refresh Token"
+                  title={t('providers.addGoogleManual')}
+                  aria-label={t('providers.addGoogleManual')}
                 >
                   <IconPlus size={14} />
-                  <span>Thêm Token</span>
+                  <span>{t('providers.addTokenBtn')}</span>
                 </button>
               </div>
 
@@ -1509,8 +1863,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               >
                 <span>
                   {showGoogleDetails
-                    ? 'Thu gọn danh sách tài khoản'
-                    : `Chi tiết tài khoản (${accounts.length} trong pool)`}
+                    ? t('providers.collapseAccounts')
+                    : t('providers.accountDetailsGoogle', { count: accounts.length })}
                 </span>
                 <IconChevronDown
                   size={16}
@@ -1528,12 +1882,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <div className="details-drawer-content">
                 {accounts.length === 0 ? (
                   <div className="empty-graphic-box">
-                    <p style={{ margin: 0, fontSize: 13 }}>Chưa có tài khoản Google Antigravity nào.</p>
+                    <p style={{ margin: 0, fontSize: 13 }}>{t('providers.emptyGoogleAccounts')}</p>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={handleStartGoogleOAuth}
                     >
-                      Kết nối Google OAuth
+                      {t('providers.connectGoogleOAuth')}
                     </button>
                   </div>
                 ) : (
@@ -1541,11 +1895,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     <table>
                       <thead>
                         <tr>
-                          <th>Tài Khoản</th>
-                          <th>Trạng Thái</th>
-                          <th>Cooldown</th>
-                          <th>Quota Còn Lại</th>
-                          <th>Tác Vụ</th>
+                          <th>{t('providers.thAccount')}</th>
+                          <th>{t('providers.thStatus')}</th>
+                          <th>{t('providers.thCooldown')}</th>
+                          <th>{t('providers.thQuotaRemaining')}</th>
+                          <th>{t('providers.thActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1563,7 +1917,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               </td>
                               <td>
                                 <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
-                                  {acc.is_active ? 'Bật' : 'Tắt'}
+                                  {acc.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
                               <td>
@@ -1572,7 +1926,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     {Math.ceil(acc.cooldown_remaining)}s
                                   </span>
                                 ) : (
-                                  <span className="badge badge-success">Sẵn sàng</span>
+                                  <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
                               <td>
@@ -1580,9 +1934,9 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                     {acc.quota.gemini_5h && (
                                       <span>
-                                        Gemini 5h: <strong>{acc.quota.gemini_5h.remaining_percent}%</strong>
+                                        {t('providers.quotaGemini5h')}: <strong>{acc.quota.gemini_5h.remaining_percent}%</strong>
                                         {formatResetTime(acc.quota.gemini_5h.reset_time) && (
-                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={`Reset lúc: ${acc.quota.gemini_5h.reset_time}`}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.gemini_5h.reset_time })}>
                                             ({formatResetTime(acc.quota.gemini_5h.reset_time)})
                                           </span>
                                         )}
@@ -1590,9 +1944,9 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     )}
                                     {acc.quota.gemini_weekly && (
                                       <span>
-                                        Gemini Tuần: <strong>{acc.quota.gemini_weekly.remaining_percent}%</strong>
+                                        {t('providers.quotaGeminiWeekly')}: <strong>{acc.quota.gemini_weekly.remaining_percent}%</strong>
                                         {formatResetTime(acc.quota.gemini_weekly.reset_time) && (
-                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={`Reset lúc: ${acc.quota.gemini_weekly.reset_time}`}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.gemini_weekly.reset_time })}>
                                             ({formatResetTime(acc.quota.gemini_weekly.reset_time)})
                                           </span>
                                         )}
@@ -1600,9 +1954,9 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     )}
                                     {acc.quota.claude_5h && (
                                       <span>
-                                        Claude 5h: <strong>{acc.quota.claude_5h.remaining_percent}%</strong>
+                                        {t('providers.quotaClaude5h')}: <strong>{acc.quota.claude_5h.remaining_percent}%</strong>
                                         {formatResetTime(acc.quota.claude_5h.reset_time) && (
-                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={`Reset lúc: ${acc.quota.claude_5h.reset_time}`}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.claude_5h.reset_time })}>
                                             ({formatResetTime(acc.quota.claude_5h.reset_time)})
                                           </span>
                                         )}
@@ -1610,9 +1964,9 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     )}
                                     {acc.quota.claude_weekly && (
                                       <span>
-                                        Claude Tuần: <strong>{acc.quota.claude_weekly.remaining_percent}%</strong>
+                                        {t('providers.quotaClaudeWeekly')}: <strong>{acc.quota.claude_weekly.remaining_percent}%</strong>
                                         {formatResetTime(acc.quota.claude_weekly.reset_time) && (
-                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={`Reset lúc: ${acc.quota.claude_weekly.reset_time}`}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.claude_weekly.reset_time })}>
                                             ({formatResetTime(acc.quota.claude_weekly.reset_time)})
                                           </span>
                                         )}
@@ -1633,7 +1987,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     </button>
                                   </div>
                                 ) : (
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Chưa nạp</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
                               <td>
@@ -1642,25 +1996,25 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     className="btn btn-secondary btn-sm"
                                     onClick={() => handleTestGoogleAccount(acc)}
                                     disabled={actionLoading}
-                                    title="Kiểm tra token"
+                                    title={t('providers.testToken')}
                                   >
-                                    Test
+                                    {t('providers.btnTest')}
                                   </button>
                                   {isCooling && (
                                     <button
                                       className="btn btn-secondary btn-sm"
                                       onClick={() => handleResetGoogleCooldown(acc)}
                                       disabled={actionLoading}
-                                      title="Reset Cooldown"
+                                      title={t('providers.btnResetCooldown')}
                                     >
-                                      Reset
+                                      {t('providers.btnResetCooldown')}
                                     </button>
                                   )}
                                   <button
                                     className="btn btn-danger btn-sm btn-icon-only"
                                     onClick={() => handleDeleteGoogleAccount(acc)}
                                     disabled={actionLoading}
-                                    title="Xóa tài khoản"
+                                    title={t('providers.btnDeleteAccount')}
                                   >
                                     <IconTrash size={14} />
                                   </button>
@@ -1701,21 +2055,21 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             {/* Health Ring & Big Numbers */}
             <div className="visual-metrics-row">
-              {renderHealthRing(codexPrimaryAvg, 'Primary TB', 'Cửa sổ 5h khả dụng')}
+              {renderHealthRing(codexPrimaryAvg, t('providers.primaryAvgLabel'), t('providers.codexPrimarySub'))}
               <div className="visual-stat-numbers">
                 <div className="stat-num-box">
                   <span className="stat-num-val active">{codexActiveCount}</span>
-                  <span className="stat-num-lbl">Hoạt động</span>
+                  <span className="stat-num-lbl">{t('providers.statActive')}</span>
                 </div>
                 <div className="stat-num-box">
                   <span className={`stat-num-val ${codexCooldownCount > 0 ? 'cooldown' : ''}`}>
                     {codexCooldownCount}
                   </span>
-                  <span className="stat-num-lbl">Cooldown</span>
+                  <span className="stat-num-lbl">{t('providers.statCooldown')}</span>
                 </div>
                 <div className="stat-num-box">
                   <span className="stat-num-val total">{codexTotalCount}</span>
-                  <span className="stat-num-lbl">Tổng số</span>
+                  <span className="stat-num-lbl">{t('providers.statTotal')}</span>
                 </div>
               </div>
             </div>
@@ -1723,7 +2077,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             {/* Micro Quota Bars & Sparkline */}
             <div className="visual-quota-bars">
               <div className="micro-bar-row">
-                <span className="micro-bar-label">Primary (5h):</span>
+                <span className="micro-bar-label">{t('providers.quotaCodexPrimary')}:</span>
                 <div className="micro-bar-track">
                   <div
                     className="micro-bar-fill"
@@ -1742,7 +2096,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
 
               <div className="micro-bar-row">
-                <span className="micro-bar-label">Weekly:</span>
+                <span className="micro-bar-label">{t('providers.quotaCodexWeekly')}:</span>
                 <div className="micro-bar-track">
                   <div
                     className="micro-bar-fill"
@@ -1760,7 +2114,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-val">{codexWeeklyAvg !== null ? `${codexWeeklyAvg}%` : '-'}</span>
               </div>
 
-              {renderActivityPulse('#10a37f', 'Nhịp hoạt động Codex')}
+              {renderActivityPulse('#10a37f', t('providers.pulseCodex'))}
             </div>
 
             {/* Consolidated Action Bar */}
@@ -1770,31 +2124,31 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="action-icon-btn"
                   onClick={handleRefreshAllCodexQuota}
                   disabled={actionLoading}
-                  title="Làm mới Quota toàn pool Codex"
-                  aria-label="Làm mới Quota toàn pool Codex"
+                  title={t('providers.refreshCodexPoolQuota')}
+                  aria-label={t('providers.refreshCodexPoolQuota')}
                 >
                   <IconRefresh size={14} />
-                  <span>Quota</span>
+                  <span>{t('providers.quotaActionBtn')}</span>
                 </button>
                 <button
                   className="action-icon-btn"
                   onClick={handleStartCodexOAuth}
                   disabled={actionLoading}
-                  title="Khởi tạo luồng xác thực OAuth PKCE"
-                  aria-label="Khởi tạo luồng xác thực OAuth PKCE"
+                  title={t('providers.initCodexOAuth')}
+                  aria-label={t('providers.initCodexOAuth')}
                 >
                   <IconShield size={14} />
-                  <span>OAuth PKCE</span>
+                  <span>{t('providers.oauthPkceBtn')}</span>
                 </button>
                 <button
                   className="action-icon-btn primary"
                   onClick={() => setShowCodexAddModal(true)}
                   disabled={actionLoading}
-                  title="Thêm tệp auth.json"
-                  aria-label="Thêm tệp auth.json"
+                  title={t('providers.addAuthJson')}
+                  aria-label={t('providers.addAuthJson')}
                 >
                   <IconPlus size={14} />
-                  <span>Thêm Auth</span>
+                  <span>{t('providers.addAuthBtn')}</span>
                 </button>
               </div>
 
@@ -1807,8 +2161,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               >
                 <span>
                   {showCodexDetails
-                    ? 'Thu gọn danh sách tài khoản'
-                    : `Chi tiết tài khoản (${codexTotalCount} trong pool)`}
+                    ? t('providers.collapseAccounts')
+                    : t('providers.accountDetailsCodex', { count: codexTotalCount })}
                 </span>
                 <IconChevronDown
                   size={16}
@@ -1826,12 +2180,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <div className="details-drawer-content">
                 {codexAccounts.length === 0 ? (
                   <div className="empty-graphic-box">
-                    <p style={{ margin: 0, fontSize: 13 }}>Chưa có tài khoản OpenAI Codex nào.</p>
+                    <p style={{ margin: 0, fontSize: 13 }}>{t('providers.emptyCodexAccounts')}</p>
                     <button
                       className="btn btn-secondary btn-sm"
                       onClick={handleStartCodexOAuth}
                     >
-                      Bắt đầu OAuth PKCE
+                      {t('providers.startCodexOAuthBtn')}
                     </button>
                   </div>
                 ) : (
@@ -1839,11 +2193,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     <table>
                       <thead>
                         <tr>
-                          <th>Tài Khoản</th>
-                          <th>Trạng Thái</th>
-                          <th>Cooldown</th>
-                          <th>Hạn Mức</th>
-                          <th>Tác Vụ</th>
+                          <th>{t('providers.thAccount')}</th>
+                          <th>{t('providers.thStatus')}</th>
+                          <th>{t('providers.thCooldown')}</th>
+                          <th>{t('providers.thLimit')}</th>
+                          <th>{t('providers.thActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1855,7 +2209,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                             <tr key={acc.id}>
                               <td>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                  {acc.email || '(Chưa xác định)'}
+                                  {acc.email || t('providers.accountUndefined')}
                                 </div>
                                 <span className="badge badge-neutral font-mono" style={{ fontSize: 10, marginTop: 2 }}>
                                   id: {acc.id.slice(0, 8)}...
@@ -1863,7 +2217,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               </td>
                               <td>
                                 <span className={`badge ${isActiveAcc ? 'badge-success' : 'badge-neutral'}`}>
-                                  {isActiveAcc ? 'Bật' : 'Tắt'}
+                                  {isActiveAcc ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
                               <td>
@@ -1872,32 +2226,65 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     {Math.ceil(acc.cooldown_remaining || 0)}s
                                   </span>
                                 ) : (
-                                  <span className="badge badge-success">Sẵn sàng</span>
+                                  <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
                               <td>
                                 {q.primaryRemaining !== null ? (
-                                  <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                    <span>Primary: <strong>{q.primaryRemaining}%</strong></span>
+                                  <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                    <div>
+                                      <span>Primary (5h): <strong>{q.primaryRemaining}%</strong></span>
+                                      {formatResetTime(q.primaryResetTime) && (
+                                        <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: q.primaryResetTime })}>
+                                          ({formatResetTime(q.primaryResetTime)})
+                                        </span>
+                                      )}
+                                    </div>
                                     {q.weeklyRemaining !== null && (
-                                      <span>Weekly: <strong>{q.weeklyRemaining}%</strong></span>
+                                      <div>
+                                        <span>Weekly: <strong>{q.weeklyRemaining}%</strong></span>
+                                        {formatResetTime(q.weeklyResetTime) && (
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: q.weeklyResetTime })}>
+                                            ({formatResetTime(q.weeklyResetTime)})
+                                          </span>
+                                        )}
+                                      </div>
                                     )}
-                                    <button
-                                      className="btn btn-secondary btn-sm font-mono"
-                                      style={{ padding: '1px 6px', fontSize: 10, alignSelf: 'flex-start', marginTop: 2 }}
-                                      onClick={() =>
-                                        setSelectedQuota({
-                                          title: `Quota Codex (${acc.email || acc.id})`,
-                                          quota: acc.quota,
-                                          onRefreshQuota: () => handleRefreshCodexAccountQuota(acc),
-                                        })
-                                      }
-                                    >
-                                      JSON
-                                    </button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                      <span
+                                        className={`badge ${q.availableTickets > 0 ? 'badge-info' : 'badge-neutral'}`}
+                                        style={{ fontSize: 10, padding: '1px 6px' }}
+                                        title={t('providers.codexResetTicketsTooltip')}
+                                      >
+                                        🎟️ {t('providers.codexResetTickets', { count: q.availableTickets })}
+                                      </span>
+                                      {q.availableTickets > 0 && (
+                                        <button
+                                          className="btn btn-primary btn-sm font-mono"
+                                          style={{ padding: '1px 6px', fontSize: 10 }}
+                                          onClick={() => handleOpenResetCreditModal(acc)}
+                                          title={t('providers.useCodexResetTicket')}
+                                        >
+                                          {t('providers.useTicket')}
+                                        </button>
+                                      )}
+                                      <button
+                                        className="btn btn-secondary btn-sm font-mono"
+                                        style={{ padding: '1px 6px', fontSize: 10 }}
+                                        onClick={() =>
+                                          setSelectedQuota({
+                                            title: `Quota Codex (${acc.email || acc.id})`,
+                                            quota: acc.quota,
+                                            onRefreshQuota: () => handleRefreshCodexAccountQuota(acc),
+                                          })
+                                        }
+                                      >
+                                        JSON
+                                      </button>
+                                    </div>
                                   </div>
                                 ) : (
-                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Chưa nạp</span>
+                                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
                               <td>
@@ -1907,23 +2294,23 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     onClick={() => handleToggleCodex(acc)}
                                     disabled={actionLoading}
                                   >
-                                    {isActiveAcc ? 'Tắt' : 'Bật'}
+                                    {isActiveAcc ? t('providers.statusOff') : t('providers.statusOn')}
                                   </button>
                                   {isCooling && (
                                     <button
                                       className="btn btn-secondary btn-sm"
                                       onClick={() => handleResetCodex(acc)}
                                       disabled={actionLoading}
-                                      title="Reset Cooldown"
+                                      title={t('providers.btnResetCooldown')}
                                     >
-                                      Reset
+                                      {t('providers.btnResetCooldown')}
                                     </button>
                                   )}
                                   <button
                                     className="btn btn-danger btn-sm btn-icon-only"
                                     onClick={() => handleDeleteCodex(acc)}
                                     disabled={actionLoading}
-                                    title="Xóa tài khoản"
+                                    title={t('providers.btnDeleteAccount')}
                                   >
                                     <IconTrash size={14} />
                                   </button>
@@ -1940,7 +2327,284 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             </div>
           </div>
 
-        {/* CARD 3: UPSTREAM CUSTOM PROVIDERS */}
+        {/* CARD 3: OPENROUTER FIRST-CLASS PROVIDER */}
+        <div id="provider-openrouter" className="visual-card">
+          {/* Header */}
+          <div className="visual-card-header">
+            <div className="visual-brand-group">
+              <div className="visual-logo-badge openrouter">
+                <IconOpenRouter size={22} />
+              </div>
+              <div className="visual-brand-meta">
+                <div className="visual-card-title">
+                  <span>OpenRouter</span>
+                </div>
+                <div className="visual-chips-row">
+                  <span className="model-family-chip">openrouter/*</span>
+                  <span className="model-sub-chip">Claude 3.5</span>
+                  <span className="model-sub-chip">DeepSeek R1</span>
+                  <span className="model-sub-chip">Llama 3.3</span>
+                  <span className="model-sub-chip">GPT-4o</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {openrouterProv && (
+                <span
+                  className={`badge ${
+                    !openrouterProv.api_key
+                      ? 'badge-warning'
+                      : !openrouterProv.is_active
+                      ? 'badge-neutral'
+                      : 'badge-success'
+                  }`}
+                >
+                  {!openrouterProv.api_key
+                    ? 'Chưa gắn Key'
+                    : !openrouterProv.is_active
+                    ? 'Tạm tắt'
+                    : 'Đang hoạt động'}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Metrics Row: Balance & Models */}
+          <div className="visual-metrics-row">
+            {/* Balance Card */}
+            <div
+              style={{
+                flex: 1,
+                minWidth: 220,
+                padding: '12px 16px',
+                borderRadius: 'var(--radius-md)',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.04em' }}>
+                  SỐ DƯ TÀI KHOẢN (CREDITS)
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ padding: '2px 8px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                  onClick={fetchOpenRouterCredits}
+                  disabled={openrouterCreditsLoading}
+                  title="Kiểm tra số dư mới nhất"
+                >
+                  <IconRefresh size={11} className={openrouterCreditsLoading ? 'spinner' : ''} />
+                  <span>{openrouterCreditsLoading ? 'Đang tải...' : 'Làm mới'}</span>
+                </button>
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: (openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? '#f59e0b' : '#10b981' }}>
+                {openrouterCredits && typeof openrouterCredits.total_credits === 'number'
+                  ? `$${Math.max(0, openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)).toFixed(2)}`
+                  : openrouterCreditsLoading
+                  ? 'Đang kiểm tra...'
+                  : '$0.00'}
+              </div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {openrouterCredits && typeof openrouterCredits.total_credits === 'number'
+                  ? `Tổng nạp: $${openrouterCredits.total_credits.toFixed(2)} · Đã dùng: $${(openrouterCredits.total_usage || 0).toFixed(2)}${
+                      openrouterCredits.updated_at
+                        ? ` · Cập nhật: ${new Date(openrouterCredits.updated_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                        : ''
+                    }`
+                  : openrouterProv?.api_key
+                  ? `Key: ${openrouterProv.api_key}`
+                  : 'Chưa cấu hình API Key'}
+              </div>
+              {openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.01 && (
+                <div style={{ marginTop: 4 }}>
+                  <span className="badge badge-warning" style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                    ⚡ Số dư: $0.00 (Chỉ dùng được model :free, cần nạp thêm để dùng model trả phí)
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Stat Numbers */}
+            <div className="visual-stat-numbers">
+              <div className="stat-num-box">
+                <span className="stat-num-val active">
+                  {Array.isArray(openrouterProv?.models) ? openrouterProv.models.length : 0}
+                </span>
+                <span className="stat-num-lbl">Model Kích Hoạt</span>
+              </div>
+              <div className="stat-num-box">
+                <span className="stat-num-val total">
+                  458
+                </span>
+                <span className="stat-num-lbl">Tổng Model OR</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Bar */}
+          <div className="segment-action-bar">
+            <div className="segment-actions-group" style={{ flexWrap: 'wrap', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setOpenrouterKeyInput(localStorage.getItem('ag_openrouter_raw_key') || '');
+                  setShowOpenRouterKeyModal(true);
+                }}
+              >
+                <IconKey size={14} />
+                <span>{openrouterProv?.api_key ? 'Đổi API Key' : 'Gắn API Key'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setSelectedOpenRouterModels(
+                    Array.isArray(openrouterProv?.models) ? [...openrouterProv.models] : []
+                  );
+                  setShowOpenRouterModelModal(true);
+                  if (allOpenRouterModels.length === 0) {
+                    loadAllOpenRouterModels();
+                  }
+                }}
+              >
+                <IconServer size={14} />
+                <span>Chọn Model Hiển Thị ({Array.isArray(openrouterProv?.models) ? openrouterProv.models.length : 0})</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleTestOpenRouter}
+                disabled={actionLoading}
+              >
+                <IconZap size={14} />
+                <span>Test Kết Nối</span>
+              </button>
+
+              {openrouterProv && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleToggleOpenRouterActive(openrouterProv)}
+                  disabled={actionLoading}
+                >
+                  {openrouterProv.is_active ? 'Tạm Tắt' : 'Kích Hoạt'}
+                </button>
+              )}
+            </div>
+
+            <button
+              className="details-toggle-btn"
+              style={{ width: 'auto' }}
+              onClick={() => setShowOpenRouterDetails(!showOpenRouterDetails)}
+              aria-expanded={showOpenRouterDetails}
+            >
+              <span>
+                {showOpenRouterDetails
+                  ? 'Thu gọn danh sách model'
+                  : `Xem model đã chọn (${Array.isArray(openrouterProv?.models) ? openrouterProv.models.length : 0})`}
+              </span>
+              <IconChevronDown
+                size={14}
+                className={`details-toggle-chevron ${showOpenRouterDetails ? 'open' : ''}`}
+              />
+            </button>
+          </div>
+
+          {/* Expandable Model List Drawer */}
+          <div
+            className={`details-drawer-wrapper ${showOpenRouterDetails ? 'expanded' : 'collapsed'}`}
+            aria-hidden={!showOpenRouterDetails}
+          >
+            <div className="details-drawer-content" style={{ padding: '14px 16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  Danh sách model OpenRouter hiển thị trong Router ({Array.isArray(openrouterProv?.models) ? openrouterProv.models.length : 0}):
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setSelectedOpenRouterModels(
+                      Array.isArray(openrouterProv?.models) ? [...openrouterProv.models] : []
+                    );
+                    setShowOpenRouterModelModal(true);
+                    if (allOpenRouterModels.length === 0) {
+                      loadAllOpenRouterModels();
+                    }
+                  }}
+                >
+                  <IconPlus size={13} />
+                  <span>Chọn Thêm / Bớt Model</span>
+                </button>
+              </div>
+
+              {(!openrouterProv?.models || !Array.isArray(openrouterProv.models) || openrouterProv.models.length === 0) ? (
+                <div className="empty-graphic-box" style={{ padding: 20 }}>
+                  <p style={{ margin: 0, fontSize: 13 }}>Chưa có model nào được chọn hiển thị.</p>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    style={{ marginTop: 8 }}
+                    onClick={() => {
+                      setSelectedOpenRouterModels([...CURATED_OPENROUTER_MODELS]);
+                      handleSaveSelectedModels();
+                    }}
+                  >
+                    ⚡ Kích hoạt top model phổ biến
+                  </button>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {openrouterProv.models.map((m: string) => (
+                    <div
+                      key={m}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 12px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        fontSize: 12.5,
+                      }}
+                    >
+                      <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+                        OR
+                      </span>
+                      <span className="font-mono" style={{ fontWeight: 600 }}>
+                        openrouter/{m}
+                      </span>
+                      <button
+                        type="button"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: 0,
+                          display: 'flex',
+                        }}
+                        title="Bỏ model này"
+                        onClick={() => handleRemoveSingleModel(m)}
+                      >
+                        <IconX size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* CARD 4: UPSTREAM CUSTOM PROVIDERS */}
         <div id="provider-upstream" className="visual-card">
             {/* Header */}
             <div className="visual-card-header">
@@ -1958,28 +2622,28 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   </div>
                 </div>
               </div>
-              <span className="badge badge-neutral font-mono">{providers.length} nguồn</span>
+              <span className="badge badge-neutral font-mono">{t('providers.sourcesCount', { count: otherProviders.length })}</span>
             </div>
 
             {/* Health Ring & Big Numbers */}
             <div className="visual-metrics-row">
               {renderHealthRing(
-                providers.length > 0
-                  ? Math.round((providers.filter((p) => p.is_active).length / providers.length) * 100)
+                otherProviders.length > 0
+                  ? Math.round((otherProviders.filter((p) => p.is_active).length / otherProviders.length) * 100)
                   : 0,
-                'Tỷ lệ hoạt động',
-                'Nguồn sẵn sàng'
+                t('providers.upstreamActiveRate'),
+                t('providers.sourcesReady')
               )}
               <div className="visual-stat-numbers">
                 <div className="stat-num-box">
                   <span className="stat-num-val active">
-                    {providers.filter((p) => p.is_active).length}
+                    {otherProviders.filter((p) => p.is_active).length}
                   </span>
-                  <span className="stat-num-lbl">Hoạt động</span>
+                  <span className="stat-num-lbl">{t('providers.statActive')}</span>
                 </div>
                 <div className="stat-num-box">
-                  <span className="stat-num-val total">{providers.length}</span>
-                  <span className="stat-num-lbl">Cấu hình</span>
+                  <span className="stat-num-val total">{otherProviders.length}</span>
+                  <span className="stat-num-lbl">{t('providers.statConfigured')}</span>
                 </div>
               </div>
             </div>
@@ -1991,11 +2655,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="action-icon-btn primary"
                   onClick={openAddUpstreamModal}
                   disabled={actionLoading}
-                  title="Thêm nhà cung cấp upstream mới"
-                  aria-label="Thêm nhà cung cấp upstream mới"
+                  title={t('providers.addUpstreamTitle')}
+                  aria-label={t('providers.addUpstreamTitle')}
                 >
                   <IconPlus size={14} />
-                  <span>Thêm Upstream</span>
+                  <span>{t('providers.addUpstreamBtn')}</span>
                 </button>
               </div>
 
@@ -2008,8 +2672,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               >
                 <span>
                   {showUpstreamDetails
-                    ? 'Thu gọn danh sách upstream'
-                    : `Chi tiết upstream (${providers.length} nguồn)`}
+                    ? t('providers.collapseUpstream')
+                    : t('providers.upstreamDetails', { count: otherProviders.length })}
                 </span>
                 <IconChevronDown
                   size={14}
@@ -2025,11 +2689,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               aria-hidden={!showUpstreamDetails}
             >
               <div className="details-drawer-content">
-                {providers.length === 0 ? (
+                {otherProviders.length === 0 ? (
                   <div className="empty-graphic-box">
-                    <p style={{ margin: 0, fontSize: 13 }}>Chưa có nhà cung cấp upstream nào được cấu hình.</p>
+                    <p style={{ margin: 0, fontSize: 13 }}>{t('providers.emptyUpstream')}</p>
                     <button className="btn btn-secondary btn-sm" onClick={openAddUpstreamModal}>
-                      Thêm Upstream đầu tiên
+                      {t('providers.addFirstUpstream')}
                     </button>
                   </div>
                 ) : (
@@ -2037,17 +2701,17 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     <table>
                       <thead>
                         <tr>
-                          <th>Tên & Prefix</th>
-                          <th>Loại</th>
-                          <th>Base URL</th>
-                          <th>API Key</th>
-                          <th>Models</th>
-                          <th>Trạng Thái</th>
-                          <th>Tác Vụ</th>
+                          <th>{t('providers.thNamePrefix')}</th>
+                          <th>{t('providers.thType')}</th>
+                          <th>{t('providers.thBaseUrl')}</th>
+                          <th>{t('providers.thApiKey')}</th>
+                          <th>{t('providers.thModels')}</th>
+                          <th>{t('providers.thStatus')}</th>
+                          <th>{t('providers.thActions')}</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {providers.map((p) => {
+                        {otherProviders.map((p) => {
                           const modelsArr = Array.isArray(p.models)
                             ? p.models
                             : typeof p.models === 'object' && p.models
@@ -2069,17 +2733,17 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               </td>
                               <td>
                                 <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                  {p.api_key ? '••••••••' : '(Trống)'}
+                                  {p.api_key ? '••••••••' : t('providers.emptyValue')}
                                 </span>
                               </td>
                               <td>
                                 <span className="badge badge-neutral" style={{ fontSize: 10 }}>
-                                  {modelsArr.length > 0 ? `${modelsArr.length} models` : 'Mặc định'}
+                                  {modelsArr.length > 0 ? t('providers.modelsCount', { count: modelsArr.length }) : t('providers.modelsDefault')}
                                 </span>
                               </td>
                               <td>
                                 <span className={`badge ${p.is_active ? 'badge-success' : 'badge-neutral'}`}>
-                                  {p.is_active ? 'Bật' : 'Tắt'}
+                                  {p.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
                               <td>
@@ -2087,7 +2751,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <button
                                     className="btn btn-secondary btn-sm btn-icon-only"
                                     onClick={() => openEditUpstreamModal(p)}
-                                    title="Sửa cấu hình"
+                                    title={t('providers.editConfig')}
                                   >
                                     <IconEdit size={14} />
                                   </button>
@@ -2095,15 +2759,15 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     className="btn btn-secondary btn-sm"
                                     onClick={() => handleTestUpstream(p)}
                                     disabled={actionLoading}
-                                    title="Kiểm tra kết nối"
+                                    title={t('providers.testConnection')}
                                   >
-                                    Test
+                                    {t('providers.btnTest')}
                                   </button>
                                   <button
                                     className="btn btn-secondary btn-sm btn-icon-only"
                                     onClick={() => handleSyncUpstream(p)}
                                     disabled={actionLoading}
-                                    title="Đồng bộ models"
+                                    title={t('providers.syncModels')}
                                   >
                                     <IconRefresh size={14} />
                                   </button>
@@ -2111,7 +2775,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                     className="btn btn-danger btn-sm btn-icon-only"
                                     onClick={() => handleDeleteUpstream(p)}
                                     disabled={actionLoading}
-                                    title="Xóa nhà cung cấp"
+                                    title={t('providers.deleteProvider')}
                                   >
                                     <IconTrash size={14} />
                                   </button>
@@ -2138,7 +2802,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Thêm Tài Khoản Google Antigravity</h3>
+              <h3 className="modal-title">{t('providers.modalGoogleAddTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowGoogleAddModal(false)}
@@ -2149,7 +2813,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             <form onSubmit={handleAddGoogleAccount}>
               <div className="form-group">
-                <label>Email Google (tùy chọn hoặc định danh)</label>
+                <label>{t('providers.labelGoogleEmail')}</label>
                 <input
                   type="text"
                   placeholder="user@example.com"
@@ -2159,7 +2823,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>OAuth Refresh Token (Bắt buộc)</label>
+                <label>{t('providers.labelGoogleRefreshToken')}</label>
                 <textarea
                   rows={4}
                   placeholder="1//04..."
@@ -2169,7 +2833,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   style={{ resize: 'vertical', fontFamily: 'var(--font-mono)' }}
                 />
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  Token được mã hóa bảo mật và không bao giờ xuất hiện trong phản hồi API.
+                  {t('providers.googleTokenHint')}
                 </span>
               </div>
 
@@ -2179,10 +2843,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="btn btn-secondary"
                   onClick={() => setShowGoogleAddModal(false)}
                 >
-                  Hủy
+                  {t('providers.btnCancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Thêm Vào Pool'}
+                  {actionLoading ? <div className="spinner" /> : t('providers.btnAddToPool')}
                 </button>
               </div>
             </form>
@@ -2199,7 +2863,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Đăng Nhập Google OAuth (Antigravity)</h3>
+              <h3 className="modal-title">{t('providers.modalGoogleOAuthTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowGoogleOAuthModal(false)}
@@ -2211,7 +2875,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             <div style={{ marginBottom: 16 }}>
               {googleOAuthTicket?.state && (
                 <div style={{ marginBottom: 12 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Mã phiên (State): </span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('providers.sessionStateLabel')} </span>
                   <span className="badge badge-warning font-mono" style={{ fontSize: 11 }}>
                     {googleOAuthTicket.state.length > 28
                       ? googleOAuthTicket.state.slice(0, 28) + '...'
@@ -2221,7 +2885,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               )}
 
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                Hoàn tất trên cửa sổ Google vừa mở, hoặc mở trực tiếp qua liên kết bên dưới:
+                {t('providers.googleOAuthHelp')}
               </p>
 
               {(googleOAuthTicket?.authorize_url || googleOAuthUrl) && (
@@ -2233,7 +2897,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     className="btn btn-secondary btn-sm"
                     style={{ flex: 1, justifyContent: 'center' }}
                   >
-                    Mở Trang Ủy Quyền Google
+                    {t('providers.openGoogleAuthPage')}
                   </a>
                   <button
                     type="button"
@@ -2244,33 +2908,33 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                         navigator.clipboard.writeText(url);
                         setActionMessage({
                           type: 'success',
-                          text: 'Đã sao chép link ủy quyền! Dán vào Cửa Sổ Ẩn Danh (Incognito) nếu muốn chọn tài khoản khác.',
+                          text: t('providers.msgCopiedAuthLink'),
                         });
                       }
                     }}
                   >
-                    Sao Chép Link
+                    {t('providers.copyLink')}
                   </button>
                 </div>
               )}
 
               <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 14 }}>
-                💡 <b>Mẹo thêm tài khoản mới:</b> Nếu Google tự động chọn tài khoản đang đăng nhập, hãy bấm <b>Sao Chép Link</b> và mở trong <b>Cửa sổ ẩn danh (Incognito)</b> để chọn hoặc đăng nhập tài khoản Google khác.
+                💡 <b>{t('providers.tipNewAccount')}</b> {t('providers.tipNewAccountDesc')}
               </div>
 
               <form onSubmit={handleExchangeGoogleOAuth}>
                 <div className="form-group">
-                  <label>Mã Authorization Code hoặc Toàn Bộ URL Callback:</label>
+                  <label>{t('providers.labelGoogleCode')}</label>
                   <textarea
                     rows={3}
-                    placeholder="Dán mã code hoặc toàn bộ URL callback (http://localhost:20229/auth/callback?code=...)"
+                    placeholder={t('providers.placeholderGoogleCode')}
                     value={googleOAuthCode}
                     onChange={(e) => setGoogleOAuthCode(e.target.value)}
                     required
                     style={{ resize: 'vertical', fontFamily: 'var(--font-mono)' }}
                   />
                   <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    Dán URL chuyển hướng sau khi đăng nhập Google hoặc mã authorization code để hoàn tất liên kết tài khoản.
+                    {t('providers.helpGoogleCode')}
                   </span>
                 </div>
 
@@ -2280,14 +2944,14 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     className="btn btn-secondary"
                     onClick={() => setShowGoogleOAuthModal(false)}
                   >
-                    Đóng
+                    {t('providers.btnClose')}
                   </button>
                   <button
                     type="submit"
                     className="btn btn-primary"
                     disabled={actionLoading || !googleOAuthCode.trim()}
                   >
-                    {actionLoading ? <div className="spinner" /> : 'Hoàn Tất Ủy Quyền'}
+                    {actionLoading ? <div className="spinner" /> : t('providers.btnCompleteAuth')}
                   </button>
                 </div>
               </form>
@@ -2305,7 +2969,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Thêm Tài Khoản OpenAI Codex</h3>
+              <h3 className="modal-title">{t('providers.modalCodexAddTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowCodexAddModal(false)}
@@ -2316,7 +2980,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             <form onSubmit={handleAddCodexAccount}>
               <div className="form-group">
-                <label>Đường dẫn tệp auth.json (Bắt buộc)</label>
+                <label>{t('providers.labelCodexAuthPath')}</label>
                 <input
                   type="text"
                   placeholder="/home/user/.codex/auth.json"
@@ -2325,12 +2989,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   required
                 />
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  Hệ thống sao chép tệp bảo mật vào kho riêng của proxy.
+                  {t('providers.helpCodexAuthPath')}
                 </span>
               </div>
 
               <div className="form-group">
-                <label>Email / Nhãn định danh (tùy chọn)</label>
+                <label>{t('providers.labelCodexEmail')}</label>
                 <input
                   type="text"
                   placeholder="codex-user@example.com"
@@ -2345,10 +3009,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="btn btn-secondary"
                   onClick={() => setShowCodexAddModal(false)}
                 >
-                  Hủy
+                  {t('providers.btnCancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Thêm Vào Pool'}
+                  {actionLoading ? <div className="spinner" /> : t('providers.btnAddToPool')}
                 </button>
               </div>
             </form>
@@ -2365,7 +3029,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header">
-              <h3 className="modal-title">Xác Thực OpenAI Codex OAuth (PKCE)</h3>
+              <h3 className="modal-title">{t('providers.modalCodexOAuthTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowCodexOAuthModal(false)}
@@ -2376,9 +3040,9 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             <div style={{ marginBottom: 16 }}>
               <div style={{ marginBottom: 12 }}>
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Trạng thái phiên: </span>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('providers.sessionStatusLabel')} </span>
                 <span className="badge badge-warning font-mono">
-                  {codexOAuthStatus || 'Đang chờ xác thực...'}
+                  {codexOAuthStatus || t('providers.waitingAuth')}
                 </span>
               </div>
 
@@ -2390,23 +3054,23 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="btn btn-secondary"
                   style={{ width: '100%', justifyContent: 'center', marginBottom: 16 }}
                 >
-                  Mở Trang Đăng Nhập OpenAI Codex
+                  {t('providers.openCodexLoginPage')}
                 </a>
               )}
 
               <form onSubmit={handleExchangeCodexOAuth}>
                 <div className="form-group">
-                  <label>Mã Authorization Code hoặc URL Callback</label>
+                  <label>{t('providers.labelCodexCode')}</label>
                   <textarea
                     rows={3}
-                    placeholder="Dán mã code hoặc toàn bộ URL localhost:1455/auth/callback?code=..."
+                    placeholder={t('providers.placeholderCodexCode')}
                     value={codexOAuthCode}
                     onChange={(e) => setCodexOAuthCode(e.target.value)}
                     required
                     style={{ resize: 'vertical', fontFamily: 'var(--font-mono)' }}
                   />
                   <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                    Dán URL chuyển hướng sau khi đăng nhập OpenAI để hoàn tất lưu tài khoản.
+                    {t('providers.helpCodexCode')}
                   </span>
                 </div>
 
@@ -2416,14 +3080,14 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     className="btn btn-secondary"
                     onClick={() => setShowCodexOAuthModal(false)}
                   >
-                    Đóng
+                    {t('providers.btnClose')}
                   </button>
                   <button
                     type="submit"
                     className="btn btn-primary"
                     disabled={actionLoading || !codexOAuthCode.trim()}
                   >
-                    {actionLoading ? <div className="spinner" /> : 'Hoàn Tất Ủy Quyền'}
+                    {actionLoading ? <div className="spinner" /> : t('providers.btnCompleteAuth')}
                   </button>
                 </div>
               </form>
@@ -2442,7 +3106,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           >
             <div className="modal-header">
               <h3 className="modal-title">
-                {editingProvider ? 'Cập Nhật Nhà Cung Cấp' : 'Thêm Nhà Cung Cấp Upstream'}
+                {editingProvider ? t('providers.modalUpstreamEditTitle') : t('providers.modalUpstreamAddTitle')}
               </h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
@@ -2453,11 +3117,56 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
             </div>
 
             <form onSubmit={handleSaveUpstream}>
+              {!editingProvider && (
+                <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Mẫu nhanh:</span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: 12, padding: '3px 8px' }}
+                    onClick={() => {
+                      setName('OpenRouter');
+                      setPrefix('openrouter');
+                      setProviderType('openrouter');
+                      setBaseUrl('https://openrouter.ai/api/v1');
+                    }}
+                  >
+                    ⚡ OpenRouter
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: 12, padding: '3px 8px' }}
+                    onClick={() => {
+                      setName('DeepSeek');
+                      setPrefix('deepseek');
+                      setProviderType('openai');
+                      setBaseUrl('https://api.deepseek.com/v1');
+                    }}
+                  >
+                    ⚡ DeepSeek
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    style={{ fontSize: 12, padding: '3px 8px' }}
+                    onClick={() => {
+                      setName('Groq');
+                      setPrefix('groq');
+                      setProviderType('openai');
+                      setBaseUrl('https://api.groq.com/openai/v1');
+                    }}
+                  >
+                    ⚡ Groq
+                  </button>
+                </div>
+              )}
+
               <div className="form-group">
-                <label>Tên Nhà Cung Cấp</label>
+                <label>{t('providers.labelProviderName')}</label>
                 <input
                   type="text"
-                  placeholder="Ví dụ: DeepSeek Official"
+                  placeholder={t('providers.placeholderProviderName')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -2465,25 +3174,47 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>Tiền Tố Routing (Prefix)</label>
+                <label>{t('providers.labelRoutingPrefix')}</label>
                 <input
                   type="text"
-                  placeholder="Ví dụ: deepseek"
+                  placeholder={t('providers.placeholderRoutingPrefix')}
                   value={prefix}
                   onChange={(e) => setPrefix(e.target.value)}
                   disabled={!!editingProvider}
                   required
                 />
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  Định tuyến model: <code>{prefix || 'prefix'}/*</code>
+                  {t('providers.helpRoutingPrefix', { prefix: prefix || 'prefix' })}
                 </span>
               </div>
 
               <div className="form-group">
-                <label>Loại Giao Thức (Provider Type)</label>
+                <label>{t('providers.labelProviderType')}</label>
                 <select
                   value={providerType}
-                  onChange={(e) => setProviderType(e.target.value)}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    setProviderType(nextType);
+                    if (!editingProvider) {
+                      if (nextType === 'openrouter') {
+                        if (!name || name === 'DeepSeek' || name === 'Groq' || name === 'OpenAI') setName('OpenRouter');
+                        if (!prefix || prefix === 'deepseek' || prefix === 'groq' || prefix === 'openai') setPrefix('openrouter');
+                        if (!baseUrl || baseUrl.includes('deepseek') || baseUrl.includes('groq')) setBaseUrl('https://openrouter.ai/api/v1');
+                      } else if (nextType === 'openai') {
+                        if (name === 'OpenRouter') setName('');
+                        if (prefix === 'openrouter') setPrefix('');
+                        if (baseUrl === 'https://openrouter.ai/api/v1') setBaseUrl('');
+                      } else if (nextType === 'gemini') {
+                        if (!name || name === 'OpenRouter') setName('Google Gemini');
+                        if (!prefix || prefix === 'openrouter') setPrefix('gemini');
+                        if (!baseUrl || baseUrl === 'https://openrouter.ai/api/v1') setBaseUrl('https://generativelanguage.googleapis.com/v1beta');
+                      } else if (nextType === 'anthropic') {
+                        if (!name || name === 'OpenRouter') setName('Anthropic Claude');
+                        if (!prefix || prefix === 'openrouter') setPrefix('anthropic');
+                        if (!baseUrl || baseUrl === 'https://openrouter.ai/api/v1') setBaseUrl('https://api.anthropic.com/v1');
+                      }
+                    }
+                  }}
                   style={{
                     width: '100%',
                     padding: '8px 12px',
@@ -2501,7 +3232,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>Base URL Upstream</label>
+                <label>{t('providers.labelBaseUrl')}</label>
                 <input
                   type="text"
                   placeholder="https://api.deepseek.com/v1"
@@ -2513,7 +3244,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>Khóa API Upstream</label>
+                <label>{t('providers.labelApiKey')}</label>
                 <input
                   type="text"
                   placeholder="sk-..."
@@ -2524,7 +3255,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <div className="form-group">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <label style={{ marginBottom: 0 }}>Danh Sách Models (tự tải hoặc nhập tay)</label>
+                  <label style={{ marginBottom: 0 }}>{t('providers.labelModelsList')}</label>
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
@@ -2532,7 +3263,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                     disabled={modelsLoading || !baseUrl.trim()}
                   >
                     {modelsLoading ? <div className="spinner" /> : <IconRefresh size={14} />}
-                    <span>{modelsLoading ? 'Đang tải...' : 'Tải models'}</span>
+                    <span>{modelsLoading ? t('providers.btnLoadingModels') : t('providers.btnFetchModels')}</span>
                   </button>
                 </div>
                 <textarea
@@ -2556,7 +3287,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   style={{ width: 18, height: 18 }}
                 />
                 <label htmlFor="upIsActive" style={{ marginBottom: 0, cursor: 'pointer' }}>
-                  Kích hoạt nhà cung cấp này
+                  {t('providers.labelActivateProvider')}
                 </label>
               </div>
 
@@ -2566,13 +3297,242 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   className="btn btn-secondary"
                   onClick={() => setShowAddProviderModal(false)}
                 >
-                  Hủy
+                  {t('providers.btnCancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Lưu Nhà Cung Cấp'}
+                  {actionLoading ? <div className="spinner" /> : t('providers.btnSaveProvider')}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: OPENROUTER API KEY */}
+      {showOpenRouterKeyModal && (
+        <div className="modal-backdrop" onClick={() => setShowOpenRouterKeyModal(false)}>
+          <div className="modal-card" style={{ maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title">Cấu hình API Key OpenRouter</h3>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm btn-icon-only"
+                onClick={() => setShowOpenRouterKeyModal(false)}
+              >
+                <IconX size={16} />
+              </button>
+            </div>
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label" style={{ fontWeight: 600 }}>
+                OpenRouter API Key (sk-or-v1-...)
+              </label>
+              <input
+                type="password"
+                className="form-input font-mono"
+                placeholder="sk-or-v1-..."
+                value={openrouterKeyInput}
+                onChange={(e) => setOpenrouterKeyInput(e.target.value)}
+                autoFocus
+              />
+              <span className="form-help" style={{ marginTop: 6, display: 'block', fontSize: 12 }}>
+                Lấy API key tại{' '}
+                <a
+                  href="https://openrouter.ai/settings/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'var(--primary)', textDecoration: 'underline' }}
+                >
+                  openrouter.ai/settings/keys
+                </a>
+                . Key được dùng để xác thực và truy vấn số dư tài khoản.
+              </span>
+            </div>
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowOpenRouterKeyModal(false)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSaveOpenRouterKey}
+                disabled={openrouterKeySaving || !openrouterKeyInput.trim()}
+              >
+                {openrouterKeySaving ? <div className="spinner" /> : 'Lưu & Kiểm Tra Số Dư'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: OPENROUTER MODEL SELECTOR */}
+      {showOpenRouterModelModal && (
+        <div className="modal-backdrop" onClick={() => setShowOpenRouterModelModal(false)}>
+          <div
+            className="modal-card"
+            style={{ maxWidth: 680, maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">Chọn Model OpenRouter Hiển Thị</h3>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                  Chỉ các model được chọn mới xuất hiện trong <code>/v1/models</code>, tránh làm loãng danh sách ({selectedOpenRouterModels.length} đã chọn).
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm btn-icon-only"
+                onClick={() => setShowOpenRouterModelModal(false)}
+              >
+                <IconX size={16} />
+              </button>
+            </div>
+
+            {/* Quick Actions & Search */}
+            <div style={{ padding: '12px 0', borderBottom: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      const merged = Array.from(new Set([...selectedOpenRouterModels, ...CURATED_OPENROUTER_MODELS]));
+                      setSelectedOpenRouterModels(merged);
+                    }}
+                  >
+                    ⭐ Thêm Top Model Hot
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setSelectedOpenRouterModels([])}
+                  >
+                    Bỏ chọn tất cả
+                  </button>
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Đã chọn: <strong style={{ color: 'var(--primary)' }}>{selectedOpenRouterModels.length}</strong> model
+                </span>
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ paddingLeft: 32 }}
+                  placeholder="Tìm kiếm model (vd: claude, deepseek, llama, qwen, gpt, flash, pro...)"
+                  value={openrouterModelSearch}
+                  onChange={(e) => setOpenrouterModelSearch(e.target.value)}
+                />
+                <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+                  <IconSearch size={14} />
+                </span>
+              </div>
+            </div>
+
+            {/* Scrollable Model List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 0', minHeight: 300, maxHeight: 420 }}>
+              {allModelsLoading ? (
+                <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                  <div className="spinner" style={{ margin: '0 auto 8px' }} />
+                  Đang tải danh sách model từ OpenRouter...
+                </div>
+              ) : (() => {
+                const modelList = allOpenRouterModels.length > 0
+                  ? allOpenRouterModels
+                  : Array.from(new Set([...CURATED_OPENROUTER_MODELS, ...selectedOpenRouterModels])).map((id) => ({
+                      id,
+                      name: id,
+                      context_length: undefined,
+                    }));
+
+                const query = openrouterModelSearch.trim().toLowerCase();
+                const filtered = modelList.filter((m) =>
+                  !query || m.id.toLowerCase().includes(query) || (m.name && m.name.toLowerCase().includes(query))
+                );
+
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)', fontSize: 13 }}>
+                      Không tìm thấy model khớp với "{openrouterModelSearch}"
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {filtered.map((m) => {
+                      const isSelected = selectedOpenRouterModels.includes(m.id);
+                      return (
+                        <label
+                          key={m.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            padding: '8px 12px',
+                            borderRadius: 'var(--radius-sm)',
+                            background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-secondary)',
+                            border: `1px solid ${isSelected ? 'rgba(99, 102, 241, 0.3)' : 'var(--border-subtle)'}`,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedOpenRouterModels([...selectedOpenRouterModels, m.id]);
+                                } else {
+                                  setSelectedOpenRouterModels(selectedOpenRouterModels.filter((id) => id !== m.id));
+                                }
+                              }}
+                            />
+                            <div>
+                              <div className="font-mono" style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#818cf8' : 'var(--text-primary)' }}>
+                                openrouter/{m.id}
+                              </div>
+                              {m.name && m.name !== m.id && (
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{m.name}</div>
+                              )}
+                            </div>
+                          </div>
+                          {m.context_length && (
+                            <span className="badge badge-neutral font-mono" style={{ fontSize: 10 }}>
+                              {Math.round(m.context_length / 1024)}k ctx
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="modal-actions" style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowOpenRouterModelModal(false)}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSaveSelectedModels}
+                disabled={actionLoading}
+              >
+                {actionLoading ? <div className="spinner" /> : `Lưu ${selectedOpenRouterModels.length} Model Đã Chọn`}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2606,14 +3566,186 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   disabled={actionLoading}
                 >
                   <IconRefresh size={14} />
-                  <span>Làm Mới Quota Tài Khoản</span>
+                  <span>{t('providers.btnRefreshAccountQuota')}</span>
                 </button>
               )}
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => setSelectedQuota(null)}
               >
-                Đóng
+                {t('providers.btnClose')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CODEX RATE LIMIT RESET CREDIT */}
+      {resetCreditModalAccount && (
+        <div
+          className="modal-backdrop"
+          onClick={() => !consumingCredit && setResetCreditModalAccount(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="codex-reset-modal-title"
+        >
+          <div
+            className="modal-card"
+            style={{ maxWidth: 520 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3 className="modal-title" id="codex-reset-modal-title">
+                {t('providers.modalResetCreditTitle')}
+              </h3>
+              <button
+                className="btn btn-secondary btn-sm btn-icon-only"
+                onClick={() => setResetCreditModalAccount(null)}
+                disabled={consumingCredit}
+                aria-label={t('providers.modalResetCreditBtnCancel')}
+              >
+                <IconX size={16} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+              <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                {t('providers.modalResetCreditDesc')}
+              </p>
+
+              <div
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 6,
+                  padding: 12,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('providers.thAccount')}:</span>
+                  <strong style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+                    {resetCreditModalAccount.email || resetCreditModalAccount.id}
+                  </strong>
+                </div>
+                {(() => {
+                  const q = getCodexQuotaNumbers(resetCreditModalAccount);
+                  return (
+                    <>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>Primary (5h):</span>
+                        <span>
+                          <strong>{q.primaryRemaining ?? '—'}%</strong> {t('providers.modalResetCreditRemaining')}
+                          {formatResetTime(q.primaryResetTime) && ` (${formatResetTime(q.primaryResetTime)})`}
+                        </span>
+                      </div>
+                      {q.weeklyRemaining !== null && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>Weekly:</span>
+                          <span>
+                            <strong>{q.weeklyRemaining}%</strong> {t('providers.modalResetCreditRemaining')}
+                            {formatResetTime(q.weeklyResetTime) && ` (${formatResetTime(q.weeklyResetTime)})`}
+                          </span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: 6, marginTop: 4 }}>
+                        <span style={{ color: 'var(--text-muted)' }}>{t('providers.thQuotaLimit')}:</span>
+                        <span className="badge badge-info font-mono">
+                          🎟️ {t('providers.modalResetCreditAvailable', { count: q.availableTickets })}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {resetCreditsLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)' }}>
+                  <div className="spinner" />
+                  <span>{t('providers.modalResetCreditLoading')}</span>
+                </div>
+              ) : resetCreditsList.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                    {t('providers.modalResetCreditListTitle')}
+                  </span>
+                  <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {resetCreditsList.map((c) => (
+                      <label
+                        key={c.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 8,
+                          padding: 8,
+                          borderRadius: 6,
+                          border: selectedCreditId === c.id ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                          background: selectedCreditId === c.id ? 'var(--primary-subtle, rgba(59, 130, 246, 0.08))' : 'var(--bg-card)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="selected_codex_credit"
+                          checked={selectedCreditId === c.id}
+                          onChange={() => setSelectedCreditId(c.id)}
+                          style={{ marginTop: 2 }}
+                        />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                            {c.title || 'Full reset (Weekly + 5 hr)'}
+                          </span>
+                          <span style={{ color: 'var(--text-muted)' }}>
+                            {c.description || 'Rate limit reset'}
+                          </span>
+                          {c.expires_at && (
+                            <span style={{ fontSize: 11, color: 'var(--text-warning, #f59e0b)' }}>
+                              {t('providers.modalResetCreditExpires', { date: new Date(c.expires_at).toLocaleDateString() })}
+                            </span>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  {t('providers.noResetTicketsAvailable')}
+                </div>
+              )}
+
+              <div
+                style={{
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  borderRadius: 6,
+                  padding: 10,
+                  color: 'var(--error, #ef4444)',
+                  fontSize: 12,
+                }}
+              >
+                ⚠️ {t('providers.modalResetCreditWarning')}
+              </div>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setResetCreditModalAccount(null)}
+                disabled={consumingCredit}
+              >
+                {t('providers.modalResetCreditBtnCancel')}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleConfirmConsumeResetCredit}
+                disabled={consumingCredit || resetCreditsLoading || !selectedCreditId || resetCreditsList.length === 0}
+              >
+                {consumingCredit ? <div className="spinner" /> : t('providers.modalResetCreditBtnConfirm')}
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AccountResponse } from '../types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlus,
   IconCheck,
@@ -24,6 +25,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
   error,
   onRefresh,
 }) => {
+  const { t } = useI18n();
   const [showAddModal, setShowAddModal] = useState(false);
   const [email, setEmail] = useState('');
   const [refreshToken, setRefreshToken] = useState('');
@@ -38,7 +40,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!refreshToken.trim()) {
-      setActionMessage({ type: 'error', text: 'Vui lòng cung cấp Refresh Token.' });
+      setActionMessage({ type: 'error', text: t('accounts.msgTokenRequired') });
       return;
     }
 
@@ -49,13 +51,13 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
         email: email.trim() || undefined,
         refresh_token: refreshToken.trim(),
       });
-      setActionMessage({ type: 'success', text: 'Đã thêm tài khoản Google Antigravity mới.' });
+      setActionMessage({ type: 'success', text: t('accounts.msgAddSuccess') });
       setShowAddModal(false);
       setEmail('');
       setRefreshToken('');
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể thêm tài khoản.' });
+      setActionMessage({ type: 'error', text: err?.message || t('accounts.msgAddError') });
     } finally {
       setActionLoading(false);
     }
@@ -66,10 +68,10 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
     setActionMessage(null);
     try {
       await api.resetAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã reset cooldown cho "${acc.email}".` });
+      setActionMessage({ type: 'success', text: t('accounts.msgResetSuccess', { email: acc.email }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi khi reset cooldown.' });
+      setActionMessage({ type: 'error', text: err?.message || t('accounts.msgResetError') });
     } finally {
       setActionLoading(false);
     }
@@ -80,11 +82,11 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
     setActionMessage(null);
     try {
       const res = await api.refreshAccountQuota(acc.id);
-      setActionMessage({ type: 'success', text: `Đã cập nhật hạn mức quota cho "${acc.email}".` });
+      setActionMessage({ type: 'success', text: t('accounts.msgRefreshSuccess', { email: acc.email }) });
       setSelectedQuota({ email: acc.email, quota: res.quota });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi làm mới hạn mức quota.' });
+      setActionMessage({ type: 'error', text: err?.message || t('accounts.msgRefreshError') });
     } finally {
       setActionLoading(false);
     }
@@ -97,12 +99,12 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
       const res = await api.testAccount(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Kiểm tra token "${acc.email}": Thành công (${JSON.stringify(res)})`,
+        text: t('accounts.msgTestSuccess', { email: acc.email, detail: JSON.stringify(res) }),
       });
     } catch (err: any) {
       setActionMessage({
         type: 'error',
-        text: `Kiểm tra "${acc.email}" thất bại: ${err?.message || 'Lỗi xác thực'}`,
+        text: t('accounts.msgTestError', { email: acc.email, error: err?.message || 'Lỗi xác thực' }),
       });
     } finally {
       setActionLoading(false);
@@ -110,15 +112,15 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
   };
 
   const handleDelete = async (acc: AccountResponse) => {
-    if (!window.confirm(`Xác nhận xóa tài khoản "${acc.email}"?`)) return;
+    if (!window.confirm(t('accounts.confirmDelete', { email: acc.email }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã xóa tài khoản "${acc.email}".` });
+      setActionMessage({ type: 'success', text: t('accounts.msgDeleteSuccess', { email: acc.email }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa tài khoản.' });
+      setActionMessage({ type: 'error', text: err?.message || t('accounts.msgDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -131,14 +133,14 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
     <div>
       <div className="section-header">
         <div>
-          <h2 className="section-title">Quản Lý Pool Tài Khoản Google (Antigravity)</h2>
+          <h2 className="section-title">{t('accounts.title')}</h2>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Hệ thống xoay vòng tài khoản tự động LRU & kiểm soát hạn mức (Quota / Cooldown)
+            {t('accounts.subtitle')}
           </span>
         </div>
         <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
           <IconPlus size={16} />
-          <span>Thêm Tài Khoản</span>
+          <span>{t('accounts.addAccount')}</span>
         </button>
       </div>
 
@@ -146,15 +148,15 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
       <div className="kpi-grid" style={{ marginBottom: 20 }}>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Tổng Tài Khoản</span>
+            <span>{t('accounts.kpiTotalAccounts')}</span>
             <IconUsers size={16} />
           </div>
           <div className="kpi-value">{accounts.length}</div>
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Sẵn Sàng Tiếp Nhận</span>
-            <span className="badge badge-success">Active</span>
+            <span>{t('accounts.kpiReady')}</span>
+            <span className="badge badge-success">{t('accounts.badgeActive')}</span>
           </div>
           <div className="kpi-value" style={{ color: '#10b981' }}>
             {activeCount}
@@ -162,8 +164,8 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Đang Cooldown</span>
-            <span className="badge badge-warning">Waiting</span>
+            <span>{t('accounts.kpiCooldown')}</span>
+            <span className="badge badge-warning">{t('accounts.badgeWaiting')}</span>
           </div>
           <div className="kpi-value" style={{ color: cooldownCount > 0 ? '#f59e0b' : 'inherit' }}>
             {cooldownCount}
@@ -189,13 +191,13 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
         {loading && accounts.length === 0 ? (
           <div className="state-container">
             <div className="spinner" />
-            <p>Đang tải danh sách tài khoản Google...</p>
+            <p>{t('accounts.loading')}</p>
           </div>
         ) : accounts.length === 0 ? (
           <div className="state-container">
-            <p>Chưa có tài khoản Antigravity nào trong nhóm.</p>
+            <p>{t('accounts.empty')}</p>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowAddModal(true)}>
-              Thêm tài khoản Google
+              {t('accounts.btnAddGoogle')}
             </button>
           </div>
         ) : (
@@ -203,14 +205,14 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
             <table>
               <thead>
                 <tr>
-                  <th>Email & ID</th>
-                  <th>Trạng Thái</th>
-                  <th>Cooldown</th>
-                  <th>Tổng Yêu Cầu</th>
-                  <th>Lỗi</th>
-                  <th>RPM Gần Đây</th>
-                  <th>Hạn Mức (Quota)</th>
-                  <th>Hành Động</th>
+                  <th>{t('accounts.thEmailId')}</th>
+                  <th>{t('accounts.thStatus')}</th>
+                  <th>{t('accounts.thCooldown')}</th>
+                  <th>{t('accounts.thTotalRequests')}</th>
+                  <th>{t('accounts.thErrors')}</th>
+                  <th>{t('accounts.thRecentRpm')}</th>
+                  <th>{t('accounts.thQuota')}</th>
+                  <th>{t('accounts.thActions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -226,16 +228,16 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                       </td>
                       <td>
                         <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
-                          {acc.is_active ? 'Hoạt động' : 'Tắt'}
+                          {acc.is_active ? t('accounts.statusActive') : t('accounts.statusInactive')}
                         </span>
                       </td>
                       <td>
                         {isCooling ? (
                           <span className="badge badge-warning font-mono">
-                            Chờ {Math.ceil(acc.cooldown_remaining)}s
+                            {t('accounts.cooldownWait', { sec: Math.ceil(acc.cooldown_remaining) })}
                           </span>
                         ) : (
-                          <span className="badge badge-success">Sẵn sàng</span>
+                          <span className="badge badge-success">{t('accounts.statusReady')}</span>
                         )}
                       </td>
                       <td className="font-mono">{acc.total_requests}</td>
@@ -268,10 +270,10 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                             style={{ padding: '2px 8px', fontSize: 11 }}
                             onClick={() => setSelectedQuota({ email: acc.email, quota: acc.quota })}
                           >
-                            Xem Quota
+                            {t('accounts.viewQuota')}
                           </button>
                         ) : (
-                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Chưa nạp</span>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('accounts.quotaNotLoaded')}</span>
                         )}
                       </td>
                       <td>
@@ -280,25 +282,26 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleTest(acc)}
                             disabled={actionLoading}
-                            title="Kiểm tra cấp phát Token"
+                            title={t('accounts.testTitle')}
                           >
-                            Test
+                            {t('accounts.testBtn')}
                           </button>
                           {isCooling && (
                             <button
                               className="btn btn-secondary btn-sm"
                               onClick={() => handleResetCooldown(acc)}
                               disabled={actionLoading}
-                              title="Xóa thời gian chờ (Reset Cooldown)"
+                              title={t('accounts.resetTitle')}
                             >
-                              Reset
+                              {t('accounts.resetBtn')}
                             </button>
                           )}
                           <button
                             className="btn btn-secondary btn-sm btn-icon-only"
                             onClick={() => handleRefreshQuota(acc)}
                             disabled={actionLoading}
-                            title="Làm mới hạn mức Quota"
+                            title={t('accounts.refreshQuotaTitle')}
+                            aria-label={t('accounts.refreshQuotaTitle')}
                           >
                             <IconRefresh size={14} />
                           </button>
@@ -306,7 +309,8 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                             className="btn btn-danger btn-sm btn-icon-only"
                             onClick={() => handleDelete(acc)}
                             disabled={actionLoading}
-                            title="Xóa tài khoản khỏi Pool"
+                            title={t('accounts.deleteTitle')}
+                            aria-label={t('accounts.deleteTitle')}
                           >
                             <IconTrash size={14} />
                           </button>
@@ -326,10 +330,11 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
         <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
           <div className="modal-card" style={{ maxWidth: 500 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Thêm Tài Khoản Google Antigravity</h3>
+              <h3 className="modal-title">{t('accounts.modalAddTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowAddModal(false)}
+                aria-label={t('actions.close')}
               >
                 <IconX size={16} />
               </button>
@@ -337,7 +342,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
 
             <form onSubmit={handleCreate}>
               <div className="form-group">
-                <label>Email Google (tùy chọn hoặc định danh)</label>
+                <label>{t('accounts.labelEmail')}</label>
                 <input
                   type="text"
                   placeholder="user@example.com"
@@ -347,7 +352,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>OAuth Refresh Token (Bắt buộc)</label>
+                <label>{t('accounts.labelRefreshToken')}</label>
                 <textarea
                   rows={4}
                   placeholder="1//04..."
@@ -357,7 +362,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                   style={{ resize: 'vertical', fontFamily: 'var(--font-mono)' }}
                 />
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  Token được bảo mật nghiêm ngặt và không bao giờ xuất hiện trong phản hồi API.
+                  {t('accounts.tokenSecurityNote')}
                 </span>
               </div>
 
@@ -367,10 +372,10 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                   className="btn btn-secondary"
                   onClick={() => setShowAddModal(false)}
                 >
-                  Hủy
+                  {t('actions.cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Thêm Vào Pool'}
+                  {actionLoading ? <div className="spinner" /> : t('accounts.addToPool')}
                 </button>
               </div>
             </form>
@@ -383,10 +388,11 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
         <div className="modal-backdrop" onClick={() => setSelectedQuota(null)}>
           <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Chi Tiết Hạn Mức Quota ({selectedQuota.email})</h3>
+              <h3 className="modal-title">{t('accounts.modalQuotaTitle', { email: selectedQuota.email })}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setSelectedQuota(null)}
+                aria-label={t('actions.close')}
               >
                 <IconX size={16} />
               </button>
@@ -396,7 +402,7 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
             </pre>
             <div className="modal-actions">
               <button className="btn btn-secondary btn-sm" onClick={() => setSelectedQuota(null)}>
-                Đóng
+                {t('actions.close')}
               </button>
             </div>
           </div>

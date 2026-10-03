@@ -18,6 +18,7 @@ import {
   QuotaRefreshStatus,
   UpdateQuotaRefreshPayload,
   RequestsResponse,
+  TokenAnalyticsResponse,
   UpdateProviderRequest,
   type TokenSaverSettings,
   SystemLogsResponse,
@@ -108,6 +109,10 @@ export const api = {
   getStats: (key?: string) => request<AdminStats>('/admin/stats', {}, key),
   getAccounts: () => request<ListAccountsResponse>('/admin/accounts'),
   getRequestSummary: () => request<ModelRequestSummary[]>('/admin/request-summary'),
+  getTokenAnalytics: (period?: string) =>
+    request<TokenAnalyticsResponse>(
+      `/admin/token-analytics${period ? `?period=${encodeURIComponent(period)}` : ''}`
+    ),
   getRequests: (params: { limit?: number; offset?: number; model?: string; status?: string }) => {
     const q = new URLSearchParams();
     if (params.limit !== undefined) q.set('limit', String(params.limit));
@@ -270,6 +275,18 @@ export const api = {
     request<{ account_id: string; quota: any }>(
       `/admin/codex/accounts/${encodeURIComponent(id)}/refresh-quota`,
       { method: 'POST' }
+    ),
+  getCodexResetCredits: (id: string) =>
+    request<{ ok: boolean; id: string; data: any }>(
+      `/admin/codex/accounts/${encodeURIComponent(id)}/reset-credits`
+    ),
+  consumeCodexResetCredit: (id: string, creditId?: string) =>
+    request<{ ok: boolean; id: string; result?: any; quota?: any; error?: string }>(
+      `/admin/codex/accounts/${encodeURIComponent(id)}/consume-reset-credit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ credit_id: creditId || null }),
+      }
     ),
   deleteCodexAccount: (id: string) =>
     request<{ ok: boolean }>(`/admin/codex/accounts/${encodeURIComponent(id)}`, {

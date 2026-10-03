@@ -413,6 +413,31 @@ pub fn resolve_embeddings_url(base_url: &str) -> String {
     }
 }
 
+/// Resolves the upstream endpoint for image generations, avoiding duplicate `/v1`.
+pub fn resolve_image_generations_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{trimmed}/images/generations")
+    } else {
+        format!("{trimmed}/v1/images/generations")
+    }
+}
+
+pub fn format_reqwest_stream_error(err: &reqwest::Error) -> AppError {
+    let mut details = err.to_string();
+    let mut curr: &dyn std::error::Error = err;
+    while let Some(src) = curr.source() {
+        details.push_str(&format!(" -> {src}"));
+        curr = src;
+    }
+    let lower = details.to_lowercase();
+    if err.is_timeout() || lower.contains("timed out") || lower.contains("timeout") {
+        AppError::GatewayTimeout(format!("Upstream stream read timed out: {details}"))
+    } else {
+        AppError::BadGateway(format!("Upstream stream error: {details}"))
+    }
+}
+
 pub struct HttpUpstreamProvider {
     base_url: Option<String>,
     api_key: Option<String>,
@@ -465,6 +490,113 @@ impl HttpUpstreamProvider {
     pub fn with_max_response_bytes(mut self, max_bytes: usize) -> Self {
         self.max_response_bytes = max_bytes;
         self
+    }
+
+    pub async fn generate_image(
+        &self,
+        request: &serde_json::Value,
+        routing_prefix: Option<&str>,
+    ) -> Result<serde_json::Value, AppError> {
+        let base_url = self
+            .base_url
+            .as_deref()
+            .ok_or_else(|| AppError::Internal("Upstream base URL is not configured".to_string()))?;
+        let url = resolve_image_generations_url(base_url);
+        let mut upstream_request = request.clone();
+        let model = upstream_request
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| AppError::BadRequest("model must be a non-empty string".to_string()))?
+            .to_string();
+        if let Some(upstream_model) = routing_prefix
+            .filter(|prefix| !prefix.is_empty())
+            .and_then(|prefix| model.strip_prefix(prefix))
+            .and_then(|model| model.strip_prefix('/'))
+        {
+            upstream_request["model"] = serde_json::Value::String(upstream_model.to_string());
+        }
+
+        tracing::info!(
+            upstream_url = %url,
+            model = %upstream_request["model"].as_str().unwrap_or(&model),
+            "Dispatching image generation request to upstream provider"
+        );
+
+        let mut request_builder = self.client.post(&url).json(&upstream_request);
+        if let Some(key) = self.api_key.as_ref().filter(|key| !key.trim().is_empty()) {
+            request_builder =
+                request_builder.header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"));
+        }
+        let response = request_builder.send().await.map_err(|err| {
+            if err.is_timeout() {
+                AppError::GatewayTimeout(format!("Upstream image request timed out: {err}"))
+            } else if err.is_connect() {
+                AppError::BadGateway(format!("Upstream image connection failed: {err}"))
+            } else {
+                AppError::BadGateway(format!("Upstream image request failed: {err}"))
+            }
+        })?;
+        let status = response.status();
+        if response
+            .content_length()
+            .is_some_and(|length| length > self.max_response_bytes as u64)
+        {
+            return Err(AppError::BadGateway(format!(
+                "Upstream response exceeded limit of {} bytes",
+                self.max_response_bytes
+            )));
+        }
+
+        let mut body = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await.map_err(|err| {
+            if err.is_timeout() {
+                AppError::GatewayTimeout(format!("Upstream image response read timed out: {err}"))
+            } else {
+                AppError::BadGateway(format!(
+                    "Failed to read upstream image response body: {err}"
+                ))
+            }
+        })? {
+            if body.len() + chunk.len() > self.max_response_bytes {
+                return Err(AppError::BadGateway(format!(
+                    "Upstream response exceeded limit of {} bytes",
+                    self.max_response_bytes
+                )));
+            }
+            body.extend_from_slice(&chunk);
+        }
+
+        if !status.is_success() {
+            let message = match serde_json::from_slice::<serde_json::Value>(&body) {
+                Ok(value) => value
+                    .pointer("/error/message")
+                    .or_else(|| value.get("detail"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_else(|| value.to_string().chars().take(500).collect()),
+                Err(_) => {
+                    let text = String::from_utf8_lossy(&body);
+                    if text.trim().is_empty() {
+                        format!("Upstream returned HTTP status {status}")
+                    } else {
+                        text.chars().take(500).collect()
+                    }
+                }
+            };
+            return match status.as_u16() {
+                400 => Err(AppError::BadRequest(message)),
+                404 => Err(AppError::NotFound(message)),
+                408 | 504 => Err(AppError::GatewayTimeout(message)),
+                _ => Err(AppError::BadGateway(format!(
+                    "Upstream error ({status}): {message}"
+                ))),
+            };
+        }
+
+        serde_json::from_slice(&body).map_err(|err| {
+            AppError::BadGateway(format!("Failed to parse upstream image response: {err}"))
+        })
     }
 }
 
@@ -717,15 +849,9 @@ impl Provider for HttpUpstreamProvider {
             };
         }
 
-        let stream = response.bytes_stream().map(|chunk_result| {
-            chunk_result.map_err(|err| {
-                if err.is_timeout() {
-                    AppError::GatewayTimeout(format!("Upstream stream read timed out: {err}"))
-                } else {
-                    AppError::BadGateway(format!("Upstream stream error: {err}"))
-                }
-            })
-        });
+        let stream = response
+            .bytes_stream()
+            .map(|chunk_result| chunk_result.map_err(|err| format_reqwest_stream_error(&err)));
 
         Ok(Box::pin(stream))
     }
@@ -1127,16 +1253,18 @@ pub fn normalize_tool_schema(schema: &serde_json::Value) -> serde_json::Value {
                 let mut result = serde_json::Map::new();
 
                 for (key, value) in map {
-                    // Strip unsupported / meta schema fields
-                    if matches!(
-                        key.as_str(),
-                        "$schema"
-                            | "definitions"
-                            | "$defs"
-                            | "dependencies"
-                            | "dependentSchemas"
-                            | "dependentRequired"
-                    ) {
+                    // Strip unsupported / meta schema fields (Gemini/Antigravity API rejects $* like $comment, $id, $defs, $schema)
+                    if key.starts_with('$')
+                        || matches!(
+                            key.as_str(),
+                            "definitions"
+                                | "dependencies"
+                                | "dependentSchemas"
+                                | "dependentRequired"
+                                | "patternProperties"
+                                | "propertyNames"
+                        )
+                    {
                         continue;
                     }
 
@@ -1252,7 +1380,56 @@ pub fn normalize_tool_schema(schema: &serde_json::Value) -> serde_json::Value {
                         continue;
                     }
 
-                    result.insert(key.clone(), value.clone());
+                    // Fallback for markdownDescription: if description is missing, map it
+                    if key == "markdownDescription" && !map.contains_key("description") {
+                        if let Some(s) = value.as_str() {
+                            result.insert("description".to_string(), serde_json::json!(s));
+                        }
+                        continue;
+                    }
+
+                    // Fallback for exclusiveMinimum -> minimum
+                    if key == "exclusiveMinimum" && !map.contains_key("minimum") {
+                        if value.is_number() {
+                            result.insert("minimum".to_string(), value.clone());
+                        }
+                        continue;
+                    }
+
+                    // Fallback for exclusiveMaximum -> maximum
+                    if key == "exclusiveMaximum" && !map.contains_key("maximum") {
+                        if value.is_number() {
+                            result.insert("maximum".to_string(), value.clone());
+                        }
+                        continue;
+                    }
+
+                    // Allowlist of valid Google Gemini / Antigravity OpenAPI schema properties
+                    if matches!(
+                        key.as_str(),
+                        "type"
+                            | "format"
+                            | "title"
+                            | "description"
+                            | "nullable"
+                            | "enum"
+                            | "items"
+                            | "maxItems"
+                            | "minItems"
+                            | "properties"
+                            | "required"
+                            | "minimum"
+                            | "maximum"
+                            | "minLength"
+                            | "maxLength"
+                            | "pattern"
+                            | "example"
+                            | "anyOf"
+                            | "default"
+                    ) {
+                        result.insert(key.clone(), value.clone());
+                    }
+                    // All other vendor/Draft-7 fields (enumDescriptions, deprecationMessage, etc.) are safely ignored
                 }
 
                 // If type is object, enforce properties and validate required
@@ -2544,14 +2721,16 @@ impl AntigravityProvider {
         refresher: Arc<dyn TokenRefresher>,
         base_url: &str,
     ) -> Self {
-        let timeout_secs = std::env::var("UPSTREAM_REQUEST_TIMEOUT_SECS")
+        let timeout_secs = std::env::var("AG_UPSTREAM_REQUEST_TIMEOUT_SECS")
+            .or_else(|_| std::env::var("UPSTREAM_REQUEST_TIMEOUT_SECS"))
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(600);
-        let read_timeout_secs = std::env::var("UPSTREAM_READ_TIMEOUT_SECS")
+            .unwrap_or(1800);
+        let read_timeout_secs = std::env::var("AG_UPSTREAM_READ_TIMEOUT_SECS")
+            .or_else(|_| std::env::var("UPSTREAM_READ_TIMEOUT_SECS"))
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(300);
+            .unwrap_or(900);
 
         let client = Client::builder()
             .timeout(Duration::from_secs(timeout_secs))
@@ -2891,9 +3070,9 @@ impl Provider for AntigravityProvider {
             }
 
             // Status 200 OK: retries stop here!
-            let byte_stream = response.bytes_stream().map(|chunk_res| {
-                chunk_res.map_err(|e| AppError::BadGateway(format!("Upstream stream error: {e}")))
-            });
+            let byte_stream = response
+                .bytes_stream()
+                .map(|chunk_res| chunk_res.map_err(|e| format_reqwest_stream_error(&e)));
 
             let gemini_stream = GeminiSseStream::new(
                 Box::pin(byte_stream),
@@ -3771,7 +3950,12 @@ mod tests {
             "properties": {
                 "command": {
                     "type": "STRING",
-                    "description": "Shell command"
+                    "description": "Shell command",
+                    "$comment": "VS Code Copilot param comment",
+                    "$id": "#command",
+                    "markdownDescription": "Markdown command info",
+                    "exclusiveMinimum": 1,
+                    "enumDescriptions": ["Command description"]
                 },
                 "notify": {
                     "anyOf": [
@@ -3786,7 +3970,9 @@ mod tests {
             },
             "required": ["command", "nonexistent_field"],
             "$schema": "http://json-schema.org/draft-07/schema#",
-            "definitions": {}
+            "$comment": "Root comment",
+            "definitions": {},
+            "$defs": {}
         });
 
         let normalized = normalize_tool_schema(&input);
@@ -3794,6 +3980,20 @@ mod tests {
         // 1. Root and primitive types must be lowercase for Draft 2020-12
         assert_eq!(normalized["type"], "object");
         assert_eq!(normalized["properties"]["command"]["type"], "string");
+        assert!(normalized["properties"]["command"]
+            .get("$comment")
+            .is_none());
+        assert!(normalized["properties"]["command"].get("$id").is_none());
+        assert!(normalized["properties"]["command"]
+            .get("enumDescriptions")
+            .is_none());
+        assert_eq!(
+            normalized["properties"]["command"]["minimum"],
+            serde_json::json!(1)
+        );
+        assert!(normalized["properties"]["command"]
+            .get("exclusiveMinimum")
+            .is_none());
 
         // 2. anyOf must be collapsed to a single valid schema branch
         assert_eq!(normalized["properties"]["notify"]["type"], "boolean");
@@ -3811,7 +4011,9 @@ mod tests {
 
         // 5. Unsupported root metadata keys must be stripped
         assert!(normalized.get("$schema").is_none());
+        assert!(normalized.get("$comment").is_none());
         assert!(normalized.get("definitions").is_none());
+        assert!(normalized.get("$defs").is_none());
     }
 
     #[test]
@@ -4217,7 +4419,7 @@ mod tests {
         // Real sample from session bebcbf6f8bb0 message 60 using Rust raw string
         let msg60 = concat!(
             "Tôi sẽ kiểm tra lại test suite.",
-            r#"[Tool Call: execute_code({"code":"from hermes_tools import terminal\ncmd = \"\"\"set -e\ncd client\nnpm test\nnode --test tests/*.test.mjs\n\"\"\"\nr = terminal(cmd, workdir=\"/workspace/project\", timeout=120)\nprint(r['output'])\nprint('exit_code=', r['exit_code'])","reset":false})]"#
+            r#"[Tool Call: execute_code({"code":"from hermes_tools import terminal\ncmd = \"\"\"set -e\ncd client\nnpm test\nnode --test tests/*.test.mjs\n\"\"\"\nr = terminal(cmd, workdir=\"/home/namhv/P2P_Auto\", timeout=120)\nprint(r['output'])\nprint('exit_code=', r['exit_code'])","reset":false})]"#
         );
         let (cleaned60, calls60) = extract_text_tool_calls(msg60);
         assert_eq!(cleaned60, "Tôi sẽ kiểm tra lại test suite.");
@@ -4227,7 +4429,7 @@ mod tests {
         // Real sample from session bebcbf6f8bb0 message 62 using Rust raw string
         let msg62 = concat!(
             "Đang làm đúng theo Task 1.**Step 1: Viết failing test**",
-            r#"[Tool Call: write_file({"content":"import assert from 'node:assert/strict'\nconst NOW = 1000;\n","path":"/workspace/project/client/src/utils/renewalEligibility.test.js"})]"#
+            r#"[Tool Call: write_file({"content":"import assert from 'node:assert/strict'\nconst NOW = 1000;\n","path":"/home/namhv/P2P_Auto/client/src/utils/renewalEligibility.test.js"})]"#
         );
         let (cleaned62, calls62) = extract_text_tool_calls(msg62);
         assert_eq!(
@@ -4240,7 +4442,7 @@ mod tests {
             serde_json::from_str(calls62[0]["function"]["arguments"].as_str().unwrap()).unwrap();
         assert_eq!(
             args62["path"],
-            "/workspace/project/client/src/utils/renewalEligibility.test.js"
+            "/home/namhv/P2P_Auto/client/src/utils/renewalEligibility.test.js"
         );
     }
 

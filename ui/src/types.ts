@@ -15,6 +15,7 @@ export interface AdminStats {
   total_tokens: number;
   avg_duration_ms: number;
   error_count: number;
+  quota_count?: number;
   total_accounts: number;
   active_accounts: number;
   cooldown_accounts: number;
@@ -28,10 +29,56 @@ export interface ModelRequestSummary {
   requests: number;
   ok: number;
   errors: number;
+  quota_exhausted?: number;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
   avg_duration_ms: number;
+}
+
+export interface TokenPeriodStats {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  requests: number;
+  error_count: number;
+}
+
+export interface TokenPeriodsSummary {
+  today: TokenPeriodStats;
+  yesterday: TokenPeriodStats;
+  last_3_days: TokenPeriodStats;
+  last_7_days: TokenPeriodStats;
+  last_30_days: TokenPeriodStats;
+  all_time: TokenPeriodStats;
+}
+
+export interface DailyTokenStat {
+  date: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  requests: number;
+  error_count: number;
+  avg_duration_ms: number;
+}
+
+export interface TokenAnalyticsSummary {
+  total_tokens: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_requests: number;
+  error_count: number;
+  peak_day: string | null;
+  peak_tokens: number;
+  avg_tokens_per_day: number;
+}
+
+export interface TokenAnalyticsResponse {
+  period: string;
+  periods: TokenPeriodsSummary;
+  daily: DailyTokenStat[];
+  summary: TokenAnalyticsSummary;
 }
 
 export interface RequestLogItem {
@@ -65,6 +112,7 @@ export interface ActiveRequestItem {
   stream: boolean;
   started_at: number;
   elapsed_ms: number;
+  ttft_ms?: number;
   completed_at?: number;
 }
 
@@ -127,11 +175,30 @@ export interface AccountQuotaWindow {
   limit_window_seconds?: number;
   reset_after_seconds?: number;
   reset_at?: number;
+  reset_time?: string;
+}
+
+export interface RateLimitResetCreditDetail {
+  id: string;
+  reset_type?: string;
+  status?: string;
+  title?: string;
+  description?: string;
+  granted_at?: string;
+  expires_at?: string | null;
+}
+
+export interface RateLimitResetCreditsSummary {
+  available_count: number;
+  applicable_available_count?: number;
+  credits?: RateLimitResetCreditDetail[];
 }
 
 export interface AccountQuota {
   primary_window?: AccountQuotaWindow;
   weekly_window?: AccountQuotaWindow;
+  rate_limit_reset_credits?: RateLimitResetCreditsSummary;
+  plan_type?: string;
   [key: string]: any;
 }
 
@@ -212,6 +279,11 @@ export interface QuotaRefreshStatus {
   last_error: string | null;
   is_refreshing: boolean;
   last_summary?: QuotaRefreshSummary;
+  openrouter_credits?: {
+    total_credits: number;
+    total_usage: number;
+    updated_at?: number;
+  };
 }
 
 export interface UpdateQuotaRefreshPayload {

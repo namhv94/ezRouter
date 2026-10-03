@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useI18n } from '../i18n';
 import { SystemLogEntry } from '../types';
 import { api } from '../api';
 import {
@@ -12,6 +13,7 @@ import {
 } from '../icons';
 
 export const ConsoleLogTab: React.FC = () => {
+  const { t } = useI18n();
   const [logs, setLogs] = useState<SystemLogEntry[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
@@ -49,13 +51,13 @@ export const ConsoleLogTab: React.FC = () => {
         setLogs(resp.logs || []);
         setTotal(resp.total || 0);
       } catch (err: any) {
-        setError(err?.message || 'Không thể tải log hệ thống.');
+        setError(err?.message || t('logs.fetchError'));
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [limit, levelFilter, searchQuery]
+    [limit, levelFilter, searchQuery, t]
   );
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export const ConsoleLogTab: React.FC = () => {
       setTotal(0);
       setClearConfirm(false);
     } catch (err: any) {
-      setError(err?.message || 'Không thể xóa log.');
+      setError(err?.message || t('logs.clearError'));
     }
   };
 
@@ -116,17 +118,17 @@ export const ConsoleLogTab: React.FC = () => {
         <div>
           <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconTerminal size={22} style={{ color: 'var(--color-primary, #6366f1)' }} />
-            <span>Nhật Ký Hệ Thống (Console Log)</span>
+            <span>{t('logs.title')}</span>
           </h2>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            Theo dõi real-time log hệ thống, quota scheduler, và routing pipeline từ ezRouter
+            {t('logs.subtitle')}
           </span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {/* Auto Refresh selector */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Tự động:</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('logs.autoLabel')}</span>
             <select
               value={autoRefreshSec}
               onChange={(e) => setAutoRefreshSec(Number(e.target.value))}
@@ -139,11 +141,11 @@ export const ConsoleLogTab: React.FC = () => {
                 border: '1px solid var(--border-subtle)',
               }}
             >
-              <option value={0}>Tắt</option>
-              <option value={2}>2 giây</option>
-              <option value={3}>3 giây</option>
-              <option value={5}>5 giây</option>
-              <option value={10}>10 giây</option>
+              <option value={0}>{t('logs.refreshOff')}</option>
+              <option value={2}>{t('logs.refreshSec', { count: 2 })}</option>
+              <option value={3}>{t('logs.refreshSec', { count: 3 })}</option>
+              <option value={5}>{t('logs.refreshSec', { count: 5 })}</option>
+              <option value={10}>{t('logs.refreshSec', { count: 10 })}</option>
             </select>
           </div>
 
@@ -153,10 +155,10 @@ export const ConsoleLogTab: React.FC = () => {
             className="btn btn-secondary btn-sm"
             onClick={() => fetchLogs(false)}
             disabled={refreshing || loading}
-            title="Làm mới log"
+            title={t('logs.refreshTitle')}
           >
             <IconRefresh size={14} className={refreshing ? 'spin' : ''} />
-            <span>{refreshing ? 'Đang tải...' : 'Làm Mới'}</span>
+            <span>{refreshing ? t('actions.refreshing') : t('actions.refresh')}</span>
           </button>
 
           {/* Copy logs */}
@@ -165,10 +167,10 @@ export const ConsoleLogTab: React.FC = () => {
             className="btn btn-secondary btn-sm"
             onClick={handleCopyLogs}
             disabled={logs.length === 0}
-            title="Sao chép toàn bộ log đang hiển thị"
+            title={t('logs.copyTitle')}
           >
             {copied ? <IconCheck size={14} style={{ color: '#10b981' }} /> : <IconCopy size={14} />}
-            <span>{copied ? 'Đã sao chép' : 'Sao Chép'}</span>
+            <span>{copied ? t('actions.copied') : t('actions.copy')}</span>
           </button>
 
           {/* Clear logs */}
@@ -179,14 +181,14 @@ export const ConsoleLogTab: React.FC = () => {
                 className="btn btn-danger btn-sm"
                 onClick={handleClearLogs}
               >
-                Xác nhận xóa
+                {t('logs.clearConfirm')}
               </button>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => setClearConfirm(false)}
               >
-                Hủy
+                {t('actions.cancel')}
               </button>
             </div>
           ) : (
@@ -194,10 +196,10 @@ export const ConsoleLogTab: React.FC = () => {
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => setClearConfirm(true)}
-              title="Xóa bộ đệm log trong RAM"
+              title={t('logs.clearTitle')}
             >
               <IconTrash size={14} />
-              <span>Xóa Màn Hình</span>
+              <span>{t('logs.clearScreen')}</span>
             </button>
           )}
         </div>
@@ -224,7 +226,7 @@ export const ConsoleLogTab: React.FC = () => {
       >
         {/* Level Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Mức độ:</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>{t('logs.levelLabel')}</span>
           {(['all', 'INFO', 'WARN', 'ERROR', 'DEBUG'] as const).map((lvl) => {
             const isActive = levelFilter === lvl;
             let badgeCount = total;
@@ -247,7 +249,7 @@ export const ConsoleLogTab: React.FC = () => {
                   gap: 6,
                 }}
               >
-                <span>{lvl === 'all' ? 'Tất Cả' : lvl}</span>
+                <span>{lvl === 'all' ? t('logs.levelAll') : lvl}</span>
                 <span
                   style={{
                     fontSize: 10,
@@ -270,7 +272,7 @@ export const ConsoleLogTab: React.FC = () => {
           <div style={{ position: 'relative', width: 220 }}>
             <input
               type="text"
-              placeholder="Lọc từ khóa / module..."
+              placeholder={t('logs.filterPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
@@ -308,10 +310,10 @@ export const ConsoleLogTab: React.FC = () => {
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <option value={50}>50 dòng</option>
-            <option value={100}>100 dòng</option>
-            <option value={200}>200 dòng</option>
-            <option value={500}>500 dòng</option>
+            <option value={50}>{t('logs.linesCount', { count: 50 })}</option>
+            <option value={100}>{t('logs.linesCount', { count: 100 })}</option>
+            <option value={200}>{t('logs.linesCount', { count: 200 })}</option>
+            <option value={500}>{t('logs.linesCount', { count: 500 })}</option>
           </select>
 
           {/* Auto-scroll toggle */}
@@ -332,7 +334,7 @@ export const ConsoleLogTab: React.FC = () => {
               onChange={(e) => setAutoScroll(e.target.checked)}
               style={{ cursor: 'pointer' }}
             />
-            <span>Tự cuộn xuống</span>
+            <span>{t('logs.autoScroll')}</span>
           </label>
         </div>
       </div>
@@ -374,9 +376,9 @@ export const ConsoleLogTab: React.FC = () => {
             <span style={{ marginLeft: 8, color: '#e2e8f0', fontWeight: 600 }}>ezRouter System Output</span>
           </div>
           <div>
-            <span>Hiển thị: </span>
+            <span>{t('logs.displayCount')}</span>
             <strong style={{ color: '#38bdf8' }}>{logs.length}</strong>
-            <span> / {total} sự kiện</span>
+            <span>{t('logs.totalEvents', { total })}</span>
           </div>
         </div>
 
@@ -398,11 +400,11 @@ export const ConsoleLogTab: React.FC = () => {
           {loading && logs.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
               <div className="spinner" style={{ margin: '0 auto 12px' }} />
-              <p>Đang tải log hệ thống...</p>
+              <p>{t('logs.loadingLogs')}</p>
             </div>
           ) : logs.length === 0 ? (
             <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
-              <p>Không có log nào phù hợp với bộ lọc hiện tại.</p>
+              <p>{t('logs.emptyLogs')}</p>
               {searchQuery && (
                 <button
                   type="button"
@@ -410,7 +412,7 @@ export const ConsoleLogTab: React.FC = () => {
                   style={{ marginTop: 8 }}
                   onClick={() => setSearchQuery('')}
                 >
-                  Xóa bộ lọc tìm kiếm
+                  {t('logs.clearFilter')}
                 </button>
               )}
             </div>

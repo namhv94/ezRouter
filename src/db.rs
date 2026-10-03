@@ -54,6 +54,8 @@ pub struct AdminStats {
     pub avg_duration_ms: f64,
     pub error_count: i64,
     #[serde(default)]
+    pub quota_count: i64,
+    #[serde(default)]
     pub total_accounts: usize,
     #[serde(default)]
     pub active_accounts: usize,
@@ -73,10 +75,62 @@ pub struct ModelRequestSummary {
     pub requests: i64,
     pub ok: i64,
     pub errors: i64,
+    #[serde(default)]
+    pub quota_exhausted: i64,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub total_tokens: i64,
     pub avg_duration_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TokenPeriodStats {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
+    pub requests: i64,
+    pub error_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TokenPeriodsSummary {
+    pub today: TokenPeriodStats,
+    pub yesterday: TokenPeriodStats,
+    pub last_3_days: TokenPeriodStats,
+    pub last_7_days: TokenPeriodStats,
+    pub last_30_days: TokenPeriodStats,
+    pub all_time: TokenPeriodStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DailyTokenStat {
+    pub date: String,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_tokens: i64,
+    pub requests: i64,
+    pub error_count: i64,
+    pub avg_duration_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct TokenAnalyticsSummary {
+    pub total_tokens: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub total_requests: i64,
+    pub error_count: i64,
+    pub peak_day: Option<String>,
+    pub peak_tokens: i64,
+    pub avg_tokens_per_day: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TokenAnalyticsResponse {
+    pub period: String,
+    pub periods: TokenPeriodsSummary,
+    pub daily: Vec<DailyTokenStat>,
+    pub summary: TokenAnalyticsSummary,
 }
 
 pub fn mask_api_key(key: &str) -> String {
@@ -750,14 +804,15 @@ impl Database {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
 
-        let (total_requests, prompt_tokens, completion_tokens, avg_duration_ms, error_count) = conn
+        let (total_requests, prompt_tokens, completion_tokens, avg_duration_ms, error_count, quota_count) = conn
             .query_row(
                 "SELECT
                     COUNT(*) AS total_requests,
                     COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                     COALESCE(AVG(duration_ms), 0.0) AS avg_duration_ms,
-                    COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS error_count
+                    COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS error_count,
+                    COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0) AS quota_count
                  FROM request_log",
                 [],
                 |row| {
@@ -766,12 +821,14 @@ impl Database {
                     let completion_tokens: i64 = row.get(2)?;
                     let avg_duration_ms: f64 = row.get(3)?;
                     let error_count: i64 = row.get(4)?;
+                    let quota_count: i64 = row.get(5)?;
                     Ok((
                         total_requests,
                         prompt_tokens,
                         completion_tokens,
                         avg_duration_ms,
                         error_count,
+                        quota_count,
                     ))
                 },
             )?;
@@ -801,6 +858,7 @@ impl Database {
             total_tokens,
             avg_duration_ms: rounded_avg,
             error_count,
+            quota_count,
             total_accounts: 0,
             active_accounts: 0,
             cooldown_accounts: 0,
@@ -894,6 +952,7 @@ impl Database {
                     COUNT(*) AS requests,
                     COALESCE(SUM(CASE WHEN status IN ('ok', 'success') THEN 1 ELSE 0 END), 0) AS ok,
                     COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS errors,
+                    COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0) AS quota_exhausted,
                     COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                     COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                     COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
@@ -904,16 +963,17 @@ impl Database {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            let avg_duration_ms: f64 = row.get(7)?;
+            let avg_duration_ms: f64 = row.get(8)?;
             let rounded_avg = (avg_duration_ms * 100.0).round() / 100.0;
             Ok(ModelRequestSummary {
                 model: row.get(0)?,
                 requests: row.get(1)?,
                 ok: row.get(2)?,
                 errors: row.get(3)?,
-                prompt_tokens: row.get(4)?,
-                completion_tokens: row.get(5)?,
-                total_tokens: row.get(6)?,
+                quota_exhausted: row.get(4)?,
+                prompt_tokens: row.get(5)?,
+                completion_tokens: row.get(6)?,
+                total_tokens: row.get(7)?,
                 avg_duration_ms: rounded_avg,
             })
         })?;
@@ -923,6 +983,202 @@ impl Database {
             summaries.push(s?);
         }
         Ok(summaries)
+    }
+
+    pub fn get_token_analytics(
+        &self,
+        period: Option<&str>,
+    ) -> Result<TokenAnalyticsResponse, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+
+        let periods_sql = "
+            WITH daily_grouped AS (
+                SELECT
+                    date(datetime(timestamp, 'unixepoch', 'localtime')) AS d,
+                    COUNT(*) AS requests,
+                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                    COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
+                    COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS error_count
+                FROM request_log
+                GROUP BY d
+            )
+            SELECT
+                -- Today
+                COALESCE(SUM(CASE WHEN d = date('now', 'localtime') THEN prompt_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', 'localtime') THEN completion_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', 'localtime') THEN total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', 'localtime') THEN requests ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', 'localtime') THEN error_count ELSE 0 END), 0),
+
+                -- Yesterday
+                COALESCE(SUM(CASE WHEN d = date('now', '-1 day', 'localtime') THEN prompt_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', '-1 day', 'localtime') THEN completion_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', '-1 day', 'localtime') THEN total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', '-1 day', 'localtime') THEN requests ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d = date('now', '-1 day', 'localtime') THEN error_count ELSE 0 END), 0),
+
+                -- Last 3 days
+                COALESCE(SUM(CASE WHEN d >= date('now', '-2 days', 'localtime') THEN prompt_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-2 days', 'localtime') THEN completion_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-2 days', 'localtime') THEN total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-2 days', 'localtime') THEN requests ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-2 days', 'localtime') THEN error_count ELSE 0 END), 0),
+
+                -- Last 7 days
+                COALESCE(SUM(CASE WHEN d >= date('now', '-6 days', 'localtime') THEN prompt_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-6 days', 'localtime') THEN completion_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-6 days', 'localtime') THEN total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-6 days', 'localtime') THEN requests ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-6 days', 'localtime') THEN error_count ELSE 0 END), 0),
+
+                -- Last 30 days
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN prompt_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN completion_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN total_tokens ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN requests ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN error_count ELSE 0 END), 0),
+
+                -- All time
+                COALESCE(SUM(prompt_tokens), 0),
+                COALESCE(SUM(completion_tokens), 0),
+                COALESCE(SUM(total_tokens), 0),
+                COALESCE(SUM(requests), 0),
+                COALESCE(SUM(error_count), 0)
+            FROM daily_grouped;
+        ";
+
+        let periods = conn.query_row(periods_sql, [], |row| {
+            Ok(TokenPeriodsSummary {
+                today: TokenPeriodStats {
+                    prompt_tokens: row.get(0)?,
+                    completion_tokens: row.get(1)?,
+                    total_tokens: row.get(2)?,
+                    requests: row.get(3)?,
+                    error_count: row.get(4)?,
+                },
+                yesterday: TokenPeriodStats {
+                    prompt_tokens: row.get(5)?,
+                    completion_tokens: row.get(6)?,
+                    total_tokens: row.get(7)?,
+                    requests: row.get(8)?,
+                    error_count: row.get(9)?,
+                },
+                last_3_days: TokenPeriodStats {
+                    prompt_tokens: row.get(10)?,
+                    completion_tokens: row.get(11)?,
+                    total_tokens: row.get(12)?,
+                    requests: row.get(13)?,
+                    error_count: row.get(14)?,
+                },
+                last_7_days: TokenPeriodStats {
+                    prompt_tokens: row.get(15)?,
+                    completion_tokens: row.get(16)?,
+                    total_tokens: row.get(17)?,
+                    requests: row.get(18)?,
+                    error_count: row.get(19)?,
+                },
+                last_30_days: TokenPeriodStats {
+                    prompt_tokens: row.get(20)?,
+                    completion_tokens: row.get(21)?,
+                    total_tokens: row.get(22)?,
+                    requests: row.get(23)?,
+                    error_count: row.get(24)?,
+                },
+                all_time: TokenPeriodStats {
+                    prompt_tokens: row.get(25)?,
+                    completion_tokens: row.get(26)?,
+                    total_tokens: row.get(27)?,
+                    requests: row.get(28)?,
+                    error_count: row.get(29)?,
+                },
+            })
+        })?;
+
+        let p = period.unwrap_or("30d");
+        let (where_clause, normalized_period) = match p {
+            "today" => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) = date('now', 'localtime')", "today"),
+            "yesterday" => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) >= date('now', '-1 day', 'localtime')", "yesterday"),
+            "3d" => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) >= date('now', '-2 days', 'localtime')", "3d"),
+            "7d" | "1w" | "weekly" => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) >= date('now', '-6 days', 'localtime')", "7d"),
+            "14d" | "2w" => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) >= date('now', '-13 days', 'localtime')", "14d"),
+            "all" | "all_time" => ("", "all"),
+            _ => ("WHERE date(datetime(timestamp, 'unixepoch', 'localtime')) >= date('now', '-29 days', 'localtime')", "30d"),
+        };
+
+        let daily_sql = format!(
+            "SELECT
+                date(datetime(timestamp, 'unixepoch', 'localtime')) AS day,
+                COUNT(*) AS requests,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS error_count,
+                COALESCE(AVG(duration_ms), 0.0) AS avg_duration_ms
+             FROM request_log
+             {where_clause}
+             GROUP BY day
+             ORDER BY day ASC"
+        );
+
+        let mut stmt = conn.prepare(&daily_sql)?;
+        let rows = stmt.query_map([], |row| {
+            let avg_duration_ms: f64 = row.get(6)?;
+            let rounded_avg = (avg_duration_ms * 100.0).round() / 100.0;
+            Ok(DailyTokenStat {
+                date: row.get(0)?,
+                requests: row.get(1)?,
+                prompt_tokens: row.get(2)?,
+                completion_tokens: row.get(3)?,
+                total_tokens: row.get(4)?,
+                error_count: row.get(5)?,
+                avg_duration_ms: rounded_avg,
+            })
+        })?;
+
+        let mut daily = Vec::new();
+        let mut total_tokens: i64 = 0;
+        let mut prompt_tokens: i64 = 0;
+        let mut completion_tokens: i64 = 0;
+        let mut total_requests: i64 = 0;
+        let mut error_count: i64 = 0;
+        let mut peak_day: Option<String> = None;
+        let mut peak_tokens: i64 = 0;
+
+        for r in rows {
+            let item = r?;
+            total_tokens += item.total_tokens;
+            prompt_tokens += item.prompt_tokens;
+            completion_tokens += item.completion_tokens;
+            total_requests += item.requests;
+            error_count += item.error_count;
+            if item.total_tokens > peak_tokens {
+                peak_tokens = item.total_tokens;
+                peak_day = Some(item.date.clone());
+            }
+            daily.push(item);
+        }
+
+        let num_days = daily.len().max(1) as i64;
+        let avg_tokens_per_day = total_tokens / num_days;
+
+        let summary = TokenAnalyticsSummary {
+            total_tokens,
+            prompt_tokens,
+            completion_tokens,
+            total_requests,
+            error_count,
+            peak_day,
+            peak_tokens,
+            avg_tokens_per_day,
+        };
+
+        Ok(TokenAnalyticsResponse {
+            period: normalized_period.to_string(),
+            periods,
+            daily,
+            summary,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2218,6 +2474,72 @@ mod tests {
 
         assert_eq!(summary[1].model, "model-b");
         assert_eq!(summary[1].requests, 1);
+    }
+
+    #[test]
+    fn test_db_token_analytics() {
+        let db = Database::open_in_memory(None).unwrap();
+
+        // 1. Empty database verification
+        let empty_analytics = db.get_token_analytics(None).unwrap();
+        assert_eq!(empty_analytics.daily.len(), 0);
+        assert_eq!(empty_analytics.periods.today.total_tokens, 0);
+        assert_eq!(empty_analytics.periods.all_time.total_tokens, 0);
+        assert_eq!(empty_analytics.summary.total_tokens, 0);
+        assert_eq!(empty_analytics.summary.peak_day, None);
+
+        // 2. Insert requests: today and yesterday
+        let now_sec = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+        let yesterday_sec = now_sec - 86400.0;
+
+        // Today: 100 prompt + 50 completion = 150 total
+        db.record_request(
+            Some("acc-1"),
+            "model-a",
+            now_sec,
+            "ok",
+            100,
+            50,
+            120.0,
+            None,
+        )
+        .unwrap();
+
+        // Yesterday: 200 prompt + 100 completion = 300 total
+        db.record_request(
+            Some("acc-1"),
+            "model-b",
+            yesterday_sec,
+            "error",
+            200,
+            100,
+            240.0,
+            Some("fail"),
+        )
+        .unwrap();
+
+        let analytics = db.get_token_analytics(Some("30d")).unwrap();
+        assert_eq!(analytics.periods.today.prompt_tokens, 100);
+        assert_eq!(analytics.periods.today.completion_tokens, 50);
+        assert_eq!(analytics.periods.today.total_tokens, 150);
+        assert_eq!(analytics.periods.today.requests, 1);
+        assert_eq!(analytics.periods.today.error_count, 0);
+
+        assert_eq!(analytics.periods.yesterday.prompt_tokens, 200);
+        assert_eq!(analytics.periods.yesterday.completion_tokens, 100);
+        assert_eq!(analytics.periods.yesterday.total_tokens, 300);
+        assert_eq!(analytics.periods.yesterday.requests, 1);
+        assert_eq!(analytics.periods.yesterday.error_count, 1);
+
+        assert!(analytics.periods.last_3_days.total_tokens >= 450);
+        assert!(analytics.periods.last_7_days.total_tokens >= 450);
+        assert!(analytics.periods.last_30_days.total_tokens >= 450);
+        assert_eq!(analytics.periods.all_time.total_tokens, 450);
+        assert_eq!(analytics.summary.total_tokens, 450);
+        assert_eq!(analytics.summary.peak_tokens, 300);
     }
 
     #[test]

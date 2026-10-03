@@ -10,7 +10,7 @@ import urllib.error
 import os
 
 BASE_URL = os.environ.get("AG_BASE_URL", "http://127.0.0.1:20229")
-ADMIN_KEY = os.environ.get("AG_API_KEY", "ag-proxy-key")
+ADMIN_KEY = os.environ.get("AG_API_KEY", "namhv94")
 
 def audit_get_models():
     print("\n--- 1. Audit /v1/models ---")

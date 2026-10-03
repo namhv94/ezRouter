@@ -150,18 +150,19 @@ fn resolve_model_provider(
         None
     };
 
-    if external_prov.is_none() && state.models.get_model(target_model).is_none() {
+    let is_codex_model = crate::models::is_known_codex_model(target_model)
+        || state
+            .models
+            .get_model(target_model)
+            .map(|m| m.owned_by == "openai-codex")
+            .unwrap_or(false);
+
+    if external_prov.is_none() && !is_codex_model && state.models.get_model(target_model).is_none()
+    {
         return Err(AppError::NotFound(format!(
             "Model '{target_model}' not found"
         )));
     }
-
-    let is_codex_model = state
-        .models
-        .get_model(target_model)
-        .map(|m| m.owned_by == "openai-codex")
-        .unwrap_or(false)
-        || target_model.starts_with("cx/");
 
     let (chosen_provider, account_id_for_log, provider_display_name, masked_account_label) =
         if let Some(ref prov) = external_prov {
@@ -406,10 +407,28 @@ pub fn rewrite_sse_chunk(bytes: &Bytes, requested_model: &str) -> Bytes {
     }
 }
 
+pub fn classify_error_status(err: &AppError) -> &'static str {
+    let s = err.to_string().to_lowercase();
+    if s.contains("quota")
+        || s.contains("cooldown")
+        || s.contains("usage_limit")
+        || s.contains("429")
+        || s.contains("resource_exhausted")
+        || s.contains("rate_limit")
+        || s.contains("payment required")
+        || s.contains("credits")
+    {
+        "quota_exhausted"
+    } else {
+        "error"
+    }
+}
+
 pub struct LoggingChatStream {
     inner: BoxChatStream,
     logged: bool,
     start_time: Instant,
+    ttft_ms: Option<f64>,
     timestamp: f64,
     account_id: String,
     model: String,
@@ -430,6 +449,11 @@ impl Stream for LoggingChatStream {
         let this = self.as_mut().get_mut();
         match Pin::new(&mut this.inner).poll_next(cx) {
             std::task::Poll::Ready(Some(Ok(bytes))) => {
+                if this.ttft_ms.is_none() {
+                    let ms = this.start_time.elapsed().as_secs_f64() * 1000.0;
+                    this.ttft_ms = Some(ms);
+                    this.live_registry.record_first_token(&this.request_id, ms);
+                }
                 if let Some((pt, ct)) = extract_usage_from_bytes(&bytes) {
                     this.prompt_tokens = this.prompt_tokens.max(pt);
                     this.completion_tokens = this.completion_tokens.max(ct);
@@ -439,14 +463,15 @@ impl Stream for LoggingChatStream {
             std::task::Poll::Ready(Some(Err(err))) => {
                 if !this.logged {
                     this.logged = true;
-                    this.live_registry.finish(&this.request_id, "error");
+                    let status = classify_error_status(&err);
+                    this.live_registry.finish(&this.request_id, status);
                     let duration_ms = this.start_time.elapsed().as_secs_f64() * 1000.0;
                     spawn_log_completion(
                         this.db.clone(),
                         this.account_id.clone(),
                         this.model.clone(),
                         this.timestamp,
-                        "error",
+                        status,
                         this.prompt_tokens,
                         this.completion_tokens,
                         duration_ms,
@@ -765,6 +790,7 @@ pub async fn chat_completions(
                 inner: Box::pin(rewrite_stream),
                 logged: false,
                 start_time,
+                ttft_ms: None,
                 timestamp,
                 account_id: chosen_account_for_stream,
                 model: trimmed_model.to_string(),
@@ -786,16 +812,17 @@ pub async fn chat_completions(
         }
     }
 
-    state.live_registry.finish(&request_id, "error");
-    cancel_guard.completed = true;
-    let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
     let final_err = last_error
         .unwrap_or_else(|| AppError::NotFound(format!("Model '{trimmed_model}' not found")));
+    let status = classify_error_status(&final_err);
+    state.live_registry.finish(&request_id, status);
+    cancel_guard.completed = true;
+    let duration_ms = start_time.elapsed().as_secs_f64() * 1000.0;
     let _ = state.db.record_request(
         None,
         trimmed_model,
         timestamp,
-        "error",
+        status,
         0,
         0,
         duration_ms,

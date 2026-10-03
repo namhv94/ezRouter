@@ -16,7 +16,7 @@ async fn main() {
         .with(SystemLogLayer)
         .init();
 
-    info!("Initializing ezRouter service...");
+    info!("Initializing Router Rust service...");
 
     let config = match Config::from_env() {
         Ok(cfg) => cfg,

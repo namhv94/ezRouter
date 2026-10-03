@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModelEntry {
@@ -74,9 +77,29 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["gemini-3.1-pro-low", "ag/gemini-pro-low", "gemini-pro-low"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol", "gpt-6.1", "cx/gpt-6.1"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-sol",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-sol", "gpt-6", "cx/gpt-6"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-luna",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-luna"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-astra",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra", "astra", "cx/astra"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-5.6-sol",
         owned_by: "openai-codex",
-        aliases: &["gpt-5.6-sol"],
+        aliases: &["gpt-5.6-sol", "gpt-5.6", "cx/gpt-5.6"],
     },
     StaticModelDef {
         canonical_id: "cx/gpt-5.6-terra",
@@ -89,14 +112,19 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["gpt-5.6-luna"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-reserve",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-5.5",
         owned_by: "openai-codex",
         aliases: &["gpt-5.5"],
     },
     StaticModelDef {
-        canonical_id: "cx/gpt-6-astra",
+        canonical_id: "cx/codex-auto-review",
         owned_by: "openai-codex",
-        aliases: &["gpt-6-astra", "astra"],
+        aliases: &["codex-auto-review"],
     },
 ];
 
@@ -161,6 +189,97 @@ impl ModelRegistry {
     }
 }
 
+struct CodexCacheState {
+    last_mtime: Option<SystemTime>,
+    cached_models: Vec<ModelEntry>,
+}
+
+static CODEX_CACHE: Mutex<Option<CodexCacheState>> = Mutex::new(None);
+
+pub fn resolve_codex_models_cache_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("CODEX_MODELS_CACHE_PATH") {
+        let p = PathBuf::from(path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(codex_home) = std::env::var("CODEX_HOME") {
+        let p = PathBuf::from(codex_home).join("models_cache.json");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let p = PathBuf::from(home).join(".codex/models_cache.json");
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+pub fn get_cached_codex_models() -> Vec<ModelEntry> {
+    let path = match resolve_codex_models_cache_path() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+
+    let current_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+
+    if let Ok(guard) = CODEX_CACHE.lock() {
+        if let Some(ref state) = *guard {
+            if state.last_mtime.is_some() && state.last_mtime == current_mtime {
+                return state.cached_models.clone();
+            }
+        }
+    }
+
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let parsed: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut models = Vec::new();
+    if let Some(models_arr) = parsed.get("models").and_then(|m| m.as_array()) {
+        for m in models_arr {
+            if let Some(slug) = m.get("slug").and_then(|s| s.as_str()) {
+                let id = format!("cx/{slug}");
+                models.push(ModelEntry {
+                    id,
+                    object: "model".to_string(),
+                    created: DEFAULT_CREATED_TIMESTAMP,
+                    owned_by: "openai-codex".to_string(),
+                });
+            }
+        }
+    }
+
+    if let Ok(mut guard) = CODEX_CACHE.lock() {
+        *guard = Some(CodexCacheState {
+            last_mtime: current_mtime,
+            cached_models: models.clone(),
+        });
+    }
+
+    models
+}
+
+pub fn is_known_codex_model(target_model: &str) -> bool {
+    if target_model.starts_with("cx/") {
+        return true;
+    }
+    let stripped = target_model.strip_prefix("cx/").unwrap_or(target_model);
+    let dynamic = get_cached_codex_models();
+    dynamic
+        .iter()
+        .any(|m| m.id == target_model || m.id.strip_prefix("cx/").unwrap_or(&m.id) == stripped)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +291,7 @@ mod tests {
         let list_resp = registry.list_models();
 
         assert_eq!(list_resp.object, "list");
-        assert_eq!(list_resp.data.len(), 13);
+        assert_eq!(list_resp.data.len(), 18);
 
         let mut seen_ids = HashSet::new();
         for entry in &list_resp.data {
@@ -202,7 +321,12 @@ mod tests {
         assert!(ids.contains(&"ag/gemini-pro-agent"));
         assert!(ids.contains(&"ag/gemini-3.1-pro-low"));
         assert!(ids.contains(&"cx/gpt-5.6-sol"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol"));
+        assert!(ids.contains(&"cx/gpt-6-sol"));
+        assert!(ids.contains(&"cx/gpt-6-luna"));
         assert!(ids.contains(&"cx/gpt-6-astra"));
+        assert!(ids.contains(&"cx/gpt-reserve"));
+        assert!(ids.contains(&"cx/codex-auto-review"));
         assert!(!ids.contains(&"gemini-3.8-flash-high"));
         assert!(!ids.contains(&"gemini-pro-agent"));
         assert!(!ids.contains(&"ag/gemini-3.1-pro"));
@@ -211,6 +335,9 @@ mod tests {
         assert!(!ids.contains(&"gemini-3.1-pro-high"));
         assert!(!ids.contains(&"gemini-3.1-pro-low"));
         assert!(!ids.contains(&"gpt-5.6-sol"));
+        assert!(!ids.contains(&"gpt-6.1-sol"));
+        assert!(!ids.contains(&"gpt-6-sol"));
+        assert!(!ids.contains(&"gpt-6-luna"));
         assert!(!ids.contains(&"ag/gemini-3.8-flash"));
         assert!(!ids.contains(&"gemini-3.8-flash"));
         // Commercial Gemini Pro names are intentionally omitted from static catalog (served via external provider gemini/*).
@@ -236,6 +363,30 @@ mod tests {
         let alias_model = registry.get_model("gpt-5.6-sol");
         assert!(alias_model.is_some());
         assert_eq!(alias_model.unwrap().owned_by, "openai-codex");
+        assert!(registry.get_model("gpt-5.6").is_some());
+        assert!(registry.get_model("cx/gpt-5.6").is_some());
+
+        // Codex GPT-6.1, GPT-6, Astra, Reserve lookups
+        let m_61 = registry.get_model("cx/gpt-6.1-sol");
+        assert!(m_61.is_some());
+        assert_eq!(m_61.unwrap().owned_by, "openai-codex");
+        assert!(registry.get_model("gpt-6.1-sol").is_some());
+        assert!(registry.get_model("gpt-6.1").is_some());
+        assert!(registry.get_model("cx/gpt-6.1").is_some());
+        assert!(registry.get_model("cx/gpt-6-sol").is_some());
+        assert!(registry.get_model("gpt-6-sol").is_some());
+        assert!(registry.get_model("gpt-6").is_some());
+        assert!(registry.get_model("cx/gpt-6").is_some());
+        assert!(registry.get_model("cx/gpt-6-luna").is_some());
+        assert!(registry.get_model("gpt-6-luna").is_some());
+        assert!(registry.get_model("cx/gpt-6-astra").is_some());
+        assert!(registry.get_model("gpt-6-astra").is_some());
+        assert!(registry.get_model("astra").is_some());
+        assert!(registry.get_model("cx/astra").is_some());
+        assert!(registry.get_model("cx/gpt-reserve").is_some());
+        assert!(registry.get_model("gpt-reserve").is_some());
+        assert!(registry.get_model("cx/codex-auto-review").is_some());
+        assert!(registry.get_model("codex-auto-review").is_some());
 
         // Gemini Pro agent canonical and alias lookup
         let m_agent = registry.get_model("ag/gemini-pro-agent");
@@ -261,5 +412,48 @@ mod tests {
         assert!(registry.get_model("ag/gemini-pro").is_none());
         assert!(registry.get_model("ag/gemini-2.5-pro").is_none());
         assert!(registry.get_model("gemini-pro").is_none());
+    }
+
+    #[test]
+    fn test_dynamic_codex_models_from_cache_and_passthrough() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("test_codex_cache_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let cache_file = temp_dir.join("models_cache.json");
+
+        let json_payload = serde_json::json!({
+            "models": [
+                {
+                    "slug": "gpt-future-v1",
+                    "display_name": "GPT Future V1",
+                    "description": "Next gen model"
+                },
+                {
+                    "slug": "gpt-omni-coding",
+                    "display_name": "Omni Coding",
+                    "description": "Specialized coding"
+                }
+            ]
+        });
+
+        std::fs::write(&cache_file, serde_json::to_string(&json_payload).unwrap()).unwrap();
+        std::env::set_var("CODEX_MODELS_CACHE_PATH", cache_file.to_str().unwrap());
+
+        let cached = get_cached_codex_models();
+        assert!(cached.iter().any(|m| m.id == "cx/gpt-future-v1"));
+        assert!(cached.iter().any(|m| m.id == "cx/gpt-omni-coding"));
+
+        // is_known_codex_model tests
+        assert!(is_known_codex_model("cx/gpt-future-v1"));
+        assert!(is_known_codex_model("gpt-future-v1"));
+        assert!(is_known_codex_model("cx/gpt-omni-coding"));
+        assert!(is_known_codex_model("gpt-omni-coding"));
+        // Passthrough for any cx/*
+        assert!(is_known_codex_model("cx/any-brand-new-model"));
+        // Unknown non-cx model is false
+        assert!(!is_known_codex_model("nonexistent-unprefixed-model"));
+
+        std::env::remove_var("CODEX_MODELS_CACHE_PATH");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

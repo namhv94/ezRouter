@@ -53,6 +53,8 @@ pub struct ActiveRequestItem {
     pub started_at: f64,
     pub elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub ttft_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<f64>,
 }
 
@@ -99,6 +101,7 @@ impl ActiveRequestRegistry {
             stream,
             started_at: now,
             elapsed_ms: 0,
+            ttft_ms: None,
             completed_at: None,
         };
 
@@ -114,6 +117,17 @@ impl ActiveRequestRegistry {
                 item.model = model.to_string();
                 item.account = account.to_string();
                 item.status = "generating".to_string();
+            }
+        }
+    }
+
+    pub fn record_first_token(&self, id: &str, ttft_ms: f64) {
+        if let Ok(mut map) = self.requests.write() {
+            if let Some(item) = map.get_mut(id) {
+                if item.ttft_ms.is_none() {
+                    item.ttft_ms = Some((ttft_ms * 10.0).round() / 10.0);
+                    item.status = "generating".to_string();
+                }
             }
         }
     }

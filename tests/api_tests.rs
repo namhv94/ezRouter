@@ -151,8 +151,17 @@ async fn test_models_list_canonical_and_unique() {
     // Exact assertions matching Python test_models.py
     assert!(ids.contains(&"ag/gemini-3.8-flash-high"));
     assert!(ids.contains(&"cx/gpt-5.6-sol"));
+    assert!(ids.contains(&"cx/gpt-6.1-sol"));
+    assert!(ids.contains(&"cx/gpt-6-sol"));
+    assert!(ids.contains(&"cx/gpt-6-luna"));
+    assert!(ids.contains(&"cx/gpt-6-astra"));
+    assert!(ids.contains(&"cx/gpt-reserve"));
+    assert!(ids.contains(&"cx/codex-auto-review"));
     assert!(!ids.contains(&"gemini-3.8-flash-high"));
     assert!(!ids.contains(&"gpt-5.6-sol"));
+    assert!(!ids.contains(&"gpt-6.1-sol"));
+    assert!(!ids.contains(&"gpt-6-sol"));
+    assert!(!ids.contains(&"gpt-6-luna"));
     assert!(!ids.contains(&"ag/gemini-3.8-flash"));
     assert!(!ids.contains(&"gemini-3.8-flash"));
 }
@@ -636,7 +645,7 @@ fn test_staging_isolation_enforcement() {
         .contains("20129 is reserved for production"));
 
     // Rejects production data directory
-    let res = Config::parse(None, None, Some("/var/test/.ag-proxy".to_string()), None);
+    let res = Config::parse(None, None, Some("/home/namhv/.ag-proxy".to_string()), None);
     assert!(res.is_err());
     assert!(res
         .err()
@@ -646,7 +655,10 @@ fn test_staging_isolation_enforcement() {
     // Default staging port and data dir
     let cfg = Config::parse(None, None, None, None).unwrap();
     assert_eq!(cfg.port, 20229);
-    assert_eq!(cfg.data_dir, PathBuf::from("./data"));
+    assert_eq!(
+        cfg.data_dir,
+        PathBuf::from("/home/namhv/.ag-proxy-rust-staging")
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -1761,7 +1773,12 @@ impl Provider for Phase3bFailingProvider {
 async fn test_phase3b_admin_endpoints_auth_protection() {
     let app = app_router(test_state());
 
-    let admin_paths = ["/admin/stats", "/admin/requests", "/admin/request-summary"];
+    let admin_paths = [
+        "/admin/stats",
+        "/admin/requests",
+        "/admin/request-summary",
+        "/admin/token-analytics",
+    ];
 
     for path in admin_paths {
         // 1. Missing auth
@@ -1935,6 +1952,24 @@ async fn test_phase3b_request_logging_lifecycle_success_and_stats() {
     assert_eq!(sum_arr[0]["errors"], 0);
     assert_eq!(sum_arr[0]["prompt_tokens"], 9);
     assert_eq!(sum_arr[0]["completion_tokens"], 31);
+
+    // 6. Verify /admin/token-analytics
+    let req = Request::builder()
+        .uri("/admin/token-analytics?period=30d")
+        .method("GET")
+        .header(AUTHORIZATION, "Bearer p3b-auth-key")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let analytics: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(analytics["period"], "30d");
+    assert_eq!(analytics["summary"]["total_requests"], 2);
+    assert_eq!(analytics["summary"]["prompt_tokens"], 9);
+    assert_eq!(analytics["summary"]["completion_tokens"], 31);
+    assert_eq!(analytics["summary"]["total_tokens"], 40);
+    assert_eq!(analytics["periods"]["today"]["total_tokens"], 40);
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -5048,6 +5083,44 @@ async fn test_phase4c_codex_admin_crud_and_toggle() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
+    // Fetch reset credits
+    let req = Request::builder()
+        .uri(format!("/admin/codex/accounts/{acc_id}/reset-credits"))
+        .method("GET")
+        .header(AUTHORIZATION, "Bearer p4c-key")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let credits_body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(credits_body.get("ok").is_some());
+    assert!(credits_body["data"]["available_count"].is_number());
+
+    // Consume reset credit
+    let req = Request::builder()
+        .uri(format!(
+            "/admin/codex/accounts/{acc_id}/consume-reset-credit"
+        ))
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer p4c-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"credit_id":"mock-credit-1"}"#))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let consume_body: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(consume_body.get("ok").is_some());
+
     // Delete account
     let req = Request::builder()
         .uri(format!("/admin/codex/accounts/{acc_id}"))
@@ -6326,7 +6399,7 @@ async fn test_public_auth_routes_and_admin_google_oauth() {
 
     // 1. GET /auth/login returns HTML with Google login link
     let req = Request::builder()
-        .uri("/auth/login?origin=https://router.example.com")
+        .uri("/auth/login?origin=https://router.namhv.vip")
         .method("GET")
         .body(Body::empty())
         .unwrap();
@@ -6593,7 +6666,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
                 (
                     StatusCode::OK,
                     [("content-type", "application/json")],
-                    r#"{"email":"google-tester@example.com","id":"12345678"}"#,
+                    r#"{"email":"google-tester@namhv.vip","id":"12345678"}"#,
                 )
                     .into_response()
             }),
@@ -6612,7 +6685,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
 
     // 5. Full public callback URL parsing & successful manual exchange
     let full_callback_url = format!(
-        "https://router.example.com/auth/callback?code=mock-good-code-123&state={}&scope=email+profile#something",
+        "https://router.namhv.vip/auth/callback?code=mock-good-code-123&state={}&scope=email+profile#something",
         state1
     );
 
@@ -6638,7 +6711,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
     .unwrap();
 
     assert_eq!(json["ok"], true);
-    assert_eq!(json["email"], "google-tester@example.com");
+    assert_eq!(json["email"], "google-tester@namhv.vip");
     assert_eq!(json["is_new"], true);
     assert_eq!(json["action"], "created");
     assert!(!json["account_id"].as_str().unwrap().is_empty());
@@ -6691,13 +6764,13 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
     )
     .unwrap();
     assert_eq!(json["ok"], true);
-    assert_eq!(json["email"], "google-tester@example.com");
+    assert_eq!(json["email"], "google-tester@namhv.vip");
     assert_eq!(json["is_new"], false);
     assert_eq!(json["action"], "updated");
 
     // 5c. Public callback flow preserves origin in state and redirects to origin/auth/success with is_new
     let req = Request::builder()
-        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Frouter.example.com")
+        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Frouter.namhv.vip")
         .method("POST")
         .header(AUTHORIZATION, "Bearer test-secret-key")
         .body(Body::empty())
@@ -6710,7 +6783,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
     )
     .unwrap();
     let state_public = json["state"].as_str().unwrap().to_string();
-    assert!(state_public.starts_with("https://router.example.com|"));
+    assert!(state_public.starts_with("https://router.namhv.vip|"));
 
     let req = Request::builder()
         .uri(format!(
@@ -6723,7 +6796,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::SEE_OTHER);
     let location = res.headers().get("location").unwrap().to_str().unwrap();
-    assert!(location.starts_with("https://router.example.com/auth/success?email="));
+    assert!(location.starts_with("https://router.namhv.vip/auth/success?email="));
     assert!(location.contains("is_new="));
 
     // 6. Replay protection: attempting to reuse the same state fails

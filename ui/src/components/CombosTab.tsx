@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ComboRecord, ModelEntry } from '../types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlus,
   IconCheck,
@@ -11,6 +12,7 @@ import {
 } from '../icons';
 
 export const CombosTab: React.FC = () => {
+  const { t } = useI18n();
   const [combos, setCombos] = useState<ComboRecord[]>([]);
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,7 +43,7 @@ export const CombosTab: React.FC = () => {
       setCombos(combosRes);
       setModels(modelsRes.data || []);
     } catch (err: any) {
-      setError(err?.message || 'Không thể tải dữ liệu điều phối');
+      setError(err?.message || t('combos.msgLoadError'));
     } finally {
       setLoading(false);
     }
@@ -75,11 +77,11 @@ export const CombosTab: React.FC = () => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setActionMessage({ type: 'error', text: 'Vui lòng nhập tên Combo.' });
+      setActionMessage({ type: 'error', text: t('combos.msgNameRequired') });
       return;
     }
     if (selectedModels.length === 0) {
-      setActionMessage({ type: 'error', text: 'Vui lòng chọn ít nhất 1 model cho combo.' });
+      setActionMessage({ type: 'error', text: t('combos.msgMinModel') });
       return;
     }
 
@@ -92,34 +94,34 @@ export const CombosTab: React.FC = () => {
           strategy,
           models: selectedModels,
         });
-        setActionMessage({ type: 'success', text: `Đã cập nhật combo "${name}".` });
+        setActionMessage({ type: 'success', text: t('combos.msgUpdateSuccess', { name }) });
       } else {
         await api.createCombo({
           name: name.trim(),
           strategy,
           models: selectedModels,
         });
-        setActionMessage({ type: 'success', text: `Đã tạo combo "${name}".` });
+        setActionMessage({ type: 'success', text: t('combos.msgCreateSuccess', { name }) });
       }
       setShowModal(false);
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi lưu thông tin combo.' });
+      setActionMessage({ type: 'error', text: err?.message || t('combos.msgSaveError') });
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDelete = async (c: ComboRecord) => {
-    if (!window.confirm(`Xác nhận xóa combo điều phối "${c.name}"?`)) return;
+    if (!window.confirm(t('combos.confirmDelete', { name: c.name }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteCombo(c.id);
-      setActionMessage({ type: 'success', text: `Đã xóa combo "${c.name}".` });
+      setActionMessage({ type: 'success', text: t('combos.msgDeleteSuccess', { name: c.name }) });
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa combo.' });
+      setActionMessage({ type: 'error', text: err?.message || t('combos.msgDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -163,14 +165,14 @@ export const CombosTab: React.FC = () => {
     <div>
       <div className="section-header">
         <div>
-          <h2 className="section-title">Cấu Hình Combo Model</h2>
+          <h2 className="section-title">{t('combos.title')}</h2>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Định tuyến dự phòng (Fallback) hoặc cân bằng tải vòng tròn (Round-Robin) giữa các upstream
+            {t('combos.subtitle')}
           </span>
         </div>
         <button className="btn btn-primary" onClick={openAddModal}>
           <IconPlus size={16} />
-          <span>Tạo Combo Mới</span>
+          <span>{t('combos.createCombo')}</span>
         </button>
       </div>
 
@@ -192,31 +194,31 @@ export const CombosTab: React.FC = () => {
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="section-header">
           <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
-            Danh Sách Combo
+            {t('combos.combosListTitle')}
           </h3>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {combos.length} cấu hình đã thiết lập
+            {t('combos.combosCount', { count: combos.length })}
           </span>
         </div>
 
         {loading && combos.length === 0 ? (
           <div className="state-container">
             <div className="spinner" />
-            <p>Đang tải danh sách combo...</p>
+            <p>{t('combos.loading')}</p>
           </div>
         ) : combos.length === 0 ? (
           <div className="state-container">
-            <p>Chưa có cấu hình combo nào. Nhấn "Tạo Combo Mới" để thiết lập.</p>
+            <p>{t('combos.empty')}</p>
           </div>
         ) : (
           <div className="table-container">
             <table>
               <thead>
                 <tr>
-                  <th>Tên Combo</th>
-                  <th>Chiến Lược</th>
-                  <th>Models Thành Viên</th>
-                  <th>Hành Động</th>
+                  <th>{t('combos.thName')}</th>
+                  <th>{t('combos.thStrategy')}</th>
+                  <th>{t('combos.thModels')}</th>
+                  <th>{t('combos.thActions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -242,7 +244,7 @@ export const CombosTab: React.FC = () => {
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {mList.length === 0 ? (
-                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Chưa có model</span>
+                            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('combos.noModels')}</span>
                           ) : (
                             mList.map((m, idx) => (
                               <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -268,7 +270,8 @@ export const CombosTab: React.FC = () => {
                           <button
                             className="btn btn-secondary btn-sm btn-icon-only"
                             onClick={() => openEditModal(c)}
-                            title="Sửa combo"
+                            title={t('combos.editTitle')}
+                            aria-label={t('combos.editTitle')}
                           >
                             <IconEdit size={14} />
                           </button>
@@ -276,7 +279,8 @@ export const CombosTab: React.FC = () => {
                             className="btn btn-danger btn-sm btn-icon-only"
                             onClick={() => handleDelete(c)}
                             disabled={actionLoading}
-                            title="Xóa combo"
+                            title={t('combos.deleteTitle')}
+                            aria-label={t('combos.deleteTitle')}
                           >
                             <IconTrash size={14} />
                           </button>
@@ -296,29 +300,29 @@ export const CombosTab: React.FC = () => {
         <div className="section-header">
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Danh Sách Model Khả Dụng (/v1/models)
+              {t('combos.availableModelsTitle')}
             </h3>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-              Các model được phát hiện từ Antigravity, Codex và Upstream Providers
+              {t('combos.availableModelsSubtitle')}
             </span>
           </div>
-          <span className="badge badge-neutral font-mono">{models.length} models</span>
+          <span className="badge badge-neutral font-mono">{t('combos.modelsCount', { count: models.length })}</span>
         </div>
 
         <div className="table-container">
           <table>
             <thead>
               <tr>
-                <th>Mã Model (ID)</th>
-                <th>Phân Loại</th>
-                <th>Nguồn Cung Cấp</th>
+                <th>{t('combos.thModelId')}</th>
+                <th>{t('combos.thModelCategory')}</th>
+                <th>{t('combos.thModelSource')}</th>
               </tr>
             </thead>
             <tbody>
               {models.length === 0 ? (
                 <tr>
                   <td colSpan={3} style={{ textAlign: 'center', padding: 24 }}>
-                    Chưa có model nào trong bộ định tuyến.
+                    {t('combos.emptyModels')}
                   </td>
                 </tr>
               ) : (
@@ -346,10 +350,11 @@ export const CombosTab: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowModal(false)}>
           <div className="modal-card" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">{editingCombo ? 'Sửa Combo Điều Phối' : 'Tạo Combo Mới'}</h3>
+              <h3 className="modal-title">{editingCombo ? t('combos.modalTitleEdit') : t('combos.modalTitleCreate')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowModal(false)}
+                aria-label={t('actions.close')}
               >
                 <IconX size={16} />
               </button>
@@ -357,10 +362,10 @@ export const CombosTab: React.FC = () => {
 
             <form onSubmit={handleSave}>
               <div className="form-group">
-                <label>Tên Combo</label>
+                <label>{t('combos.labelName')}</label>
                 <input
                   type="text"
-                  placeholder="VD: combo-fast, auto-fallback"
+                  placeholder={t('combos.namePlaceholder')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -368,15 +373,15 @@ export const CombosTab: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label>Chiến Lược Điều Phối</label>
+                <label>{t('combos.labelStrategy')}</label>
                 <select value={strategy} onChange={(e) => setStrategy(e.target.value)}>
-                  <option value="round-robin">Round-Robin (Cân bằng tải xoay vòng)</option>
-                  <option value="fallback">Fallback (Ưu tiên theo thứ tự, lỗi chuyển tiếp)</option>
+                  <option value="round-robin">{t('combos.optRoundRobin')}</option>
+                  <option value="fallback">{t('combos.optFallback')}</option>
                 </select>
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4, display: 'block' }}>
                   {strategy === 'fallback'
-                    ? '💡 Model #1 được gọi trước. Nếu lỗi hoặc hết quota, router tự động chuyển sang Model #2, #3 theo đúng thứ tự.'
-                    : '💡 Yêu cầu mới sẽ được luân phiên phân bổ lần lượt qua từng model theo thứ tự vòng tròn.'}
+                    ? t('combos.hintFallback')
+                    : t('combos.hintRoundRobin')}
                 </span>
               </div>
 
@@ -384,7 +389,7 @@ export const CombosTab: React.FC = () => {
               <div className="form-group">
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <label style={{ marginBottom: 0 }}>
-                    Thứ Tự Ưu Tiên Các Model Đã Chọn ({selectedModels.length})
+                    {t('combos.labelSelectedModels', { count: selectedModels.length })}
                   </label>
                   {selectedModels.length > 0 && (
                     <button
@@ -393,7 +398,7 @@ export const CombosTab: React.FC = () => {
                       onClick={() => setSelectedModels([])}
                       style={{ fontSize: 11, padding: '2px 8px' }}
                     >
-                      Bỏ chọn tất cả
+                      {t('combos.clearAll')}
                     </button>
                   )}
                 </div>
@@ -410,7 +415,7 @@ export const CombosTab: React.FC = () => {
                       textAlign: 'center',
                     }}
                   >
-                    Chưa có model nào được chọn. Hãy tích chọn từ danh sách bên dưới.
+                    {t('combos.noModelsSelected')}
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflowY: 'auto' }}>
@@ -450,12 +455,12 @@ export const CombosTab: React.FC = () => {
                           </span>
                           {idx === 0 && strategy === 'fallback' && (
                             <span className="badge badge-success" style={{ fontSize: 10, flexShrink: 0 }}>
-                              Chính
+                              {t('combos.badgePrimary')}
                             </span>
                           )}
                           {idx > 0 && strategy === 'fallback' && (
                             <span className="badge badge-neutral" style={{ fontSize: 10, flexShrink: 0 }}>
-                              Dự phòng {idx}
+                              {t('combos.badgeFallback', { idx })}
                             </span>
                           )}
                         </div>
@@ -466,7 +471,8 @@ export const CombosTab: React.FC = () => {
                             className="btn btn-secondary btn-sm btn-icon-only"
                             onClick={() => moveModelUp(idx)}
                             disabled={idx === 0}
-                            title="Di chuyển lên vị trí ưu tiên hơn"
+                            title={t('combos.btnMoveUp')}
+                            aria-label={t('combos.btnMoveUp')}
                             style={{ width: 26, height: 26, padding: 0 }}
                           >
                             ▲
@@ -476,7 +482,8 @@ export const CombosTab: React.FC = () => {
                             className="btn btn-secondary btn-sm btn-icon-only"
                             onClick={() => moveModelDown(idx)}
                             disabled={idx === selectedModels.length - 1}
-                            title="Di chuyển xuống vị trí dự phòng sau"
+                            title={t('combos.btnMoveDown')}
+                            aria-label={t('combos.btnMoveDown')}
                             style={{ width: 26, height: 26, padding: 0 }}
                           >
                             ▼
@@ -485,7 +492,8 @@ export const CombosTab: React.FC = () => {
                             type="button"
                             className="btn btn-danger btn-sm btn-icon-only"
                             onClick={() => removeSelectedModel(modelId)}
-                            title="Gỡ khỏi combo"
+                            title={t('combos.btnRemove')}
+                            aria-label={t('combos.btnRemove')}
                             style={{ width: 26, height: 26, padding: 0 }}
                           >
                             ✕
@@ -498,10 +506,10 @@ export const CombosTab: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label>Tìm & Chọn Thêm Model</label>
+                <label>{t('combos.labelSearch')}</label>
                 <input
                   type="text"
-                  placeholder="Tìm kiếm model..."
+                  placeholder={t('combos.searchPlaceholder')}
                   value={modelSearch}
                   onChange={(e) => setModelSearch(e.target.value)}
                   style={{ marginBottom: 8 }}
@@ -534,10 +542,10 @@ export const CombosTab: React.FC = () => {
                   className="btn btn-secondary"
                   onClick={() => setShowModal(false)}
                 >
-                  Hủy
+                  {t('actions.cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : editingCombo ? 'Cập Nhật' : 'Tạo Mới'}
+                  {actionLoading ? <div className="spinner" /> : editingCombo ? t('combos.btnUpdate') : t('combos.btnCreate')}
                 </button>
               </div>
             </form>

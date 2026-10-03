@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_PORT: u16 = 20229;
 pub const PROD_FORBIDDEN_PORT: u16 = 20129;
-pub const DEFAULT_DATA_DIR: &str = "./data";
+pub const DEFAULT_DATA_DIR: &str = "/home/namhv/.ag-proxy-rust-staging";
 pub const PROD_DATA_DIR_SUFFIX: &str = ".ag-proxy";
 pub const DEFAULT_API_KEY: &str = "ag-proxy-key";
 
@@ -192,17 +192,23 @@ impl Config {
             use_mock_provider,
         )?;
 
-        if let Ok(val) = env::var("AG_UPSTREAM_CONNECT_TIMEOUT_SECS") {
+        if let Ok(val) = env::var("AG_UPSTREAM_CONNECT_TIMEOUT_SECS")
+            .or_else(|_| env::var("UPSTREAM_CONNECT_TIMEOUT_SECS"))
+        {
             if let Ok(secs) = val.parse::<u64>() {
                 cfg.upstream_connect_timeout_secs = secs;
             }
         }
-        if let Ok(val) = env::var("AG_UPSTREAM_READ_TIMEOUT_SECS") {
+        if let Ok(val) = env::var("AG_UPSTREAM_READ_TIMEOUT_SECS")
+            .or_else(|_| env::var("UPSTREAM_READ_TIMEOUT_SECS"))
+        {
             if let Ok(secs) = val.parse::<u64>() {
                 cfg.upstream_read_timeout_secs = secs;
             }
         }
-        if let Ok(val) = env::var("AG_UPSTREAM_REQUEST_TIMEOUT_SECS") {
+        if let Ok(val) = env::var("AG_UPSTREAM_REQUEST_TIMEOUT_SECS")
+            .or_else(|_| env::var("UPSTREAM_REQUEST_TIMEOUT_SECS"))
+        {
             if let Ok(secs) = val.parse::<u64>() {
                 cfg.upstream_request_timeout_secs = secs;
             }
@@ -254,7 +260,10 @@ mod tests {
     fn test_default_config() {
         let cfg = Config::parse(None, None, None, None).expect("default config should succeed");
         assert_eq!(cfg.port, 20229);
-        assert_eq!(cfg.data_dir, PathBuf::from("./data"));
+        assert_eq!(
+            cfg.data_dir,
+            PathBuf::from("/home/namhv/.ag-proxy-rust-staging")
+        );
         assert_eq!(cfg.host, "127.0.0.1");
         assert_eq!(cfg.api_key, "ag-proxy-key");
         assert_eq!(cfg.upstream_base_url, None);
@@ -299,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_rejects_production_data_dir() {
-        let res = Config::parse(None, None, Some("/var/test/.ag-proxy".to_string()), None);
+        let res = Config::parse(None, None, Some("/home/namhv/.ag-proxy".to_string()), None);
         assert!(res.is_err());
         let err = res.err().unwrap();
         assert!(err.contains("conflicts with production ag-proxy"));
@@ -307,7 +316,7 @@ mod tests {
         let res_sub = Config::parse(
             None,
             None,
-            Some("/var/test/.ag-proxy/sub".to_string()),
+            Some("/home/namhv/.ag-proxy/sub".to_string()),
             None,
         );
         assert!(res_sub.is_err());

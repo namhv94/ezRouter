@@ -1,5 +1,5 @@
 {
-  "name": "ezrouter-ui",
+  "name": "ag-proxy-rust-ui",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node scripts/verify-mobile-css.cjs && node scripts/verify-overview-metrics.cjs && node scripts/verify-model-dropdown.cjs && node scripts/verify-token-saver-tab.cjs && node scripts/verify-pipeline-flow.cjs && node scripts/verify-quota-formatting.cjs"
+    "verify:i18n": "node scripts/verify-i18n.cjs",
+    "test": "node scripts/verify-mobile-css.cjs && node scripts/verify-overview-metrics.cjs && node scripts/verify-model-dropdown.cjs && node scripts/verify-token-saver-tab.cjs && node scripts/verify-pipeline-flow.cjs && node scripts/verify-quota-formatting.cjs && node scripts/verify-i18n.cjs"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useI18n } from '../i18n';
 import {
   IconCopy,
   IconCheck,
@@ -11,14 +12,13 @@ import {
 } from '../icons';
 
 export const IntegrationTab: React.FC = () => {
+  const { t } = useI18n();
   const [apiKey, setApiKey] = useState('ag-proxy-key');
   const [selectedModel, setSelectedModel] = useState<string>('ag/gemini-3.8-flash-high');
   const [activeTab, setActiveTab] = useState<'hermes' | 'codex' | 'python' | 'curl' | 'node'>('hermes');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const baseUrl = typeof window !== 'undefined' && window.location.origin
-    ? `${window.location.origin}/v1`
-    : 'http://localhost:20229/v1';
+  const baseUrl = 'https://router.namhv.vip/v1';
 
   const copyToClipboard = async (text: string, id: string) => {
     try {
@@ -228,9 +228,9 @@ callRouter();
       {/* Header */}
       <div className="section-header">
         <div>
-          <h2 className="section-title">Hướng Dẫn Tích Hợp API (API Integration)</h2>
+          <h2 className="section-title">{t('integration.title')}</h2>
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            Chuẩn giao thức OpenAI-compatible v1 endpoint phục vụ Hermes, Codex CLI, Python, cURL, Node.js
+            {t('integration.subtitle')}
           </span>
         </div>
       </div>
@@ -241,25 +241,25 @@ callRouter();
           <IconShield size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
           <div>
             <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fbbf24', margin: 0 }}>
-              Cảnh Báo An Toàn: Bảo Vệ Khóa API (Never Expose Secrets)
+              {t('integration.securityTitle')}
             </h3>
             <p style={{ fontSize: 13, color: '#fef3c7', marginTop: 4, lineHeight: 1.5 }}>
-              Khóa API cấp quyền truy cập trực tiếp vào các mô hình và tài nguyên của hệ thống. Hãy tuân thủ nghiêm ngặt các quy tắc an toàn sau:
+              {t('integration.securityDesc')}
             </p>
           </div>
         </div>
         <ul className="security-alert-list">
           <li>
-            <strong>Tuyệt đối KHÔNG nhúng trực tiếp API Key vào mã nguồn client-side:</strong> Tránh lưu key trong mã JavaScript frontend (React, Vue, HTML tĩnh) hoặc bundle ứng dụng di động công khai. Kẻ xấu có thể trích xuất khóa qua DevTools hoặc dịch ngược gói cài đặt.
+            <strong>{t('integration.securityNoEmbedKey')}</strong> {t('integration.securityNoEmbedKeyDesc')}
           </li>
           <li>
-            <strong>Không commit khóa lên kho mã nguồn:</strong> Đảm bảo các file cấu hình chứa key (như <code>.env</code>, <code>config.yaml</code>, <code>config.toml</code>) đã được thêm vào <code>.gitignore</code> trước khi đẩy lên GitHub, GitLab hay các kho lưu trữ công cộng.
+            <strong>{t('integration.securityNoCommit')}</strong> {t('integration.securityNoCommitDesc')}
           </li>
           <li>
-            <strong>Sử dụng Biến Môi Trường (Environment Variables):</strong> Luôn nạp key qua biến môi trường của hệ điều hành hoặc các hệ thống Secret Management bảo mật (Vault, AWS Secrets Manager, GitHub Secrets).
+            <strong>{t('integration.securityUseEnv')}</strong> {t('integration.securityUseEnvDesc')}
           </li>
           <li>
-            <strong>Kiến trúc Backend Proxy:</strong> Với các ứng dụng web phục vụ người dùng cuối, mọi lệnh gọi API phải đi qua backend server nội bộ của bạn thay vì cho phép trình duyệt người dùng gửi trực tiếp.
+            <strong>{t('integration.securityBackendProxy')}</strong> {t('integration.securityBackendProxyDesc')}
           </li>
         </ul>
       </div>
@@ -268,43 +268,43 @@ callRouter();
       <div className="integration-info-grid">
         <div className="card integration-info-card">
           <div className="kpi-label">
-            <span>Base URL Chuẩn</span>
+            <span>{t('integration.standardBaseUrl')}</span>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => copyToClipboard(baseUrl, 'base-url')}
-              title="Sao chép Base URL"
+              title={t('integration.copyBaseUrlTitle')}
             >
               {copiedId === 'base-url' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-              <span>{copiedId === 'base-url' ? 'Đã sao chép' : 'Sao chép'}</span>
+              <span>{copiedId === 'base-url' ? t('actions.copied') : t('actions.copy')}</span>
             </button>
           </div>
           <div className="integration-code-highlight" style={{ fontSize: 14 }}>
             {baseUrl}
           </div>
           <div className="kpi-sub" style={{ marginTop: 8 }}>
-            Tương thích trực tiếp với tham số <code>base_url</code> / <code>baseURL</code> của mọi thư viện OpenAI v1.
+            {t('integration.baseUrlDesc')}
           </div>
         </div>
 
         <div className="card integration-info-card">
           <div className="kpi-label">
-            <span>API Key Placeholder</span>
+            <span>{t('integration.apiKeyPlaceholderLabel')}</span>
             <button
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => copyToClipboard('ag-proxy-key', 'api-key-placeholder')}
-              title="Sao chép API Key mẫu"
+              title={t('integration.copyApiKeyTitle')}
             >
               {copiedId === 'api-key-placeholder' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-              <span>{copiedId === 'api-key-placeholder' ? 'Đã sao chép' : 'Sao chép'}</span>
+              <span>{copiedId === 'api-key-placeholder' ? t('actions.copied') : t('actions.copy')}</span>
             </button>
           </div>
           <div className="integration-code-highlight" style={{ fontSize: 14 }}>
             ag-proxy-key
           </div>
           <div className="kpi-sub" style={{ marginTop: 8 }}>
-            Gửi qua header: <code>Authorization: Bearer &lt;khóa-api&gt;</code>. Quản lý tại tab "Quản Lý Khóa API".
+            {t('integration.apiKeyDesc')}
           </div>
         </div>
       </div>
@@ -312,12 +312,12 @@ callRouter();
       {/* Interactive Customizer Bar */}
       <div className="card" style={{ padding: 18 }}>
         <h4 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
-          Tùy Chỉnh Mẫu Code Nhanh (Xem Trước Trực Tiếp)
+          {t('integration.customizerTitle')}
         </h4>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 500 }}>
-              Khóa API Của Bạn (Tùy chọn điền để cập nhật ví dụ bên dưới):
+              {t('integration.yourApiKeyLabel')}
             </label>
             <input
               type="text"
@@ -330,17 +330,19 @@ callRouter();
 
           <div>
             <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 500 }}>
-              Mô Hình Mẫu (Model Selection):
+              {t('integration.modelSelectionLabel')}
             </label>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               style={{ width: '100%' }}
             >
-              <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high (Google Antigravity - Tốc độ cao & Ngữ cảnh rộng)</option>
-              <option value="ag/gemini-pro-agent">ag/gemini-pro-agent (Google Antigravity - Gemini Pro Agent 9router)</option>
-              <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low (Google Antigravity - Gemini Pro Low Quota)</option>
-              <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol (OpenAI Codex - Chuyên sâu Logic Lập Trình)</option>
+              <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high ({t('integration.modelOptGeminiFlash')})</option>
+              <option value="ag/gemini-pro-agent">ag/gemini-pro-agent ({t('integration.modelOptGeminiProAgent')})</option>
+              <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low ({t('integration.modelOptGeminiProLow')})</option>
+              <option value="cx/gpt-6.1-sol">cx/gpt-6.1-sol ({t('integration.modelOptCodex61Sol')})</option>
+              <option value="cx/gpt-6-astra">cx/gpt-6-astra ({t('integration.modelOptCodexAstra')})</option>
+              <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol ({t('integration.modelOptCodexSol')})</option>
             </select>
           </div>
         </div>
@@ -350,7 +352,7 @@ callRouter();
       <div className="card">
         <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <IconBookOpen size={18} style={{ color: 'var(--accent-primary)' }} />
-          <span>Danh Mục Mô Hình Ví Dụ Chuẩn (Supported Model Namespaces)</span>
+          <span>{t('integration.modelCatalogTitle')}</span>
         </h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
           <div className="model-spec-card">
@@ -360,15 +362,34 @@ callRouter();
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => copyToClipboard('ag/gemini-3.8-flash-high', 'm-ag')}
-                title="Sao chép tên model"
+                title={t('integration.copyModelTitle')}
               >
                 {copiedId === 'm-ag' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'm-ag' ? 'Đã sao chép' : 'Sao chép'}</span>
+                <span>{copiedId === 'm-ag' ? t('actions.copied') : t('actions.copy')}</span>
               </button>
             </div>
             <div className="model-spec-name">ag/gemini-3.8-flash-high</div>
             <p className="model-spec-desc">
-              Phù hợp tác vụ trò chuyện thời gian thực, tổng hợp dữ liệu, cửa sổ ngữ cảnh cực lớn, hỗ trợ streaming tốc độ cao và Function Calling (Tools).
+              {t('integration.geminiFlashDesc')}
+            </p>
+          </div>
+
+          <div className="model-spec-card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="badge badge-primary">OpenAI Codex Flagship</span>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => copyToClipboard('cx/gpt-6.1-sol', 'm-cx61')}
+                title={t('integration.copyModelTitle')}
+              >
+                {copiedId === 'm-cx61' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                <span>{copiedId === 'm-cx61' ? t('actions.copied') : t('actions.copy')}</span>
+              </button>
+            </div>
+            <div className="model-spec-name">cx/gpt-6.1-sol</div>
+            <p className="model-spec-desc">
+              {t('integration.codex61SolDesc')}
             </p>
           </div>
 
@@ -379,15 +400,15 @@ callRouter();
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => copyToClipboard('cx/gpt-5.6-sol', 'm-cx')}
-                title="Sao chép tên model"
+                title={t('integration.copyModelTitle')}
               >
                 {copiedId === 'm-cx' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'm-cx' ? 'Đã sao chép' : 'Sao chép'}</span>
+                <span>{copiedId === 'm-cx' ? t('actions.copied') : t('actions.copy')}</span>
               </button>
             </div>
             <div className="model-spec-name">cx/gpt-5.6-sol</div>
             <p className="model-spec-desc">
-              Tối ưu cho kỹ thuật lập trình nâng cao, suy luận logic phức tạp, debug mã nguồn, kiến trúc phần mềm và thực thi agent tự động.
+              {t('integration.codexSolDesc')}
             </p>
           </div>
         </div>
@@ -442,10 +463,10 @@ callRouter();
         {activeTab === 'hermes' && (
           <div className="integration-tab-pane">
             <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Tích Hợp Với Hermes Agent (CLI & Configuration)
+              {t('integration.hermesTitle')}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Hermes Agent tương thích tự nhiên với các router OpenAI-compatible. Bạn có thể định cấu hình qua file <code>~/.hermes/config.yaml</code> hoặc qua các biến môi trường trực tiếp.
+              {t('integration.hermesDesc')}
             </p>
 
             {/* Config YAML */}
@@ -458,7 +479,7 @@ callRouter();
                   onClick={() => copyToClipboard(hermesConfigSnippet, 'hermes-yaml')}
                 >
                   {copiedId === 'hermes-yaml' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'hermes-yaml' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'hermes-yaml' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -469,14 +490,14 @@ callRouter();
             {/* CLI Environment */}
             <div className="code-card" style={{ marginTop: 14 }}>
               <div className="code-card-header">
-                <span className="code-file-tag">Terminal (Environment Variables)</span>
+                <span className="code-file-tag">{t('integration.terminalEnvVars')}</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => copyToClipboard(hermesCliEnvSnippet, 'hermes-env')}
                 >
                   {copiedId === 'hermes-env' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'hermes-env' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'hermes-env' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -490,10 +511,10 @@ callRouter();
         {activeTab === 'codex' && (
           <div className="integration-tab-pane">
             <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Tích Hợp Với OpenAI Codex CLI
+              {t('integration.codexTitle')}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Thiết lập file cấu hình <code>~/.codex/config.toml</code> để điều hướng mọi lệnh gọi từ Codex CLI trực tiếp qua router:
+              {t('integration.codexDesc')}
             </p>
 
             <div className="code-card">
@@ -505,7 +526,7 @@ callRouter();
                   onClick={() => copyToClipboard(codexConfigSnippet, 'codex-toml')}
                 >
                   {copiedId === 'codex-toml' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'codex-toml' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'codex-toml' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -515,14 +536,14 @@ callRouter();
 
             <div className="code-card" style={{ marginTop: 14 }}>
               <div className="code-card-header">
-                <span className="code-file-tag">Thực Thi Dòng Lệnh (Bash / Zsh)</span>
+                <span className="code-file-tag">{t('integration.codexCliTag')}</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => copyToClipboard(codexCliSnippet, 'codex-cli')}
                 >
                   {copiedId === 'codex-cli' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'codex-cli' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'codex-cli' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -536,10 +557,10 @@ callRouter();
         {activeTab === 'python' && (
           <div className="integration-tab-pane">
             <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Tích Hợp Bằng Thư Viện Chính Thức: OpenAI Python SDK
+              {t('integration.pythonTitle')}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Cài đặt thư viện bằng lệnh: <code>pip install openai</code>. Ví dụ dưới đây minh họa khởi tạo client với Base URL và đọc dữ liệu theo luồng (streaming):
+              {t('integration.pythonDesc')}
             </p>
 
             <div className="code-card">
@@ -551,7 +572,7 @@ callRouter();
                   onClick={() => copyToClipboard(pythonSdkSnippet, 'py-sdk')}
                 >
                   {copiedId === 'py-sdk' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'py-sdk' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'py-sdk' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -565,22 +586,22 @@ callRouter();
         {activeTab === 'curl' && (
           <div className="integration-tab-pane">
             <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Kiểm Tra Nhanh Bằng cURL (Terminal / Shell)
+              {t('integration.curlTitle')}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Các mẫu câu lệnh cURL chuẩn cho cả chế độ đồng bộ (non-stream) và chế độ luồng (streaming) qua cờ <code>-N</code> (no-buffer):
+              {t('integration.curlDesc')}
             </p>
 
             <div className="code-card">
               <div className="code-card-header">
-                <span className="code-file-tag">cURL: Chuẩn Non-Streaming (Nhận JSON hoàn chỉnh)</span>
+                <span className="code-file-tag">{t('integration.curlStandardTag')}</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => copyToClipboard(curlStandardSnippet, 'curl-std')}
                 >
                   {copiedId === 'curl-std' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'curl-std' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'curl-std' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -590,14 +611,14 @@ callRouter();
 
             <div className="code-card" style={{ marginTop: 14 }}>
               <div className="code-card-header">
-                <span className="code-file-tag">cURL: Chế Độ Streaming SSE (Server-Sent Events với cờ -N)</span>
+                <span className="code-file-tag">{t('integration.curlStreamTag')}</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => copyToClipboard(curlStreamSnippet, 'curl-stream')}
                 >
                   {copiedId === 'curl-stream' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'curl-stream' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'curl-stream' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -607,14 +628,14 @@ callRouter();
 
             <div className="code-card" style={{ marginTop: 14 }}>
               <div className="code-card-header">
-                <span className="code-file-tag">cURL: Kiểm Tra Danh Sách Mô Hình (GET /v1/models)</span>
+                <span className="code-file-tag">{t('integration.curlModelsTag')}</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={() => copyToClipboard(curlModelsSnippet, 'curl-models')}
                 >
                   {copiedId === 'curl-models' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'curl-models' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'curl-models' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -628,10 +649,10 @@ callRouter();
         {activeTab === 'node' && (
           <div className="integration-tab-pane">
             <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              Tích Hợp Trong Hệ Sinh Thái Node.js & TypeScript
+              {t('integration.nodeTitle')}
             </h4>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              Hỗ trợ cả thư viện <code>openai</code> chính thức lẫn hàm <code>fetch</code> có sẵn trong Node.js phiên bản hiện đại:
+              {t('integration.nodeDesc')}
             </p>
 
             <div className="code-card">
@@ -643,7 +664,7 @@ callRouter();
                   onClick={() => copyToClipboard(nodeSdkSnippet, 'node-sdk')}
                 >
                   {copiedId === 'node-sdk' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'node-sdk' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'node-sdk' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -660,7 +681,7 @@ callRouter();
                   onClick={() => copyToClipboard(nodeFetchSnippet, 'node-fetch')}
                 >
                   {copiedId === 'node-fetch' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'node-fetch' ? 'Đã sao chép' : 'Sao chép'}</span>
+                  <span>{copiedId === 'node-fetch' ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
               <pre className="code-card-pre">
@@ -675,24 +696,24 @@ callRouter();
       <div className="card">
         <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <IconZap size={18} style={{ color: '#38bdf8' }} />
-          <span>Lưu Ý Về Cơ Chế Streaming (Server-Sent Events)</span>
+          <span>{t('integration.streamingTitle')}</span>
         </h3>
         <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           <p style={{ marginBottom: 10 }}>
-            Khi đặt thuộc tính <code>"stream": true</code> trong payload yêu cầu, kết nối HTTP sẽ được giữ mở với định dạng <code>Content-Type: text/event-stream</code>.
+            {t('integration.streamingIntro')}
           </p>
           <ul style={{ paddingLeft: 20, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <li>
-              <strong>Độ trễ thấp tối ưu (Low TTFT):</strong> ezRouter được thiết kế với cơ chế zero-buffering forwarding. Từng gói tin SSE từ mô hình nền tảng (Google Antigravity hoặc OpenAI Codex) được đẩy tức thời tới client ngay khi sinh ra mà không cần gom cụm vào bộ nhớ đệm.
+              <strong>{t('integration.streamingLowLatency')}</strong> {t('integration.streamingLowLatencyDesc')}
             </li>
             <li>
-              <strong>Định dạng chunk tiêu chuẩn:</strong> Mỗi chunk văn bản mang cấu trúc chuẩn <code>{'data: {"choices":[{"delta":{"content":"..."}}]}'}</code> với trường <code>choices[0].delta.content</code>.
+              <strong>{t('integration.streamingChunkFormat')}</strong> {t('integration.streamingChunkFormatDesc')}
             </li>
             <li>
-              <strong>Tín hiệu hoàn tất:</strong> Khi mô hình sinh xong toàn bộ phản hồi, server sẽ gửi dòng kết thúc <code>data: [DONE]</code> trước khi ngắt kết nối HTTP.
+              <strong>{t('integration.streamingDoneSignal')}</strong> {t('integration.streamingDoneSignalDesc')}
             </li>
             <li>
-              <strong>Lưu ý cấu hình mạng trung gian:</strong> Nếu bạn đặt thêm reverse proxy (như Nginx) ở giữa client và ezRouter, hãy cấu hình header <code>X-Accel-Buffering: no</code> và tắt <code>proxy_buffering off;</code> để tránh việc proxy tự ý gom buffer làm giật cục luồng stream.
+              <strong>{t('integration.streamingProxyNote')}</strong> {t('integration.streamingProxyNoteDesc')}
             </li>
           </ul>
         </div>
@@ -702,31 +723,31 @@ callRouter();
       <div className="card">
         <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <IconCode size={18} style={{ color: '#a78bfa' }} />
-          <span>Lưu Ý Về Tools & Gọi Hàm (Function Calling)</span>
+          <span>{t('integration.toolsTitle')}</span>
         </h3>
         <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
           <p style={{ marginBottom: 10 }}>
-            ezRouter hỗ trợ đầy đủ tính năng Function Calling chuẩn OpenAI API cho cả hai namespace mô hình <code>ag/*</code> và <code>cx/*</code>.
+            {t('integration.toolsIntro')}
           </p>
           <ul style={{ paddingLeft: 20, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <li>
-              <strong>Chuẩn hóa giao thức hai chiều:</strong> Hệ thống tự động dịch chuyển đổi schema giữa giao thức của Google Antigravity và định dạng OpenAI tools. Client chỉ cần gửi payload JSON Schema tiêu chuẩn.
+              <strong>{t('integration.toolsProtocol')}</strong> {t('integration.toolsProtocolDesc')}
             </li>
             <li>
-              <strong>Quy trình phản hồi vòng lặp (Execution Loop):</strong> Khi mô hình quyết định gọi tool, nó sẽ trả về mảng <code>tool_calls</code> (gồm <code>id</code>, <code>name</code>, <code>arguments</code>). Client thực thi code nghiệp vụ tương ứng và gửi tiếp kết quả trở lại API với role <code>"tool"</code> kèm <code>tool_call_id</code>.
+              <strong>{t('integration.toolsLoop')}</strong> {t('integration.toolsLoopDesc')}
             </li>
           </ul>
 
           <div className="code-card">
             <div className="code-card-header">
-              <span className="code-file-tag">Cấu Trúc Payload Khai Báo Tools Mẫu</span>
+              <span className="code-file-tag">{t('integration.toolsPayloadTag')}</span>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => copyToClipboard(toolsSnippet, 'tools-json')}
               >
                 {copiedId === 'tools-json' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'tools-json' ? 'Đã sao chép' : 'Sao chép'}</span>
+                <span>{copiedId === 'tools-json' ? t('actions.copied') : t('actions.copy')}</span>
               </button>
             </div>
             <pre className="code-card-pre">
@@ -740,55 +761,55 @@ callRouter();
       <div className="card">
         <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
           <IconAlertCircle size={18} style={{ color: '#ef4444' }} />
-          <span>Chẩn Đoán Lỗi Thường Gặp & Cách Khắc Phục (Troubleshooting)</span>
+          <span>{t('integration.troubleshootTitle')}</span>
         </h3>
 
         <div className="troubleshoot-grid">
           {/* 401 */}
           <div className="troubleshoot-card">
             <div className="troubleshoot-badge status-401">HTTP 401 Unauthorized</div>
-            <div className="troubleshoot-title">Khóa API Không Hợp Lệ Hoặc Thiếu Header</div>
+            <div className="troubleshoot-title">{t('integration.err401Title')}</div>
             <div className="troubleshoot-desc">
-              <strong>Nguyên nhân:</strong> Yêu cầu không có header <code>Authorization: Bearer &lt;key&gt;</code>, hoặc chuỗi khóa API bị sai, có khoảng trắng thừa, hoặc đã bị vô hiệu hóa trong cơ sở dữ liệu.
+              <strong>{t('integration.causeLabel')}</strong> {t('integration.err401Cause')}
             </div>
             <div className="troubleshoot-fix">
-              <strong>Cách khắc phục:</strong> Kiểm tra lại biến môi trường của bạn. Truy cập tab <em>"Quản Lý Khóa API"</em> trên giao diện quản trị để kiểm tra danh sách khóa đang hoạt động hoặc tạo một khóa mới.
+              <strong>{t('integration.fixLabel')}</strong> {t('integration.err401Fix')}
             </div>
           </div>
 
           {/* 404 */}
           <div className="troubleshoot-card">
             <div className="troubleshoot-badge status-404">HTTP 404 Not Found / Model Not Found</div>
-            <div className="troubleshoot-title">Tên Mô Hình Không Khớp Hoặc Sai Namespace</div>
+            <div className="troubleshoot-title">{t('integration.err404Title')}</div>
             <div className="troubleshoot-desc">
-              <strong>Nguyên nhân:</strong> Model truyền vào không tồn tại hoặc thiếu tiền tố namespace bắt buộc (ví dụ gõ nhầm <code>gemini-3.8-flash</code> thay vì <code>ag/gemini-3.8-flash-high</code>).
+              <strong>{t('integration.causeLabel')}</strong> {t('integration.err404Cause')}
             </div>
             <div className="troubleshoot-fix">
-              <strong>Cách khắc phục:</strong> Luôn kiểm tra model có tiền tố hợp lệ (<code>ag/</code> cho Google Antigravity, <code>cx/</code> cho Codex). Kiểm tra danh sách mô hình thực tế đang mở bằng lệnh <code>curl {baseUrl}/models</code>.
+              <strong>{t('integration.fixLabel')}</strong> {t('integration.err404Fix')}
             </div>
           </div>
 
           {/* 429 */}
           <div className="troubleshoot-card">
             <div className="troubleshoot-badge status-429">HTTP 429 Rate Limit / Cooldown</div>
-            <div className="troubleshoot-title">Vượt Quá Tần Suất Yêu Cầu Hoặc Pool Bận</div>
+            <div className="troubleshoot-title">{t('integration.err429Title')}</div>
             <div className="troubleshoot-desc">
-              <strong>Nguyên nhân:</strong> Tài khoản upstream đang bị Google hoặc OpenAI áp dụng giới hạn tần suất tạm thời, hoặc tài khoản đang trong chu kỳ cooldown.
+              <strong>{t('integration.causeLabel')}</strong> {t('integration.err429Cause')}
             </div>
             <div className="troubleshoot-fix">
-              <strong>Cách khắc phục:</strong> ezRouter đã tích hợp sẵn cơ chế tự động chuyển tiếp (failover) giữa các tài khoản trong pool. Ở phía client, bạn nên kích hoạt Exponential Backoff with Jitter (chờ 1s, 2s, 4s... rồi retry).
+              <strong>{t('integration.fixLabel')}</strong> {t('integration.err429Fix')}
             </div>
           </div>
 
           {/* 500 / 502 / 503 */}
           <div className="troubleshoot-card">
             <div className="troubleshoot-badge status-500">HTTP 500 / 502 / 503 Upstream Error</div>
-            <div className="troubleshoot-title">Lỗi Kết Nối Hoặc Provider Gặp Sự Cố</div>
+            <div className="troubleshoot-title">{t('integration.err500Title')}</div>
             <div className="troubleshoot-desc">
-              <strong>Nguyên nhân:</strong> Nhà cung cấp dịch vụ gốc gặp sự cố gián đoạn tạm thời, token tài khoản bị từ chối, hoặc máy chủ mạng upstream quá tải.
+              <strong>{t('integration.causeLabel')}</strong> {t('integration.err500Cause')}
             </div>
             <div className="troubleshoot-fix">
-              <strong>Cách khắc phục:</strong> Kiểm tra tab <em>"Nhà Cung Cấp"</em> để xem trạng thái tài khoản. Thiết lập <em>"Combo"</em> để định cấu hình các mô hình dự phòng (fallback) tự động khi upstream chính không khả dụng.
+              <strong>{t('integration.fixLabel')}</strong> {t('integration.err500Fix')}
             </div>
           </div>
         </div>

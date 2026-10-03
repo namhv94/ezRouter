@@ -84,6 +84,10 @@ pub fn app_router(state: AppState) -> Router {
         .route("/v1/chat/completions", post(routes::chat::chat_completions))
         .route("/v1/embeddings", post(routes::embeddings::embeddings))
         .route(
+            "/v1/images/generations",
+            post(routes::images::image_generations),
+        )
+        .route(
             "/admin/api-keys",
             get(routes::admin::list_api_keys).post(routes::admin::create_api_key),
         )
@@ -113,6 +117,10 @@ pub fn app_router(state: AppState) -> Router {
         .route(
             "/admin/request-summary",
             get(routes::admin::get_request_summary),
+        )
+        .route(
+            "/admin/token-analytics",
+            get(routes::admin::get_token_analytics),
         )
         .route(
             "/admin/providers",
@@ -207,6 +215,14 @@ pub fn app_router(state: AppState) -> Router {
         .route(
             "/admin/codex/accounts/:id/refresh-quota",
             post(routes::admin::refresh_codex_account_quota),
+        )
+        .route(
+            "/admin/codex/accounts/:id/reset-credits",
+            get(routes::admin::get_codex_account_reset_credits),
+        )
+        .route(
+            "/admin/codex/accounts/:id/consume-reset-credit",
+            post(routes::admin::consume_codex_account_reset_credit),
         )
         .route(
             "/admin/codex/accounts/:id",

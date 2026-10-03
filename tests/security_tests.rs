@@ -68,6 +68,7 @@ async fn test_rbac_client_vs_admin_on_admin_routes() {
         ("GET", "/admin/stats"),
         ("GET", "/admin/requests"),
         ("GET", "/admin/request-summary"),
+        ("GET", "/admin/token-analytics"),
         ("GET", "/admin/api-keys"),
         ("GET", "/admin/providers"),
         ("GET", "/admin/combos"),
@@ -276,7 +277,7 @@ async fn test_oauth_open_redirect_prevention() {
 
     // 2. Whitelisted origin in /admin/accounts/oauth/start IS preserved
     let req = Request::builder()
-        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Frouter.example.com")
+        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Frouter.namhv.vip")
         .method("POST")
         .header(AUTHORIZATION, "Bearer admin-master-key")
         .body(Body::empty())
@@ -286,7 +287,7 @@ async fn test_oauth_open_redirect_prevention() {
     let json: Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
     let state_str = json["state"].as_str().unwrap();
-    assert!(state_str.starts_with("https://router.example.com|"));
+    assert!(state_str.starts_with("https://router.namhv.vip|"));
 
     // 3. Mock OAuth exchange server to test callback flow
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -309,7 +310,7 @@ async fn test_oauth_open_redirect_prevention() {
                 (
                     StatusCode::OK,
                     [("content-type", "application/json")],
-                    r#"{"email":"oauth-tester@example.com","id":"12345"}"#,
+                    r#"{"email":"oauth-tester@namhv.vip","id":"12345"}"#,
                 )
                     .into_response()
             }),
@@ -359,7 +360,6 @@ async fn test_oauth_open_redirect_prevention() {
 
     std::env::remove_var("AG_TOKEN_URL");
     std::env::remove_var("AG_USERINFO_URL");
-    std::env::remove_var("AG_GOOGLE_CLIENT_SECRET");
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 

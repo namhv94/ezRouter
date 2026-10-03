@@ -43,6 +43,13 @@ pub async fn list_models(
         }
     }
 
+    // Dynamically include models from Codex cache (~/.codex/models_cache.json)
+    for entry in crate::models::get_cached_codex_models() {
+        if !resp.data.iter().any(|existing| existing.id == entry.id) {
+            resp.data.push(entry);
+        }
+    }
+
     // Dynamically include combos from database (e.g. combo-fast, auto-fallback)
     if let Ok(combos) = state.db.list_combos() {
         for combo in combos {
@@ -102,6 +109,26 @@ pub async fn retrieve_model(
                 }
             }
         }
+    }
+
+    // Check dynamic codex cache
+    for entry in crate::models::get_cached_codex_models() {
+        if entry.id == trimmed_id || entry.id.strip_prefix("cx/").unwrap_or(&entry.id) == trimmed_id
+        {
+            let _ = state.db.increment_total_requests(&auth.key);
+            return Ok(Json(entry));
+        }
+    }
+
+    // Dynamic passthrough for any cx/* model
+    if trimmed_id.starts_with("cx/") {
+        let _ = state.db.increment_total_requests(&auth.key);
+        return Ok(Json(ModelEntry {
+            id: trimmed_id.to_string(),
+            object: "model".to_string(),
+            created: 1700000000,
+            owned_by: "openai-codex".to_string(),
+        }));
     }
 
     Err(AppError::NotFound(format!(

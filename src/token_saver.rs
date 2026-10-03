@@ -1197,7 +1197,7 @@ mod tests {
         let arr = json_obj.get_mut("matches").unwrap().as_array_mut().unwrap();
         for i in 0..100 {
             arr.push(serde_json::json!({
-                "path": format!("/workspace/project/node_modules/pkg_{}/index.js", i),
+                "path": format!("/home/namhv/project/node_modules/pkg_{}/index.js", i),
                 "line": i,
                 "content": "identical log line repeated"
             }));

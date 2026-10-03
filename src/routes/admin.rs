@@ -16,6 +16,7 @@ use crate::account::{
 use crate::auth::AdminUser;
 use crate::db::{
     AdminStats, ApiKey, ComboRecord, ModelRequestSummary, ProviderResponse, RequestsResponse,
+    TokenAnalyticsResponse,
 };
 use crate::error::AppError;
 use crate::state::AppState;
@@ -163,6 +164,20 @@ pub async fn get_request_summary(
 ) -> Result<Json<Vec<ModelRequestSummary>>, AppError> {
     let summary = state.db.get_request_summary()?;
     Ok(Json(summary))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TokenAnalyticsQuery {
+    pub period: Option<String>,
+}
+
+pub async fn get_token_analytics(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+    Query(query): Query<TokenAnalyticsQuery>,
+) -> Result<Json<TokenAnalyticsResponse>, AppError> {
+    let analytics = state.db.get_token_analytics(query.period.as_deref())?;
+    Ok(Json(analytics))
 }
 
 pub async fn get_active_requests(
@@ -1266,6 +1281,81 @@ pub async fn refresh_codex_account_quota(
         "id": id,
         "quota": quota
     })))
+}
+
+pub async fn get_codex_account_reset_credits(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    match state.codex_pool.fetch_account_reset_credits(&id).await {
+        Ok(credits) => Ok(Json(serde_json::json!({
+            "ok": true,
+            "id": id,
+            "data": credits,
+        }))),
+        Err(err) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "id": id,
+            "error": crate::codex::mask_codex_error(&err),
+            "data": {
+                "credits": [],
+                "available_count": 0,
+            }
+        }))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ConsumeCodexResetCreditPayload {
+    pub credit_id: Option<String>,
+}
+
+pub async fn consume_codex_account_reset_credit(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    payload: Option<Json<ConsumeCodexResetCreditPayload>>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let credit_id = payload.and_then(|p| p.credit_id.clone());
+    if let Some(ref cid) = credit_id {
+        let trimmed = cid.trim();
+        if trimmed.len() > 128
+            || (!trimmed.is_empty()
+                && !trimmed
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+        {
+            return Err(AppError::BadRequest("Invalid credit_id format".to_string()));
+        }
+    }
+
+    match state
+        .codex_pool
+        .consume_account_reset_credit(&id, credit_id)
+        .await
+    {
+        Ok(outcome) => {
+            let acc = state.codex_pool.accounts.read().unwrap().get(&id).cloned();
+
+            let quota = match acc {
+                Some(a) => a.quota_cache.read().unwrap().clone(),
+                None => serde_json::json!({}),
+            };
+
+            Ok(Json(serde_json::json!({
+                "ok": true,
+                "id": id,
+                "result": outcome,
+                "quota": quota,
+            })))
+        }
+        Err(err) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "id": id,
+            "error": crate::codex::mask_codex_error(&err),
+        }))),
+    }
 }
 
 pub async fn delete_codex_account(

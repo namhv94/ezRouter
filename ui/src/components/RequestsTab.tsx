@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useI18n } from '../i18n';
 import { RequestLogItem, RequestsResponse, AdminStats, ActiveRequestItem } from '../types';
 import { api } from '../api';
 import {
@@ -13,7 +14,31 @@ import {
   IconActivity,
 } from '../icons';
 
+const OPENROUTER_PRICING: Record<string, { prompt: number; completion: number }> = {
+  'deepseek/deepseek-chat': { prompt: 0.14, completion: 0.28 },
+  'deepseek/deepseek-r1': { prompt: 0.55, completion: 2.19 },
+  'meta-llama/llama-3.3-70b-instruct': { prompt: 0.13, completion: 0.40 },
+  'openai/gpt-4o': { prompt: 2.50, completion: 10.00 },
+  'openai/gpt-4o-mini': { prompt: 0.15, completion: 0.60 },
+  'google/gemini-2.5-pro': { prompt: 1.25, completion: 5.00 },
+  'google/gemini-2.5-flash': { prompt: 0.075, completion: 0.30 },
+  'qwen/qwen-2.5-coder-32b-instruct': { prompt: 0.07, completion: 0.16 },
+  'anthropic/claude-3.5-sonnet': { prompt: 3.00, completion: 15.00 },
+  'anthropic/claude-3.7-sonnet': { prompt: 3.00, completion: 15.00 },
+};
+
+const estimateRequestCost = (model: string, promptTokens: number, completionTokens: number): number | null => {
+  if (!model || !model.startsWith('openrouter/')) return null;
+  const subModel = model.replace('openrouter/', '');
+  const pricing = OPENROUTER_PRICING[subModel];
+  if (pricing) {
+    return ((promptTokens || 0) * pricing.prompt + (completionTokens || 0) * pricing.completion) / 1_000_000;
+  }
+  return ((promptTokens || 0) * 0.50 + (completionTokens || 0) * 1.50) / 1_000_000;
+};
+
 export const RequestsTab: React.FC = () => {
+  const { locale, t } = useI18n();
   const [data, setData] = useState<RequestsResponse | null>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,13 +96,13 @@ export const RequestsTab: React.FC = () => {
         }
         setLastRefreshedAt(new Date());
       } catch (err: any) {
-        setError(err?.message || 'Không thể tải dữ liệu monitoring');
+        setError(err?.message || t('requests.fetchError'));
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [limit, offset, modelFilter, statusFilter]
+    [limit, offset, modelFilter, statusFilter, t]
   );
 
   // Initial and on filter change
@@ -169,13 +194,13 @@ export const RequestsTab: React.FC = () => {
     if (!ts) return '-';
     const ms = ts > 10000000000 ? ts : ts * 1000;
     const diffSec = Math.floor((Date.now() - ms) / 1000);
-    if (diffSec < 5) return 'vừa xong';
-    if (diffSec < 60) return `${diffSec} giây trước`;
+    if (diffSec < 5) return t('requests.timeJustNow');
+    if (diffSec < 60) return t('requests.timeSecAgo', { count: diffSec });
     const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin} phút trước`;
+    if (diffMin < 60) return t('requests.timeMinAgo', { count: diffMin });
     const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return `${diffHour} giờ trước`;
-    return new Date(ms).toLocaleDateString('vi-VN', {
+    if (diffHour < 24) return t('requests.timeHourAgo', { count: diffHour });
+    return new Date(ms).toLocaleDateString(locale === 'vi' ? 'vi-VN' : 'en-US', {
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',
@@ -187,7 +212,8 @@ export const RequestsTab: React.FC = () => {
     if (!ts) return '-';
     const ms = ts > 10000000000 ? ts : ts * 1000;
     const d = new Date(ms);
-    return `${d.toLocaleTimeString('vi-VN')} ${d.toLocaleDateString('vi-VN')}`;
+    const dateLoc = locale === 'vi' ? 'vi-VN' : 'en-US';
+    return `${d.toLocaleTimeString(dateLoc)} ${d.toLocaleDateString(dateLoc)}`;
   };
 
   const getLatencyBadgeClass = (ms: number) => {
@@ -197,14 +223,15 @@ export const RequestsTab: React.FC = () => {
   };
 
   const getLatencyLabel = (ms: number) => {
-    if (ms < 1000) return 'Nhanh';
-    if (ms < 3000) return 'Trung bình';
-    return 'Chậm';
+    if (ms < 1000) return t('requests.latencyFast');
+    if (ms < 3000) return t('requests.latencyMed');
+    return t('requests.latencySlow');
   };
 
   const getModelFamily = (model: string) => {
     if (model.startsWith('ag/')) return { label: 'AG', className: 'family-tag family-tag-ag' };
     if (model.startsWith('cx/')) return { label: 'CX', className: 'family-tag family-tag-cx' };
+    if (model.startsWith('openrouter/')) return { label: 'OR', className: 'family-tag family-tag-or' };
     return { label: 'UP', className: 'family-tag family-tag-custom' };
   };
 
@@ -247,35 +274,35 @@ export const RequestsTab: React.FC = () => {
         <div className="traffic-live-indicator">
           <span className={`live-pulse-dot ${autoRefreshSec === 0 ? 'paused' : ''}`} />
           <span style={{ color: autoRefreshSec > 0 ? '#10b981' : 'var(--text-muted)' }}>
-            {autoRefreshSec > 0 ? `Trực tiếp (${autoRefreshSec}s)` : 'Tạm dừng tự động'}
+            {autoRefreshSec > 0 ? t('requests.liveActive', { sec: autoRefreshSec }) : t('requests.livePaused')}
           </span>
           <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
-            Cập nhật lúc: {lastRefreshedAt.toLocaleTimeString('vi-VN')}
+            {t('requests.lastUpdated', { time: lastRefreshedAt.toLocaleTimeString(locale === 'vi' ? 'vi-VN' : 'en-US') })}
           </span>
         </div>
 
         <div className="traffic-controls-group">
-          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Tần suất:</label>
+          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('requests.frequencyLabel')}</label>
           <select
             value={autoRefreshSec}
             onChange={(e) => setAutoRefreshSec(Number(e.target.value))}
             style={{ width: 'auto', padding: '6px 10px', fontSize: 13, minHeight: 44 }}
           >
-            <option value={0}>Tắt tự động</option>
-            <option value={3}>3 giây</option>
-            <option value={5}>5 giây (Mặc định)</option>
-            <option value={10}>10 giây</option>
-            <option value={15}>15 giây</option>
+            <option value={0}>{t('requests.autoOff')}</option>
+            <option value={3}>{t('requests.secCount', { count: 3 })}</option>
+            <option value={5}>{t('requests.sec5Default')}</option>
+            <option value={10}>{t('requests.secCount', { count: 10 })}</option>
+            <option value={15}>{t('requests.secCount', { count: 15 })}</option>
           </select>
 
           <button
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => setAutoRefreshSec(autoRefreshSec > 0 ? 0 : 5)}
-            title={autoRefreshSec > 0 ? 'Tạm dừng polling' : 'Bật polling'}
+            title={autoRefreshSec > 0 ? t('requests.pausePolling') : t('requests.resumePolling')}
           >
             {autoRefreshSec > 0 ? <IconPause size={15} /> : <IconPlay size={15} />}
-            <span>{autoRefreshSec > 0 ? 'Dừng' : 'Bật'}</span>
+            <span>{autoRefreshSec > 0 ? t('requests.pause') : t('requests.resume')}</span>
           </button>
 
           <button
@@ -286,7 +313,7 @@ export const RequestsTab: React.FC = () => {
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <IconRefresh size={15} className={refreshing ? 'spinning' : ''} />
-            <span>Làm Mới</span>
+            <span>{t('actions.refresh')}</span>
           </button>
         </div>
       </div>
@@ -295,22 +322,24 @@ export const RequestsTab: React.FC = () => {
       <div className="pf" id="pipelineFlow">
         <div className="pf-title">
           <div className="pf-heading">
-            <div className="pf-kicker">Traffic</div>
-            <b>Pipeline Flow</b>
+            <div className="pf-kicker">{t('requests.kicker')}</div>
+            <b>{t('requests.pipelineTitle')}</b>
           </div>
           <div className="pf-title-meta">
             <span className={`pf-live-badge ${autoRefreshSec === 0 ? 'paused' : ''}`}>
               <span className={`pf-live-dot ${autoRefreshSec === 0 ? 'paused' : ''}`} />
-              {autoRefreshSec > 0 ? 'LIVE' : 'PAUSED'}
+              {autoRefreshSec > 0 ? t('requests.liveBadge') : t('requests.pausedBadge')}
             </span>
             <span className="pf-count">
               <span>{activeRequests.length}</span>
-              <small>active</small>
+              <small>{t('requests.activeCount')}</small>
             </span>
             <span className="pf-legend">
               {activeRequests.length > 0
-                ? `Routing ${activeRequests.length} request${activeRequests.length === 1 ? '' : 's'} · signal active`
-                : 'Monitoring · all routes idle'}
+                ? activeRequests.length === 1
+                  ? t('requests.routingActiveSingular')
+                  : t('requests.routingActivePlural', { count: activeRequests.length })
+                : t('requests.monitoringIdle')}
             </span>
           </div>
         </div>
@@ -319,8 +348,8 @@ export const RequestsTab: React.FC = () => {
           {/* Client Node */}
           <div className="pf-node pf-source">
             <div className="pf-icon">⬡</div>
-            <div className="pf-label">Client</div>
-            <div className="pf-detail">OpenAI / Hermes</div>
+            <div className="pf-label">{t('requests.clientNode')}</div>
+            <div className="pf-detail">{t('requests.clientDetail')}</div>
           </div>
 
           {/* Client -> Router Curved Connector */}
@@ -411,9 +440,9 @@ export const RequestsTab: React.FC = () => {
             className={`pf-node pf-source pf-router ${activeRequests.length > 0 ? 'active' : 'idle'}`}
           >
             <div className="pf-icon">ez</div>
-            <div className="pf-label">ezRouter</div>
-            <div className="pf-detail">Route &amp; balance</div>
-            <span className="pf-router-badge">Gateway</span>
+            <div className="pf-label">{t('requests.routerNode')}</div>
+            <div className="pf-detail">{t('requests.routerDetail')}</div>
+            <span className="pf-router-badge">{t('requests.gatewayBadge')}</span>
           </div>
 
           {/* Router -> Providers Curved Fan-out Connector */}
@@ -643,28 +672,34 @@ export const RequestsTab: React.FC = () => {
                     : 'idle'
                 }`}
                 onClick={() => agActive && setSelectedActiveReq(agActive)}
-                title={agActive ? 'Nhấp để xem chi tiết request' : 'Google Antigravity'}
+                title={agActive ? t('requests.inspectRequestTitle') : 'Google Antigravity'}
               >
                 <div className="pf-icon pf-icon-ag">G</div>
                 <div className="pf-provider-info">
                   <div className="pf-label">Google Antigravity</div>
                   <div className="pf-detail">
                     {agActive
-                      ? `${agActive.model} · ${agActive.account} · ${formatDuration(agActive.elapsed_ms)}`
-                      : 'Sẵn sàng · Chờ request'}
+                      ? `${agActive.model} · ${agActive.account} · ${
+                          agActive.status === 'generating'
+                            ? `Stream ${formatDuration(agActive.elapsed_ms)}`
+                            : formatDuration(agActive.elapsed_ms)
+                        }`
+                      : t('requests.readyWaiting')}
                   </div>
-                </div>
-                <span className="pf-provider-state">
+                  </div>
+                  <span className="pf-provider-state">
                   {agActive
                     ? agActive.status === 'success'
-                      ? 'Thành công'
+                      ? t('requests.statusSuccess')
                       : agActive.status === 'error'
-                      ? 'Lỗi'
+                      ? t('requests.statusError')
                       : agActive.status === 'cancelled'
-                      ? 'Đã hủy'
-                      : 'Active'
-                    : 'Ready'}
-                </span>
+                      ? t('requests.statusCancelled')
+                      : agActive.status === 'generating'
+                      ? '⚡ Đang sinh...'
+                      : t('requests.statusActive')
+                    : t('requests.statusReady')}
+                  </span>
               </div>
             </div>
 
@@ -723,28 +758,34 @@ export const RequestsTab: React.FC = () => {
                     : 'idle'
                 }`}
                 onClick={() => cxActive && setSelectedActiveReq(cxActive)}
-                title={cxActive ? 'Nhấp để xem chi tiết request' : 'OpenAI Codex'}
+                title={cxActive ? t('requests.inspectRequestTitle') : 'OpenAI Codex'}
               >
                 <div className="pf-icon pf-icon-cx">CX</div>
                 <div className="pf-provider-info">
                   <div className="pf-label">OpenAI Codex</div>
                   <div className="pf-detail">
                     {cxActive
-                      ? `${cxActive.model} · ${cxActive.account} · ${formatDuration(cxActive.elapsed_ms)}`
-                      : 'Sẵn sàng · Chờ request'}
+                      ? `${cxActive.model} · ${cxActive.account} · ${
+                          cxActive.status === 'generating'
+                            ? `Stream ${formatDuration(cxActive.elapsed_ms)}`
+                            : formatDuration(cxActive.elapsed_ms)
+                        }`
+                      : t('requests.readyWaiting')}
                   </div>
-                </div>
-                <span className="pf-provider-state">
+                  </div>
+                  <span className="pf-provider-state">
                   {cxActive
                     ? cxActive.status === 'success'
-                      ? 'Thành công'
+                      ? t('requests.statusSuccess')
                       : cxActive.status === 'error'
-                      ? 'Lỗi'
+                      ? t('requests.statusError')
                       : cxActive.status === 'cancelled'
-                      ? 'Đã hủy'
-                      : 'Active'
-                    : 'Ready'}
-                </span>
+                      ? t('requests.statusCancelled')
+                      : cxActive.status === 'generating'
+                      ? '⚡ Đang sinh...'
+                      : t('requests.statusActive')
+                    : t('requests.statusReady')}
+                  </span>
               </div>
             </div>
 
@@ -797,7 +838,7 @@ export const RequestsTab: React.FC = () => {
                     : 'idle'
                 }`}
                 onClick={() => extActive && setSelectedActiveReq(extActive)}
-                title={extActive ? 'Nhấp để xem chi tiết request' : 'External Provider'}
+                title={extActive ? t('requests.inspectRequestTitle') : 'External Provider'}
               >
                 <div className="pf-icon pf-icon-ext">↗</div>
                 <div className="pf-provider-info">
@@ -805,19 +846,19 @@ export const RequestsTab: React.FC = () => {
                   <div className="pf-detail">
                     {extActive
                       ? `${extActive.model} · ${formatDuration(extActive.elapsed_ms)}`
-                      : 'Sẵn sàng · Chờ request'}
+                      : t('requests.readyWaiting')}
                   </div>
                 </div>
                 <span className="pf-provider-state">
                   {extActive
                     ? extActive.status === 'success'
-                      ? 'Thành công'
+                      ? t('requests.statusSuccess')
                       : extActive.status === 'error'
-                      ? 'Lỗi'
+                      ? t('requests.statusError')
                       : extActive.status === 'cancelled'
-                      ? 'Đã hủy'
-                      : 'Active'
-                    : 'Ready'}
+                      ? t('requests.statusCancelled')
+                      : t('requests.statusActive')
+                    : t('requests.statusReady')}
                 </span>
               </div>
             </div>
@@ -828,7 +869,7 @@ export const RequestsTab: React.FC = () => {
         <div className="pf-active-bar" aria-live="polite">
           {activeRequests.length === 0 ? (
             <div className="pf-active-empty">
-              Không có request đang xử lý · Hệ thống ở trạng thái chờ (Idle)
+              {t('requests.activeBarEmpty')}
             </div>
           ) : (
             activeRequests.map((req) => (
@@ -836,7 +877,7 @@ export const RequestsTab: React.FC = () => {
                 key={req.id}
                 className="pf-active-chip"
                 onClick={() => setSelectedActiveReq(req)}
-                title="Nhấp để kiểm tra chi tiết request"
+                title={t('requests.activeChipTitle')}
               >
                 <span
                   className={`pf-chip-pulse ${
@@ -853,8 +894,20 @@ export const RequestsTab: React.FC = () => {
                 <span className="pf-chip-arrow">→</span>
                 <span className="pf-chip-prov">{req.provider}</span>
                 {req.account && <span className="pf-chip-acc">· {req.account}</span>}
-                <span className="pf-chip-elapsed">{formatDuration(req.elapsed_ms)}</span>
-                <span className={`pf-chip-badge ${req.status}`}>{req.status}</span>
+                <span className="pf-chip-elapsed">
+                  {req.status === 'generating'
+                    ? `Stream ${formatDuration(req.elapsed_ms)}`
+                    : req.status === 'routing'
+                    ? `Kết nối ${formatDuration(req.elapsed_ms)}`
+                    : formatDuration(req.elapsed_ms)}
+                </span>
+                <span className={`pf-chip-badge ${req.status}`}>
+                  {req.status === 'generating'
+                    ? '⚡ ĐANG SINH'
+                    : req.status === 'routing'
+                    ? 'KẾT NỐI'
+                    : req.status.toUpperCase()}
+                </span>
               </div>
             ))
           )}
@@ -865,51 +918,54 @@ export const RequestsTab: React.FC = () => {
       <div className="traffic-kpi-grid">
         <div className="card">
           <div className="kpi-label">
-            <span>Tổng Yêu Cầu</span>
+            <span>{t('requests.kpiTotalRequests')}</span>
             <IconZap size={16} />
           </div>
           <div className="kpi-value">
-            {stats ? stats.total_requests.toLocaleString('vi-VN') : data?.total ?? 0}
+            {stats ? stats.total_requests.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US') : data?.total ?? 0}
           </div>
           <div className="kpi-sub">
-            Hiển thị: <strong>{data?.total ?? 0}</strong> bản ghi lọc
+            {t('requests.kpiFilteredCount', { count: data?.total ?? 0 })}
           </div>
         </div>
 
         <div className="card">
           <div className="kpi-label">
-            <span>Monitoring</span>
+            <span>{t('requests.kpiMonitoring')}</span>
             <IconActivity size={16} />
           </div>
           <div className="kpi-value" style={{ color: '#818cf8' }}>
             {stats?.rpm ?? 0}
             <span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4 }}>req/min</span>
           </div>
-          <div className="kpi-sub">Thông lượng Antigravity + Codex</div>
+          <div className="kpi-sub">{t('requests.kpiRpmSub')}</div>
         </div>
 
         <div className="card">
           <div className="kpi-label">
-            <span>Độ Trễ TB</span>
-            <span className="badge badge-neutral">Upstream</span>
+            <span>Thời Gian Stream TB</span>
+            <span className="badge badge-neutral">Gồm stream</span>
           </div>
           <div className="kpi-value">
-            {stats?.avg_duration_ms ? stats.avg_duration_ms.toFixed(1) : '0.0'}
-            <span style={{ fontSize: 13, fontWeight: 400, marginLeft: 4 }}>ms</span>
+            {stats?.avg_duration_ms
+              ? stats.avg_duration_ms < 1000
+                ? `${stats.avg_duration_ms.toFixed(0)} ms`
+                : `${(stats.avg_duration_ms / 1000).toFixed(1)}s`
+              : '0.0 ms'}
           </div>
           <div className="kpi-sub">
             {stats?.avg_duration_ms && stats.avg_duration_ms < 1000
-              ? '⚡ Phản hồi rất nhanh'
-              : 'Ổn định theo mô hình'}
+              ? '⚡ Phản hồi ban đầu nhanh (<1s)'
+              : '⚡ Thời gian truyền toàn bộ stream'}
           </div>
         </div>
 
         <div className="card">
           <div className="kpi-label">
-            <span>Tỷ Lệ Lỗi</span>
+            <span>Tỷ Lệ Lỗi Hệ Thống</span>
             <span
               className={`badge ${
-                stats && stats.error_count > 0 ? 'badge-error' : 'badge-success'
+                stats && stats.error_rate > 1.0 ? 'badge-error' : 'badge-success'
               }`}
             >
               {stats?.error_rate ? `${stats.error_rate}%` : '0%'}
@@ -917,24 +973,28 @@ export const RequestsTab: React.FC = () => {
           </div>
           <div
             className="kpi-value"
-            style={{ color: stats && stats.error_count > 0 ? '#ef4444' : 'inherit' }}
+            style={{ color: stats && stats.error_rate > 1.0 ? '#ef4444' : 'inherit' }}
           >
             {stats?.error_count ?? 0}
           </div>
-          <div className="kpi-sub">Lỗi upstream hoặc ngắt kết nối</div>
+          <div className="kpi-sub">
+            {stats?.quota_count !== undefined
+              ? `⚡ Chạm Quota/Limit: ${stats.quota_count}`
+              : 'Lỗi 5xx hoặc mạng (không tính hết quota)'}
+          </div>
         </div>
 
         <div className="card">
           <div className="kpi-label">
-            <span>Tổng Tokens</span>
+            <span>{t('requests.kpiTotalTokens')}</span>
             <span className="badge badge-neutral">In / Out</span>
           </div>
           <div className="kpi-value">
-            {stats ? stats.total_tokens.toLocaleString('vi-VN') : 0}
+            {stats ? stats.total_tokens.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US') : 0}
           </div>
           <div className="kpi-sub">
-            P: {(stats?.prompt_tokens ?? 0).toLocaleString('vi-VN')} | C:{' '}
-            {(stats?.completion_tokens ?? 0).toLocaleString('vi-VN')}
+            P: {(stats?.prompt_tokens ?? 0).toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US')} | C:{' '}
+            {(stats?.completion_tokens ?? 0).toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US')}
           </div>
         </div>
       </div>
@@ -943,40 +1003,40 @@ export const RequestsTab: React.FC = () => {
       <div className="card" style={{ marginBottom: 20 }}>
         <form onSubmit={handleSearchSubmit} className="filter-form">
           <div className="form-group filter-item-model">
-            <label>Lọc Theo Tên Model</label>
+            <label>{t('requests.filterModelLabel')}</label>
             <input
               type="text"
-              placeholder="VD: gemini, claude, sol..."
+              placeholder={t('requests.filterModelPlaceholder')}
               value={modelFilter}
               onChange={(e) => setModelFilter(e.target.value)}
             />
           </div>
 
           <div className="form-group filter-item-status">
-            <label>Trạng Thái</label>
+            <label>{t('requests.filterStatusLabel')}</label>
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-              <option value="">Tất cả trạng thái</option>
-              <option value="success">Thành công (success / 200)</option>
-              <option value="error">Lỗi (error / 4xx / 5xx)</option>
-              <option value="cancelled">Đã hủy (cancelled)</option>
+              <option value="">{t('requests.filterStatusAll')}</option>
+              <option value="success">{t('requests.filterStatusSuccess')}</option>
+              <option value="error">{t('requests.filterStatusError')}</option>
+              <option value="cancelled">{t('requests.filterStatusCancelled')}</option>
             </select>
           </div>
 
           <div className="form-group filter-item-status">
-            <label>Phân Loại Độ Trễ</label>
+            <label>{t('requests.filterLatencyLabel')}</label>
             <select
               value={latencyPreset}
               onChange={(e) => setLatencyPreset(e.target.value as any)}
             >
-              <option value="all">Tất cả tốc độ</option>
-              <option value="fast">Nhanh (&lt; 1 giây)</option>
-              <option value="med">Vừa (1 - 3 giây)</option>
-              <option value="slow">Chậm (&gt; 3 giây)</option>
+              <option value="all">{t('requests.filterLatencyAll')}</option>
+              <option value="fast">{t('requests.filterLatencyFast')}</option>
+              <option value="med">{t('requests.filterLatencyMed')}</option>
+              <option value="slow">{t('requests.filterLatencySlow')}</option>
             </select>
           </div>
 
           <div className="form-group filter-item-limit">
-            <label>Số Lượng</label>
+            <label>{t('requests.filterLimitLabel')}</label>
             <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
               <option value={25}>25</option>
               <option value={50}>50</option>
@@ -985,21 +1045,21 @@ export const RequestsTab: React.FC = () => {
           </div>
 
           <button type="submit" className="btn btn-primary filter-submit-btn">
-            Áp Dụng Lọc
+            {t('requests.filterApply')}
           </button>
         </form>
 
         {/* Quick Filter Presets */}
         <div className="traffic-filter-presets">
           <span style={{ fontSize: 12, color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4 }}>
-            Bộ lọc nhanh:
+            {t('requests.quickFilterLabel')}
           </span>
           <button
             type="button"
             className={`preset-chip ${modelFilter === '' ? 'active' : ''}`}
             onClick={() => setModelPreset('')}
           >
-            Tất Cả Models
+            {t('requests.quickFilterAll')}
           </button>
           <button
             type="button"
@@ -1023,7 +1083,17 @@ export const RequestsTab: React.FC = () => {
               setOffset(0);
             }}
           >
-            Chỉ Xem Lỗi
+            Lỗi Hệ Thống
+          </button>
+          <button
+            type="button"
+            className={`preset-chip ${statusFilter === 'quota_exhausted' ? 'active' : ''}`}
+            onClick={() => {
+              setStatusFilter(statusFilter === 'quota_exhausted' ? '' : 'quota_exhausted');
+              setOffset(0);
+            }}
+          >
+            ⚡ Hết Quota
           </button>
         </div>
       </div>
@@ -1039,20 +1109,20 @@ export const RequestsTab: React.FC = () => {
       <div className="card">
         <div className="section-header">
           <div>
-            <h2 className="section-title">Nhật Ký Yêu Cầu</h2>
+            <h2 className="section-title">{t('requests.tableTitle')}</h2>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              Nhấp vào dòng để xem chi tiết request, token và log upstream.
+              {t('requests.tableSubtitle')}
             </p>
           </div>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Đang hiển thị <strong>{filteredItems.length}</strong> / <strong>{data?.total ?? 0}</strong> yêu cầu
+            {t('requests.showingRequests', { shown: filteredItems.length, total: data?.total ?? 0 })}
           </span>
         </div>
 
         {loading ? (
           <div className="state-container">
             <div className="spinner" />
-            <p>Đang tải nhật ký...</p>
+            <p>{t('common.loading')}</p>
           </div>
         ) : (
           <>
@@ -1060,29 +1130,25 @@ export const RequestsTab: React.FC = () => {
               <table>
                 <thead>
                   <tr>
-                    <th>ID</th>
-                    <th>Thời Gian</th>
-                    <th>Model</th>
-                    <th>Tài Khoản / Key</th>
-                    <th>Trạng Thái</th>
-                    <th>Tokens (In / Out)</th>
-                    <th>Độ Trễ</th>
-                    <th style={{ textAlign: 'right' }}>Thao Tác</th>
+                    <th>{t('requests.thId')}</th>
+                    <th>{t('requests.thTime')}</th>
+                    <th>{t('requests.thModel')}</th>
+                    <th>{t('requests.thAccountKey')}</th>
+                    <th>{t('requests.thStatus')}</th>
+                    <th>{t('requests.thTokens')}</th>
+                    <th>{t('requests.thLatency')}</th>
+                    <th style={{ textAlign: 'right' }}>{t('requests.thActions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredItems.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: 'center', padding: 36, color: 'var(--text-muted)' }}>
-                        Không có yêu cầu nào phù hợp với bộ lọc hiện tại.
+                        {t('requests.tableEmpty')}
                       </td>
                     </tr>
                   ) : (
                     filteredItems.map((item: RequestLogItem) => {
-                      const isOk =
-                        item.status === '200' ||
-                        item.status === 'ok' ||
-                        item.status === 'success';
                       const family = getModelFamily(item.model);
                       const totalTokens = item.prompt_tokens + item.completion_tokens || item.total_tokens || 1;
                       const promptPct = Math.round(((item.prompt_tokens || 0) / totalTokens) * 100);
@@ -1130,18 +1196,58 @@ export const RequestsTab: React.FC = () => {
                             )}
                           </td>
                           <td>
-                            <span
-                              className={`badge ${
-                                isOk
-                                  ? 'badge-success'
-                                  : item.error
-                                  ? 'badge-error'
-                                  : 'badge-warning'
-                              }`}
-                            >
-                              {isOk ? <IconCheck size={12} /> : <IconX size={12} />}
-                              {item.status}
-                            </span>
+                            {(() => {
+                              const isQuota =
+                                item.status === 'quota_exhausted' ||
+                                (item.error &&
+                                  (item.error.toLowerCase().includes('quota') ||
+                                    item.error.toLowerCase().includes('cooldown') ||
+                                    item.error.toLowerCase().includes('usage_limit') ||
+                                    item.error.toLowerCase().includes('payment required') ||
+                                    item.error.toLowerCase().includes('credits')));
+                              const isOk =
+                                item.status === '200' ||
+                                item.status === 'ok' ||
+                                item.status === 'success';
+                              const isCancelled = item.status === 'cancelled';
+
+                              if (isQuota) {
+                                return (
+                                  <span
+                                    className="badge badge-warning"
+                                    style={{
+                                      background: 'rgba(245, 158, 11, 0.15)',
+                                      color: '#f59e0b',
+                                      borderColor: 'rgba(245, 158, 11, 0.3)',
+                                    }}
+                                  >
+                                    <IconAlertCircle size={12} />
+                                    Hết Quota
+                                  </span>
+                                );
+                              }
+                              if (isOk) {
+                                return (
+                                  <span className="badge badge-success">
+                                    <IconCheck size={12} />
+                                    Thành công
+                                  </span>
+                                );
+                              }
+                              if (isCancelled) {
+                                return (
+                                  <span className="badge badge-neutral">
+                                    Đã hủy
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="badge badge-error">
+                                  <IconX size={12} />
+                                  Lỗi Hệ Thống
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td>
                             <div className="token-bar-wrapper">
@@ -1153,12 +1259,59 @@ export const RequestsTab: React.FC = () => {
                                 <div className="token-bar-prompt" style={{ width: `${promptPct}%` }} />
                                 <div className="token-bar-comp" style={{ width: `${compPct}%` }} />
                               </div>
+                              {(() => {
+                                const cost = estimateRequestCost(item.model, item.prompt_tokens, item.completion_tokens);
+                                if (cost === null) return null;
+                                return (
+                                  <div style={{ marginTop: 3 }}>
+                                    <span
+                                      className="font-mono"
+                                      style={{
+                                        fontSize: 10.5,
+                                        padding: '1px 5px',
+                                        borderRadius: 4,
+                                        background: 'rgba(16, 185, 129, 0.15)',
+                                        color: '#10b981',
+                                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                                        display: 'inline-block',
+                                        fontWeight: 600,
+                                      }}
+                                      title={`Ước tính chi phí OpenRouter: $${cost.toFixed(6)} USD`}
+                                    >
+                                      💰 ${cost < 0.0001 ? '<0.0001' : cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </td>
                           <td>
-                            <span className={getLatencyBadgeClass(item.duration_ms)}>
-                              {item.duration_ms.toFixed(0)} ms
-                            </span>
+                            {(() => {
+                              const tps =
+                                item.duration_ms > 0 && item.completion_tokens > 20
+                                  ? (item.completion_tokens / (item.duration_ms / 1000)).toFixed(1)
+                                  : null;
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                  <span
+                                    className={
+                                      item.completion_tokens > 20
+                                        ? 'badge-latency latency-fast'
+                                        : getLatencyBadgeClass(item.duration_ms)
+                                    }
+                                  >
+                                    {item.duration_ms < 1000
+                                      ? `${item.duration_ms.toFixed(0)} ms`
+                                      : `${(item.duration_ms / 1000).toFixed(1)}s`}
+                                  </span>
+                                  {tps && (
+                                    <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>
+                                      ⚡ {tps} t/s
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <button
@@ -1174,7 +1327,7 @@ export const RequestsTab: React.FC = () => {
                                 borderColor: item.error ? 'rgba(239, 68, 68, 0.4)' : undefined,
                               }}
                             >
-                              {item.error ? 'Xem Lỗi' : 'Chi Tiết'}
+                              {item.error ? t('requests.btnViewError') : t('requests.btnDetail')}
                             </button>
                           </td>
                         </tr>
@@ -1188,8 +1341,13 @@ export const RequestsTab: React.FC = () => {
             {/* Pagination Controls */}
             <div className="pagination-bar">
               <span className="pagination-info">
-                Trang {currentPage} / {totalPages || 1} (Bản ghi {offset + 1} -{' '}
-                {Math.min(offset + limit, data?.total || 0)} trong tổng số {data?.total || 0})
+                {t('requests.paginationInfo', {
+                  page: currentPage,
+                  totalPages: totalPages || 1,
+                  from: offset + 1,
+                  to: Math.min(offset + limit, data?.total || 0),
+                  total: data?.total || 0,
+                })}
               </span>
 
               <div className="pagination-controls">
@@ -1199,7 +1357,7 @@ export const RequestsTab: React.FC = () => {
                   onClick={() => setOffset(Math.max(0, offset - limit))}
                   disabled={offset === 0}
                 >
-                  Trước
+                  {t('requests.paginationPrev')}
                 </button>
                 <button
                   type="button"
@@ -1207,7 +1365,7 @@ export const RequestsTab: React.FC = () => {
                   onClick={() => setOffset(offset + limit)}
                   disabled={offset + limit >= (data?.total || 0)}
                 >
-                  Tiếp Theo
+                  {t('requests.paginationNext')}
                 </button>
               </div>
             </div>
@@ -1226,18 +1384,57 @@ export const RequestsTab: React.FC = () => {
             <div className="modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <h3 className="modal-title font-mono">
-                  Yêu Cầu #{inspectItem.id}
+                  {t('requests.modalRequestTitle', { id: inspectItem.id })}
                 </h3>
                 <span
                   className={`badge ${
-                    inspectItem.status === '200' ||
-                    inspectItem.status === 'ok' ||
-                    inspectItem.status === 'success'
+                    inspectItem.status === 'quota_exhausted' ||
+                    (inspectItem.error &&
+                      (inspectItem.error.toLowerCase().includes('quota') ||
+                        inspectItem.error.toLowerCase().includes('cooldown') ||
+                        inspectItem.error.toLowerCase().includes('usage_limit') ||
+                        inspectItem.error.toLowerCase().includes('payment required') ||
+                        inspectItem.error.toLowerCase().includes('credits')))
+                      ? 'badge-warning'
+                      : inspectItem.status === '200' ||
+                        inspectItem.status === 'ok' ||
+                        inspectItem.status === 'success'
                       ? 'badge-success'
+                      : inspectItem.status === 'cancelled'
+                      ? 'badge-neutral'
                       : 'badge-error'
                   }`}
+                  style={
+                    inspectItem.status === 'quota_exhausted' ||
+                    (inspectItem.error &&
+                      (inspectItem.error.toLowerCase().includes('quota') ||
+                        inspectItem.error.toLowerCase().includes('cooldown') ||
+                        inspectItem.error.toLowerCase().includes('usage_limit') ||
+                        inspectItem.error.toLowerCase().includes('payment required') ||
+                        inspectItem.error.toLowerCase().includes('credits')))
+                      ? {
+                          background: 'rgba(245, 158, 11, 0.15)',
+                          color: '#f59e0b',
+                          borderColor: 'rgba(245, 158, 11, 0.3)',
+                        }
+                      : undefined
+                  }
                 >
-                  {inspectItem.status}
+                  {inspectItem.status === 'quota_exhausted' ||
+                  (inspectItem.error &&
+                    (inspectItem.error.toLowerCase().includes('quota') ||
+                      inspectItem.error.toLowerCase().includes('cooldown') ||
+                      inspectItem.error.toLowerCase().includes('usage_limit') ||
+                      inspectItem.error.toLowerCase().includes('payment required') ||
+                      inspectItem.error.toLowerCase().includes('credits')))
+                    ? '⚡ Hết Quota'
+                    : inspectItem.status === '200' ||
+                      inspectItem.status === 'ok' ||
+                      inspectItem.status === 'success'
+                    ? 'Thành công'
+                    : inspectItem.status === 'cancelled'
+                    ? 'Đã hủy'
+                    : 'Lỗi Hệ Thống'}
                 </span>
               </div>
               <button
@@ -1256,7 +1453,7 @@ export const RequestsTab: React.FC = () => {
                 className={`inspector-tab-btn ${inspectTab === 'overview' ? 'active' : ''}`}
                 onClick={() => setInspectTab('overview')}
               >
-                Tổng Quan
+                {t('requests.modalTabOverview')}
               </button>
               {inspectItem.error && (
                 <button
@@ -1265,7 +1462,7 @@ export const RequestsTab: React.FC = () => {
                   onClick={() => setInspectTab('error')}
                   style={{ color: '#ef4444' }}
                 >
-                  Lỗi Upstream
+                  {t('requests.modalTabError')}
                 </button>
               )}
               <button
@@ -1273,7 +1470,7 @@ export const RequestsTab: React.FC = () => {
                 className={`inspector-tab-btn ${inspectTab === 'raw' ? 'active' : ''}`}
                 onClick={() => setInspectTab('raw')}
               >
-                Dữ Liệu Thô (JSON)
+                {t('requests.modalTabRaw')}
               </button>
             </div>
 
@@ -1282,42 +1479,49 @@ export const RequestsTab: React.FC = () => {
               <div>
                 <div className="inspector-grid">
                   <div className="inspector-stat-box">
-                    <div className="inspector-stat-label">Mô Hình (Model)</div>
+                    <div className="inspector-stat-label">{t('requests.modalFieldModel')}</div>
                     <div className="inspector-stat-value font-mono">
                       {inspectItem.model}
                     </div>
                   </div>
 
                   <div className="inspector-stat-box">
-                    <div className="inspector-stat-label">Tài Khoản / Key</div>
+                    <div className="inspector-stat-label">{t('requests.modalFieldAccountKey')}</div>
                     <div className="inspector-stat-value font-mono">
                       {inspectItem.account_id || '—'}
                     </div>
                   </div>
 
                   <div className="inspector-stat-box">
-                    <div className="inspector-stat-label">Thời Gian Ghi Nhận</div>
+                    <div className="inspector-stat-label">{t('requests.modalFieldRecordedAt')}</div>
                     <div className="inspector-stat-value font-mono" style={{ fontSize: 13 }}>
                       {formatExactTime(inspectItem.timestamp)}
                     </div>
                   </div>
 
                   <div className="inspector-stat-box">
-                    <div className="inspector-stat-label">Thời Gian Phản Hồi</div>
+                    <div className="inspector-stat-label">Thời gian thực thi / Stream</div>
                     <div className="inspector-stat-value">
-                      <span className={getLatencyBadgeClass(inspectItem.duration_ms)}>
-                        {inspectItem.duration_ms.toFixed(1)} ms ({getLatencyLabel(inspectItem.duration_ms)})
+                      <span className={inspectItem.completion_tokens > 20 ? 'badge-latency latency-fast' : getLatencyBadgeClass(inspectItem.duration_ms)}>
+                        {inspectItem.duration_ms < 1000
+                          ? `${inspectItem.duration_ms.toFixed(1)} ms (${getLatencyLabel(inspectItem.duration_ms)})`
+                          : `${(inspectItem.duration_ms / 1000).toFixed(2)}s (Tổng stream)`}
                       </span>
+                      {inspectItem.duration_ms > 0 && inspectItem.completion_tokens > 0 && (
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                          ⚡ {((inspectItem.completion_tokens) / (inspectItem.duration_ms / 1000)).toFixed(1)} t/s
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="inspector-stat-box" style={{ marginTop: 12 }}>
-                  <div className="inspector-stat-label">Thống Kê Token Tiêu Thụ</div>
+                  <div className="inspector-stat-label">{t('requests.modalFieldTokenStats')}</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 13 }}>
-                    <span>Prompt: <strong>{inspectItem.prompt_tokens}</strong></span>
-                    <span>Completion: <strong>{inspectItem.completion_tokens}</strong></span>
-                    <span>Tổng: <strong>{inspectItem.total_tokens}</strong></span>
+                    <span>{t('requests.modalPrompt')}: <strong>{inspectItem.prompt_tokens}</strong></span>
+                    <span>{t('requests.modalCompletion')}: <strong>{inspectItem.completion_tokens}</strong></span>
+                    <span>{t('requests.modalTotal')}: <strong>{inspectItem.total_tokens}</strong></span>
                   </div>
                   <div
                     className="token-bar-track"
@@ -1341,6 +1545,24 @@ export const RequestsTab: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                {(() => {
+                  const cost = estimateRequestCost(inspectItem.model, inspectItem.prompt_tokens, inspectItem.completion_tokens);
+                  if (cost === null) return null;
+                  return (
+                    <div className="inspector-stat-box" style={{ marginTop: 12 }}>
+                      <div className="inspector-stat-label">Chi phí ước tính (OpenRouter Cost)</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, fontSize: 13 }}>
+                        <span style={{ color: '#10b981', fontWeight: 700, fontSize: 16 }}>
+                          ${cost < 0.0001 ? '<$0.0001' : cost.toFixed(5)} USD
+                        </span>
+                        <span className="font-mono" style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          {inspectItem.model.replace('openrouter/', '')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1348,7 +1570,7 @@ export const RequestsTab: React.FC = () => {
             {inspectTab === 'error' && inspectItem.error && (
               <div>
                 <div style={{ marginBottom: 12, fontSize: 13, color: '#fca5a5' }}>
-                  Thông báo lỗi được ghi nhận từ phía upstream hoặc hệ thống proxy:
+                  {t('requests.modalErrorNotice')}
                 </div>
                 <div
                   className="code-viewer-box"
@@ -1375,7 +1597,7 @@ export const RequestsTab: React.FC = () => {
                     style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                   >
                     <IconCopy size={14} />
-                    <span>{copiedRaw ? 'Đã Sao Chép!' : 'Sao Chép JSON'}</span>
+                    <span>{copiedRaw ? t('requests.copiedJson') : t('requests.copyJson')}</span>
                   </button>
                 </div>
                 <div className="code-viewer-box" style={{ maxHeight: 300, fontSize: 12 }}>
@@ -1390,7 +1612,7 @@ export const RequestsTab: React.FC = () => {
                 className="btn btn-secondary"
                 onClick={() => setInspectItem(null)}
               >
-                Đóng
+                {t('actions.close')}
               </button>
             </div>
           </div>
@@ -1408,13 +1630,13 @@ export const RequestsTab: React.FC = () => {
             <div className="modal-header">
               <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="live-pulse-dot" />
-                Chi Tiết Live Request
+                {t('requests.modalLiveTitle')}
               </h2>
               <button
                 type="button"
                 className="btn-icon-only modal-close-btn"
                 onClick={() => setSelectedActiveReq(null)}
-                title="Đóng"
+                title={t('actions.close')}
                 style={{ minWidth: 44, minHeight: 44 }}
               >
                 <IconX size={18} />
@@ -1422,12 +1644,12 @@ export const RequestsTab: React.FC = () => {
             </div>
 
             <div className="pf-modal-notice">
-              🔒 Dữ liệu trực tiếp được chuẩn hóa an toàn: prompts, completions, tokens và API keys không bao giờ được ghi nhớ trong registry bộ nhớ đệm.
+              {t('requests.modalLiveNotice')}
             </div>
 
             <div className="pf-modal-grid">
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Trạng Thái</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldStatus')}</div>
                 <div className="pf-modal-field-value">
                   <span className={`pf-chip-badge ${selectedActiveReq.status}`}>
                     {selectedActiveReq.status.toUpperCase()}
@@ -1436,53 +1658,53 @@ export const RequestsTab: React.FC = () => {
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Độ Trễ / Thời Gian</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldElapsed')}</div>
                 <div className="pf-modal-field-value" style={{ color: '#34d399', fontFamily: 'var(--font-mono)' }}>
                   {formatDuration(selectedActiveReq.elapsed_ms)}
                 </div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Khách Hàng (Client)</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldClient')}</div>
                 <div className="pf-modal-field-value">{selectedActiveReq.client}</div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Provider Đã Chọn</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldProvider')}</div>
                 <div className="pf-modal-field-value">{selectedActiveReq.provider}</div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Mô Hình (Model)</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldModel')}</div>
                 <div className="pf-modal-field-value" style={{ fontFamily: 'var(--font-mono)' }}>
                   {selectedActiveReq.model}
                 </div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Tài Khoản (Masked)</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldAccountMasked')}</div>
                 <div className="pf-modal-field-value" style={{ fontFamily: 'var(--font-mono)' }}>
                   {selectedActiveReq.account}
                 </div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Chế Độ Truyền</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldMode')}</div>
                 <div className="pf-modal-field-value">
-                  {selectedActiveReq.stream ? 'SSE Streaming' : 'Non-streaming (JSON)'}
+                  {selectedActiveReq.stream ? t('requests.modeStreaming') : t('requests.modeNonStreaming')}
                 </div>
               </div>
 
               <div className="pf-modal-field">
-                <div className="pf-modal-field-label">Bắt Đầu Lúc</div>
+                <div className="pf-modal-field-label">{t('requests.modalFieldStartedAt')}</div>
                 <div className="pf-modal-field-value">
-                  {new Date(selectedActiveReq.started_at * 1000).toLocaleTimeString('vi-VN')}
+                  {new Date(selectedActiveReq.started_at * 1000).toLocaleTimeString(locale === 'vi' ? 'vi-VN' : 'en-US')}
                 </div>
               </div>
             </div>
 
             <div className="pf-modal-field" style={{ marginBottom: 16 }}>
-              <div className="pf-modal-field-label">Request ID</div>
+              <div className="pf-modal-field-label">{t('requests.modalFieldRequestId')}</div>
               <div
                 className="pf-modal-field-value"
                 style={{
@@ -1506,7 +1728,7 @@ export const RequestsTab: React.FC = () => {
                   style={{ minHeight: 44, padding: '0 12px', flexShrink: 0 }}
                 >
                   {copiedActiveId ? <IconCheck size={14} /> : <IconCopy size={14} />}
-                  <span>{copiedActiveId ? 'Đã sao chép' : 'Copy'}</span>
+                  <span>{copiedActiveId ? t('actions.copied') : t('actions.copy')}</span>
                 </button>
               </div>
             </div>
@@ -1518,7 +1740,7 @@ export const RequestsTab: React.FC = () => {
                 onClick={() => setSelectedActiveReq(null)}
                 style={{ minHeight: 44, minWidth: 90 }}
               >
-                Đóng
+                {t('actions.close')}
               </button>
             </div>
           </div>

@@ -29,6 +29,10 @@ pub const CODEX_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub const CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 pub const CODEX_USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+pub const CODEX_RESET_CREDITS_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
+pub const CODEX_CONSUME_RESET_CREDIT_URL: &str =
+    "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume";
 pub const CODEX_AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 pub const CODEX_DEFAULT_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
 pub const CODEX_OAUTH_REDIRECT_URI: &str = CODEX_DEFAULT_REDIRECT_URI;
@@ -361,12 +365,36 @@ pub trait CodexQuotaFetcher: Send + Sync + std::fmt::Debug {
         access_token: &str,
         account_id: &str,
     ) -> Result<serde_json::Value, String>;
+
+    async fn fetch_reset_credits(
+        &self,
+        _access_token: &str,
+        _account_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({
+            "credits": [],
+            "available_count": 0
+        }))
+    }
+
+    async fn consume_reset_credit(
+        &self,
+        _access_token: &str,
+        _account_id: &str,
+        _credit_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({
+            "outcome": "reset"
+        }))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct DefaultCodexQuotaFetcher {
     client: reqwest::Client,
     usage_url: String,
+    reset_credits_url: String,
+    consume_reset_credit_url: String,
 }
 
 impl Default for DefaultCodexQuotaFetcher {
@@ -379,16 +407,35 @@ impl DefaultCodexQuotaFetcher {
     pub fn new() -> Self {
         let usage_url =
             std::env::var("CODEX_USAGE_URL").unwrap_or_else(|_| CODEX_USAGE_URL.to_string());
-        Self::with_url(usage_url)
+        let reset_credits_url = std::env::var("CODEX_RESET_CREDITS_URL")
+            .unwrap_or_else(|_| CODEX_RESET_CREDITS_URL.to_string());
+        let consume_reset_credit_url = std::env::var("CODEX_CONSUME_RESET_CREDIT_URL")
+            .unwrap_or_else(|_| CODEX_CONSUME_RESET_CREDIT_URL.to_string());
+        Self::with_urls(usage_url, reset_credits_url, consume_reset_credit_url)
     }
 
     pub fn with_url(usage_url: impl Into<String>) -> Self {
+        let u = usage_url.into();
+        Self::with_urls(
+            u,
+            CODEX_RESET_CREDITS_URL.to_string(),
+            CODEX_CONSUME_RESET_CREDIT_URL.to_string(),
+        )
+    }
+
+    pub fn with_urls(
+        usage_url: impl Into<String>,
+        reset_credits_url: impl Into<String>,
+        consume_reset_credit_url: impl Into<String>,
+    ) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(15))
                 .build()
                 .expect("Failed to build DefaultCodexQuotaFetcher client"),
             usage_url: usage_url.into(),
+            reset_credits_url: reset_credits_url.into(),
+            consume_reset_credit_url: consume_reset_credit_url.into(),
         }
     }
 }
@@ -427,6 +474,32 @@ fn normalize_quota_window(mut window: serde_json::Value) -> serde_json::Value {
         if !obj.contains_key("reset_at") {
             if let Some(r) = obj.get("resetAt").or_else(|| obj.get("reset_time")) {
                 obj.insert("reset_at".to_string(), r.clone());
+            } else if let Some(ras) = obj
+                .get("reset_after_seconds")
+                .or_else(|| obj.get("resetAfterSeconds"))
+                .and_then(|v| v.as_f64())
+            {
+                let calculated_at = current_time_secs() + ras;
+                obj.insert(
+                    "reset_at".to_string(),
+                    serde_json::json!(calculated_at as i64),
+                );
+            }
+        }
+        if !obj.contains_key("reset_time") {
+            if let Some(reset_at) = obj.get("reset_at").and_then(|v| v.as_f64()).or_else(|| {
+                obj.get("reset_at")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+            }) {
+                let ts = if reset_at > 1e11 {
+                    (reset_at / 1000.0) as i64
+                } else {
+                    reset_at as i64
+                };
+                if let Some(dt) = chrono::DateTime::from_timestamp(ts, 0) {
+                    obj.insert("reset_time".to_string(), serde_json::json!(dt.to_rfc3339()));
+                }
             }
         }
     }
@@ -482,18 +555,126 @@ impl CodexQuotaFetcher for DefaultCodexQuotaFetcher {
             .unwrap_or("")
             .to_string();
 
+        let reset_credits = raw
+            .get("rate_limit_reset_credits")
+            .cloned()
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "available_count": 0,
+                    "applicable_available_count": 0
+                })
+            });
+
+        let plan_type = raw
+            .get("plan_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         Ok(serde_json::json!({
             "primary_window": primary,
             "weekly_window": secondary,
+            "rate_limit_reset_credits": reset_credits,
+            "plan_type": plan_type,
             "email": email,
             "fetched_at": current_time_secs(),
         }))
+    }
+
+    async fn fetch_reset_credits(
+        &self,
+        access_token: &str,
+        account_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        let resp = self
+            .client
+            .get(&self.reset_credits_url)
+            .header(AUTHORIZATION, format!("Bearer {access_token}"))
+            .header("ChatGPT-Account-Id", account_id)
+            .header(USER_AGENT, CODEX_USER_AGENT)
+            .header("originator", CODEX_ORIGINATOR)
+            .header(ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("Codex reset credits network error: {e}"))?;
+
+        let status = resp.status();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read Codex reset credits response: {e}"))?;
+
+        if !status.is_success() {
+            let masked = mask_codex_error(&body);
+            return Err(format!(
+                "Codex reset credits fetch failed ({status}): {masked}"
+            ));
+        }
+
+        let raw: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse Codex reset credits JSON: {e}"))?;
+
+        Ok(raw)
+    }
+
+    async fn consume_reset_credit(
+        &self,
+        access_token: &str,
+        account_id: &str,
+        credit_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let req_id = uuid::Uuid::new_v4().to_string();
+        let mut body = serde_json::json!({
+            "redeem_request_id": req_id,
+            "idempotency_key": req_id,
+        });
+        if let Some(cid) = credit_id {
+            let trimmed = cid.trim();
+            if !trimmed.is_empty() {
+                body["credit_id"] = serde_json::json!(trimmed);
+            }
+        }
+
+        let resp = self
+            .client
+            .post(&self.consume_reset_credit_url)
+            .header(AUTHORIZATION, format!("Bearer {access_token}"))
+            .header("ChatGPT-Account-Id", account_id)
+            .header(USER_AGENT, CODEX_USER_AGENT)
+            .header("originator", CODEX_ORIGINATOR)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Codex consume reset credit network error: {e}"))?;
+
+        let status = resp.status();
+        let resp_body = resp
+            .text()
+            .await
+            .map_err(|e| format!("Failed to read Codex consume reset credit response: {e}"))?;
+
+        if !status.is_success() {
+            let masked = mask_codex_error(&resp_body);
+            return Err(format!(
+                "Codex consume reset credit failed ({status}): {masked}"
+            ));
+        }
+
+        let raw: serde_json::Value = serde_json::from_str(&resp_body)
+            .unwrap_or_else(|_| serde_json::json!({ "raw": resp_body }));
+
+        Ok(raw)
     }
 }
 
 #[derive(Debug, Default)]
 pub struct MockCodexQuotaFetcher {
     pub custom_quota: RwLock<Option<serde_json::Value>>,
+    pub custom_reset_credits: RwLock<Option<serde_json::Value>>,
+    pub consume_outcome: RwLock<Option<serde_json::Value>>,
+    pub consume_called: Arc<AtomicBool>,
     pub should_fail: AtomicBool,
 }
 
@@ -501,6 +682,9 @@ impl MockCodexQuotaFetcher {
     pub fn new() -> Self {
         Self {
             custom_quota: RwLock::new(None),
+            custom_reset_credits: RwLock::new(None),
+            consume_outcome: RwLock::new(None),
+            consume_called: Arc::new(AtomicBool::new(false)),
             should_fail: AtomicBool::new(false),
         }
     }
@@ -508,6 +692,19 @@ impl MockCodexQuotaFetcher {
     pub fn with_quota(quota: serde_json::Value) -> Self {
         Self {
             custom_quota: RwLock::new(Some(quota)),
+            custom_reset_credits: RwLock::new(None),
+            consume_outcome: RwLock::new(None),
+            consume_called: Arc::new(AtomicBool::new(false)),
+            should_fail: AtomicBool::new(false),
+        }
+    }
+
+    pub fn with_reset_credits(credits: serde_json::Value) -> Self {
+        Self {
+            custom_quota: RwLock::new(None),
+            custom_reset_credits: RwLock::new(Some(credits)),
+            consume_outcome: RwLock::new(None),
+            consume_called: Arc::new(AtomicBool::new(false)),
             should_fail: AtomicBool::new(false),
         }
     }
@@ -533,18 +730,85 @@ impl CodexQuotaFetcher for MockCodexQuotaFetcher {
             .unwrap()
             .clone()
             .unwrap_or_else(|| {
+                let reset_at = current_time_secs() + 18000.0;
+                let reset_time = chrono::DateTime::from_timestamp(reset_at as i64, 0)
+                    .map(|dt| dt.to_rfc3339())
+                    .unwrap_or_default();
                 serde_json::json!({
                     "primary_window": {
                         "used_percent": 10.0,
-                        "reset_at": current_time_secs() + 18000.0,
+                        "reset_at": reset_at,
+                        "reset_time": reset_time,
+                        "reset_after_seconds": 18000,
                     },
                     "weekly_window": {
                         "used_percent": 5.0,
+                        "reset_at": reset_at + 86400.0 * 6.0,
+                        "reset_after_seconds": 604800,
                     },
+                    "rate_limit_reset_credits": {
+                        "available_count": 3,
+                        "applicable_available_count": 0
+                    },
+                    "plan_type": "team",
                     "fetched_at": current_time_secs(),
                 })
             });
         Ok(q)
+    }
+
+    async fn fetch_reset_credits(
+        &self,
+        _access_token: &str,
+        _account_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        if self.should_fail.load(Ordering::SeqCst) {
+            return Err("Mock reset credits fetch failed".to_string());
+        }
+        let credits = self
+            .custom_reset_credits
+            .read()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "credits": [
+                        {
+                            "id": "mock_credit_1",
+                            "title": "Full reset (Weekly + 5 hr)",
+                            "description": "One free rate limit reset",
+                            "status": "available",
+                            "granted_at": "2026-09-29T19:01:04Z",
+                            "expires_at": "2026-10-29T19:01:04Z"
+                        }
+                    ],
+                    "available_count": 1
+                })
+            });
+        Ok(credits)
+    }
+
+    async fn consume_reset_credit(
+        &self,
+        _access_token: &str,
+        _account_id: &str,
+        _credit_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        if self.should_fail.load(Ordering::SeqCst) {
+            return Err("Mock consume reset credit failed".to_string());
+        }
+        self.consume_called.store(true, Ordering::SeqCst);
+        let outcome = self
+            .consume_outcome
+            .read()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "outcome": "reset"
+                })
+            });
+        Ok(outcome)
     }
 }
 
@@ -879,12 +1143,8 @@ impl std::fmt::Debug for CodexPool {
 
 impl CodexPool {
     pub fn new(db: Arc<Database>) -> Self {
-        let data_dir = std::env::var("AG_DATA_DIR")
-            .or_else(|_| std::env::var("EZ_DATA_DIR"))
-            .unwrap_or_else(|_| crate::config::DEFAULT_DATA_DIR.to_string());
-        let base_path = PathBuf::from(data_dir);
-        let accounts_dir = base_path.join("codex-accounts");
-        let default_auth_path = base_path.join("codex-auth.json");
+        let accounts_dir = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-accounts");
+        let default_auth_path = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-auth.json");
         Self::with_components(
             db,
             Arc::new(DefaultCodexTokenRefresher::new()),
@@ -896,12 +1156,8 @@ impl CodexPool {
     }
 
     pub fn with_refresher(db: Arc<Database>, refresher: Arc<dyn CodexTokenRefresher>) -> Self {
-        let data_dir = std::env::var("AG_DATA_DIR")
-            .or_else(|_| std::env::var("EZ_DATA_DIR"))
-            .unwrap_or_else(|_| crate::config::DEFAULT_DATA_DIR.to_string());
-        let base_path = PathBuf::from(data_dir);
-        let accounts_dir = base_path.join("codex-accounts");
-        let default_auth_path = base_path.join("codex-auth.json");
+        let accounts_dir = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-accounts");
+        let default_auth_path = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-auth.json");
         Self::with_components(
             db,
             refresher,
@@ -1359,6 +1615,67 @@ impl CodexPool {
             }
         }
         serde_json::Value::Object(results)
+    }
+
+    pub async fn fetch_account_reset_credits(
+        &self,
+        account_id: &str,
+    ) -> Result<serde_json::Value, String> {
+        let account = self
+            .accounts
+            .read()
+            .unwrap()
+            .get(account_id)
+            .cloned()
+            .ok_or_else(|| "Codex account not found".to_string())?;
+
+        let token = self.ensure_token(&account).await?;
+        let acc_id = account.account_id.read().unwrap().clone();
+        self.quota_fetcher
+            .fetch_reset_credits(&token, &acc_id)
+            .await
+    }
+
+    pub async fn consume_account_reset_credit(
+        &self,
+        account_id: &str,
+        credit_id: Option<String>,
+    ) -> Result<serde_json::Value, String> {
+        let account = self
+            .accounts
+            .read()
+            .unwrap()
+            .get(account_id)
+            .cloned()
+            .ok_or_else(|| "Codex account not found".to_string())?;
+
+        // Validate credit_id if provided
+        if let Some(ref cid) = credit_id {
+            let trimmed = cid.trim();
+            if trimmed.len() > 128
+                || (!trimmed.is_empty()
+                    && !trimmed
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            {
+                return Err("Invalid credit_id format".to_string());
+            }
+        }
+
+        // Serialize consumption per account using quota_lock
+        let result = {
+            let _lock = account.quota_lock.lock().await;
+            let token = self.ensure_token(&account).await?;
+            let acc_id = account.account_id.read().unwrap().clone();
+            self.quota_fetcher
+                .consume_reset_credit(&token, &acc_id, credit_id)
+                .await?
+        };
+
+        // Re-fetch quota with force=true to refresh the cached quota immediately (acquires quota_lock itself)
+        let _ = self.fetch_account_quota(&account, true).await;
+
+        Ok(result)
     }
 
     pub fn account_status(&self, acc: &Arc<CodexAccount>) -> CodexAccountStatus {
@@ -2607,6 +2924,17 @@ impl CodexProvider {
     }
 }
 
+pub fn normalize_upstream_codex_model(model: &str) -> &str {
+    let stripped = model.strip_prefix("cx/").unwrap_or(model);
+    match stripped {
+        "astra" => "gpt-6-astra",
+        "gpt-6.1" => "gpt-6.1-sol",
+        "gpt-6" => "gpt-6-sol",
+        "gpt-5.6" => "gpt-5.6-sol",
+        other => other,
+    }
+}
+
 #[axum::async_trait]
 impl Provider for CodexProvider {
     async fn complete(
@@ -2616,10 +2944,7 @@ impl Provider for CodexProvider {
         let (converted_input, converted_tools) =
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
-        let mut upstream_model = request.model.strip_prefix("cx/").unwrap_or(&request.model);
-        if upstream_model == "astra" {
-            upstream_model = "gpt-6-astra";
-        }
+        let upstream_model = normalize_upstream_codex_model(&request.model);
 
         let is_native = self.is_native_non_stream_enabled();
         let body = serde_json::json!({
@@ -2845,10 +3170,7 @@ impl Provider for CodexProvider {
         let (converted_input, converted_tools) =
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
-        let mut upstream_model = request.model.strip_prefix("cx/").unwrap_or(&request.model);
-        if upstream_model == "astra" {
-            upstream_model = "gpt-6-astra";
-        }
+        let upstream_model = normalize_upstream_codex_model(&request.model);
 
         let body = serde_json::json!({
             "model": upstream_model,
@@ -4767,5 +5089,122 @@ mod tests {
         let snapshots = store.snapshot_recent(60.0);
         assert_eq!(snapshots.len(), 1, "Exactly one trace must be recorded");
         assert_eq!(snapshots[0].status, "error");
+    }
+
+    #[test]
+    fn test_normalize_quota_window_generates_reset_time_rfc3339() {
+        let input = serde_json::json!({
+            "used_percent": 35.5,
+            "reset_at": 1790834467,
+            "limit_window_seconds": 18000
+        });
+        let normalized = normalize_quota_window(input);
+        assert_eq!(normalized["used_percent"], 35.5);
+        assert_eq!(normalized["reset_at"], 1790834467);
+        assert!(normalized.get("reset_time").is_some());
+        let reset_time_str = normalized["reset_time"].as_str().unwrap();
+        assert!(reset_time_str.contains("T"));
+    }
+
+    #[tokio::test]
+    async fn test_codex_account_pool_reset_credits_and_consume() {
+        let db = Arc::new(Database::open_in_memory(Some("test-key")).unwrap());
+        let mock_refresher = Arc::new(MockCodexTokenRefresher::new());
+        let mock_quota = Arc::new(MockCodexQuotaFetcher::new());
+        let dir = std::env::temp_dir().join(format!("codex-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let default_auth = dir.join("auth.json");
+
+        let pool = Arc::new(CodexPool::with_components(
+            db.clone(),
+            mock_refresher,
+            mock_quota.clone(),
+            dir.clone(),
+            default_auth,
+            CODEX_BASE_URL.to_string(),
+        ));
+
+        let rec = pool
+            .add_account_with_tokens(
+                serde_json::json!({
+                    "access_token": "mock-access-token",
+                    "refresh_token": "mock-refresh-token",
+                    "account_id": "test-account-123",
+                    "email": "test@example.com"
+                }),
+                Some("acc-123"),
+            )
+            .unwrap();
+
+        let acc = pool.accounts.read().unwrap().get(&rec.id).unwrap().clone();
+
+        // 1. Fetch quota verifies rate_limit_reset_credits populated
+        let q = pool.fetch_account_quota(&acc, true).await.unwrap();
+        assert_eq!(q["rate_limit_reset_credits"]["available_count"], 3);
+
+        // 2. Fetch reset credits
+        let credits = pool.fetch_account_reset_credits(&acc.id).await.unwrap();
+        assert_eq!(credits["available_count"], 1);
+        assert_eq!(credits["credits"][0]["id"], "mock_credit_1");
+
+        // 3. Consume reset credit
+        let consume_res = pool
+            .consume_account_reset_credit(&acc.id, Some("mock_credit_1".to_string()))
+            .await
+            .unwrap();
+        assert_eq!(consume_res["outcome"], "reset");
+        assert!(mock_quota.consume_called.load(Ordering::SeqCst));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_normalize_upstream_codex_model() {
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-sol"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(normalize_upstream_codex_model("gpt-6.1-sol"), "gpt-6.1-sol");
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-6.1"), "gpt-6.1-sol");
+        assert_eq!(normalize_upstream_codex_model("gpt-6.1"), "gpt-6.1-sol");
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-6-sol"), "gpt-6-sol");
+        assert_eq!(normalize_upstream_codex_model("gpt-6-sol"), "gpt-6-sol");
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-6"), "gpt-6-sol");
+        assert_eq!(normalize_upstream_codex_model("gpt-6"), "gpt-6-sol");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6-luna"),
+            "gpt-6-luna"
+        );
+        assert_eq!(normalize_upstream_codex_model("gpt-6-luna"), "gpt-6-luna");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6-astra"),
+            "gpt-6-astra"
+        );
+        assert_eq!(normalize_upstream_codex_model("gpt-6-astra"), "gpt-6-astra");
+        assert_eq!(normalize_upstream_codex_model("astra"), "gpt-6-astra");
+        assert_eq!(normalize_upstream_codex_model("cx/astra"), "gpt-6-astra");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-sol"),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(normalize_upstream_codex_model("gpt-5.6-sol"), "gpt-5.6-sol");
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-5.6"), "gpt-5.6-sol");
+        assert_eq!(normalize_upstream_codex_model("gpt-5.6"), "gpt-5.6-sol");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-terra"),
+            "gpt-5.6-terra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-luna"),
+            "gpt-5.6-luna"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-reserve"),
+            "gpt-reserve"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/codex-auto-review"),
+            "codex-auto-review"
+        );
     }
 }

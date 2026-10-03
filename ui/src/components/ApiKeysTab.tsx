@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ApiKey } from '../types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlus,
   IconCheck,
@@ -23,6 +24,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
   error,
   onRefresh,
 }) => {
+  const { t, locale } = useI18n();
   const [showAddModal, setShowAddModal] = useState(false);
   const [name, setName] = useState('');
   const [customKey, setCustomKey] = useState('');
@@ -36,7 +38,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setActionMessage({ type: 'error', text: 'Vui lòng nhập tên định danh cho khóa API.' });
+      setActionMessage({ type: 'error', text: t('apiKeys.errNameRequired') });
       return;
     }
 
@@ -48,12 +50,12 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
         key: customKey.trim() || undefined,
       });
       setCreatedKeySecret(res.key);
-      setActionMessage({ type: 'success', text: `Đã tạo khóa API "${res.name}" thành công.` });
+      setActionMessage({ type: 'success', text: t('apiKeys.msgCreateSuccess', { name: res.name }) });
       setName('');
       setCustomKey('');
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi khi tạo khóa API.' });
+      setActionMessage({ type: 'error', text: err?.message || t('apiKeys.errCreate') });
     } finally {
       setActionLoading(false);
     }
@@ -66,26 +68,26 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
       await api.updateApiKey(key.id, !key.is_active);
       setActionMessage({
         type: 'success',
-        text: `Đã ${key.is_active ? 'vô hiệu hóa' : 'kích hoạt'} khóa "${key.name}".`,
+        text: t(key.is_active ? 'apiKeys.msgDeactivated' : 'apiKeys.msgActivated', { name: key.name }),
       });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể cập nhật trạng thái khóa.' });
+      setActionMessage({ type: 'error', text: err?.message || t('apiKeys.errUpdateStatus') });
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDelete = async (key: ApiKey) => {
-    if (!window.confirm(`Xác nhận xóa khóa API "${key.name}"? Yêu cầu sử dụng khóa này sẽ bị chặn.`)) return;
+    if (!window.confirm(t('apiKeys.confirmDelete', { name: key.name }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteApiKey(key.id);
-      setActionMessage({ type: 'success', text: `Đã xóa khóa API "${key.name}".` });
+      setActionMessage({ type: 'success', text: t('apiKeys.msgDeleteSuccess', { name: key.name }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa khóa API.' });
+      setActionMessage({ type: 'error', text: err?.message || t('apiKeys.errDelete') });
     } finally {
       setActionLoading(false);
     }
@@ -95,14 +97,14 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
     <div>
       <div className="section-header">
         <div>
-          <h2 className="section-title">Quản Lý Khóa API Khách Hàng (API Keys)</h2>
+          <h2 className="section-title">{t('apiKeys.title')}</h2>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Quản lý và cấp quyền truy cập tới proxy qua Authorization: Bearer &lt;key&gt;
+            {t('apiKeys.subtitle')}
           </span>
         </div>
         <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
           <IconPlus size={16} />
-          <span>Tạo Khóa Mới</span>
+          <span>{t('apiKeys.createButton')}</span>
         </button>
       </div>
 
@@ -128,7 +130,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
             <IconKey size={16} />
-            <span>Khóa API vừa tạo (Hãy lưu lại ngay vì khóa sẽ được ẩn sau khi tải lại trang):</span>
+            <span>{t('apiKeys.createdKeyAlert')}</span>
           </div>
           <div
             style={{
@@ -151,7 +153,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
             onClick={() => setCreatedKeySecret(null)}
             style={{ marginTop: 4 }}
           >
-            Tôi đã lưu khóa an toàn
+            {t('apiKeys.savedKeyDismiss')}
           </button>
         </div>
       )}
@@ -160,13 +162,13 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
         {loading && apiKeys.length === 0 ? (
           <div className="state-container">
             <div className="spinner" />
-            <p>Đang tải danh sách khóa API...</p>
+            <p>{t('apiKeys.loading')}</p>
           </div>
         ) : apiKeys.length === 0 ? (
           <div className="state-container">
-            <p>Chưa có khóa API nào trong hệ thống.</p>
+            <p>{t('apiKeys.empty')}</p>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowAddModal(true)}>
-              Tạo khóa API đầu tiên
+              {t('apiKeys.createFirst')}
             </button>
           </div>
         ) : (
@@ -174,12 +176,12 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
             <table>
               <thead>
                 <tr>
-                  <th>Tên Định Danh</th>
-                  <th>Khóa API (Đã Ẩn)</th>
-                  <th>Trạng Thái</th>
-                  <th>Tổng Yêu Cầu</th>
-                  <th>Ngày Tạo</th>
-                  <th>Hành Động</th>
+                  <th>{t('apiKeys.colName')}</th>
+                  <th>{t('apiKeys.colKeyMasked')}</th>
+                  <th>{t('apiKeys.colStatus')}</th>
+                  <th>{t('apiKeys.colTotalRequests')}</th>
+                  <th>{t('apiKeys.colCreatedAt')}</th>
+                  <th>{t('apiKeys.colActions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -196,10 +198,10 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
                     </td>
                     <td>
                       <span className={`badge ${k.is_active ? 'badge-success' : 'badge-neutral'}`}>
-                        {k.is_active ? 'Hoạt động' : 'Đã khóa'}
+                        {k.is_active ? t('apiKeys.statusActive') : t('apiKeys.statusLocked')}
                       </span>
                     </td>
-                    <td className="font-mono">{k.total_requests.toLocaleString('vi-VN')}</td>
+                    <td className="font-mono">{k.total_requests.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US')}</td>
                     <td className="font-mono" style={{ fontSize: 12 }}>
                       {k.created_at}
                     </td>
@@ -210,13 +212,13 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
                           onClick={() => handleToggle(k)}
                           disabled={actionLoading}
                         >
-                          {k.is_active ? 'Khóa' : 'Mở'}
+                          {k.is_active ? t('apiKeys.actionLock') : t('apiKeys.actionUnlock')}
                         </button>
                         <button
                           className="btn btn-danger btn-sm btn-icon-only"
                           onClick={() => handleDelete(k)}
                           disabled={actionLoading}
-                          title="Xóa khóa"
+                          title={t('apiKeys.actionDeleteTitle')}
                         >
                           <IconTrash size={14} />
                         </button>
@@ -235,7 +237,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
         <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Tạo Khóa API Mới</h3>
+              <h3 className="modal-title">{t('apiKeys.modalTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowAddModal(false)}
@@ -246,10 +248,10 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
 
             <form onSubmit={handleCreate}>
               <div className="form-group">
-                <label>Tên Ứng Dụng / Người Dùng (Name)</label>
+                <label>{t('apiKeys.formNameLabel')}</label>
                 <input
                   type="text"
-                  placeholder="VD: App Frontend, CLI Dev, Bot Telegram..."
+                  placeholder={t('apiKeys.formNamePlaceholder')}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
@@ -258,10 +260,10 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
               </div>
 
               <div className="form-group">
-                <label>Khóa Tùy Chọn (Để trống để tự động sinh ngẫu nhiên sk-...)</label>
+                <label>{t('apiKeys.formCustomKeyLabel')}</label>
                 <input
                   type="text"
-                  placeholder="sk-my-custom-key..."
+                  placeholder={t('apiKeys.formCustomKeyPlaceholder')}
                   value={customKey}
                   onChange={(e) => setCustomKey(e.target.value)}
                 />
@@ -273,10 +275,10 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
                   className="btn btn-secondary"
                   onClick={() => setShowAddModal(false)}
                 >
-                  Hủy
+                  {t('actions.cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Tạo Khóa'}
+                  {actionLoading ? <div className="spinner" /> : t('apiKeys.btnSubmitCreate')}
                 </button>
               </div>
             </form>

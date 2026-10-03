@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CodexAccountRecord, CodexStatusResponse } from '../types';
 import { api } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlus,
   IconCheck,
@@ -11,6 +12,7 @@ import {
 } from '../icons';
 
 export const CodexTab: React.FC = () => {
+  const { t } = useI18n();
   const [status, setStatus] = useState<CodexStatusResponse | null>(null);
   const [accounts, setAccounts] = useState<CodexAccountRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,7 +50,7 @@ export const CodexTab: React.FC = () => {
         : (accountsRes as any)?.accounts || [];
       setAccounts(accList);
     } catch (err: any) {
-      setError(err?.message || 'Không thể tải thông tin Codex');
+      setError(err?.message || t('codex.msgLoadError'));
     } finally {
       setLoading(false);
     }
@@ -61,7 +63,7 @@ export const CodexTab: React.FC = () => {
   const handleAddAccount = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authPath.trim()) {
-      setActionMessage({ type: 'error', text: 'Vui lòng cung cấp đường dẫn tệp auth (auth_path).' });
+      setActionMessage({ type: 'error', text: t('codex.msgAuthPathRequired') });
       return;
     }
 
@@ -72,13 +74,13 @@ export const CodexTab: React.FC = () => {
         auth_path: authPath.trim(),
         email: email.trim() || undefined,
       });
-      setActionMessage({ type: 'success', text: 'Đã thêm tài khoản Codex thành công.' });
+      setActionMessage({ type: 'success', text: t('codex.msgAddSuccess') });
       setShowAddModal(false);
       setAuthPath('');
       setEmail('');
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi thêm tài khoản Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgAddError') });
     } finally {
       setActionLoading(false);
     }
@@ -91,11 +93,14 @@ export const CodexTab: React.FC = () => {
       await api.toggleCodexAccount(acc.id);
       setActionMessage({
         type: 'success',
-        text: `Đã ${acc.is_active ? 'tắt' : 'bật'} tài khoản Codex "${acc.email || acc.id}".`,
+        text: t('codex.msgToggleSuccess', {
+          action: acc.is_active ? t('codex.btnTurnOff').toLowerCase() : t('codex.btnTurnOn').toLowerCase(),
+          name: acc.email || acc.id,
+        }),
       });
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi thay đổi trạng thái tài khoản.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgToggleError') });
     } finally {
       setActionLoading(false);
     }
@@ -106,25 +111,25 @@ export const CodexTab: React.FC = () => {
     setActionMessage(null);
     try {
       await api.resetCodexAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã reset cooldown tài khoản "${acc.email || acc.id}".` });
+      setActionMessage({ type: 'success', text: t('codex.msgResetSuccess', { name: acc.email || acc.id }) });
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Lỗi reset cooldown.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgResetError') });
     } finally {
       setActionLoading(false);
     }
   };
 
   const handleDelete = async (acc: CodexAccountRecord) => {
-    if (!window.confirm(`Xác nhận xóa tài khoản Codex "${acc.email || acc.id}"?`)) return;
+    if (!window.confirm(t('codex.confirmDelete', { name: acc.email || acc.id }))) return;
     setActionLoading(true);
     setActionMessage(null);
     try {
       await api.deleteCodexAccount(acc.id);
-      setActionMessage({ type: 'success', text: `Đã xóa tài khoản Codex.` });
+      setActionMessage({ type: 'success', text: t('codex.msgDeleteSuccess') });
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể xóa tài khoản Codex.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgDeleteError') });
     } finally {
       setActionLoading(false);
     }
@@ -138,7 +143,7 @@ export const CodexTab: React.FC = () => {
       setOauthTicket(res);
       setShowOAuthModal(true);
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Không thể khởi tạo luồng OAuth.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgOAuthInitError') });
     } finally {
       setActionLoading(false);
     }
@@ -152,13 +157,13 @@ export const CodexTab: React.FC = () => {
     setActionMessage(null);
     try {
       await api.exchangeCodexOAuth(oauthTicket.ticket_id, oauthCode.trim());
-      setActionMessage({ type: 'success', text: 'Xác thực OAuth Codex hoàn tất và đã thêm vào pool.' });
+      setActionMessage({ type: 'success', text: t('codex.msgOAuthSuccess') });
       setShowOAuthModal(false);
       setOauthTicket(null);
       setOauthCode('');
       loadData();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || 'Đổi mã xác thực OAuth thất bại.' });
+      setActionMessage({ type: 'error', text: err?.message || t('codex.msgOAuthError') });
     } finally {
       setActionLoading(false);
     }
@@ -168,18 +173,18 @@ export const CodexTab: React.FC = () => {
     <div>
       <div className="section-header">
         <div>
-          <h2 className="section-title">Quản Lý Pool Tài Khoản OpenAI Codex</h2>
+          <h2 className="section-title">{t('codex.title')}</h2>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Hệ thống phân phối và bảo vệ luồng truy cập qua token Codex / OAuth
+            {t('codex.subtitle')}
           </span>
         </div>
         <div className="section-actions">
           <button className="btn btn-secondary" onClick={handleStartOAuth} disabled={actionLoading}>
-            <span>Khởi Tạo OAuth</span>
+            <span>{t('codex.startOAuth')}</span>
           </button>
           <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             <IconPlus size={16} />
-            <span>Thêm Tài Khoản</span>
+            <span>{t('codex.addAccount')}</span>
           </button>
         </div>
       </div>
@@ -188,15 +193,15 @@ export const CodexTab: React.FC = () => {
       <div className="kpi-grid" style={{ marginBottom: 20 }}>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Tổng Tài Khoản Codex</span>
+            <span>{t('codex.kpiTotalAccounts')}</span>
             <IconCodex size={16} />
           </div>
           <div className="kpi-value">{status?.total_accounts ?? accounts.length}</div>
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Đang Hoạt Động</span>
-            <span className="badge badge-success">Active</span>
+            <span>{t('codex.kpiActive')}</span>
+            <span className="badge badge-success">{t('codex.badgeActive')}</span>
           </div>
           <div className="kpi-value" style={{ color: '#10b981' }}>
             {status?.active_accounts ?? 0}
@@ -204,8 +209,8 @@ export const CodexTab: React.FC = () => {
         </div>
         <div className="card" style={{ padding: '14px 18px' }}>
           <div className="kpi-label">
-            <span>Đang Chờ (Cooldown)</span>
-            <span className="badge badge-warning">Cooldown</span>
+            <span>{t('codex.kpiCooldown')}</span>
+            <span className="badge badge-warning">{t('codex.badgeCooldown')}</span>
           </div>
           <div className="kpi-value" style={{ color: (status?.cooldown_accounts ?? 0) > 0 ? '#f59e0b' : 'inherit' }}>
             {status?.cooldown_accounts ?? 0}
@@ -231,13 +236,13 @@ export const CodexTab: React.FC = () => {
         {loading && accounts.length === 0 ? (
           <div className="state-container">
             <div className="spinner" />
-            <p>Đang tải danh sách tài khoản Codex...</p>
+            <p>{t('codex.loading')}</p>
           </div>
         ) : accounts.length === 0 ? (
           <div className="state-container">
-            <p>Chưa có tài khoản Codex nào trong hệ thống.</p>
+            <p>{t('codex.empty')}</p>
             <button className="btn btn-secondary btn-sm" onClick={() => setShowAddModal(true)}>
-              Thêm tài khoản đầu tiên
+              {t('codex.btnAddFirst')}
             </button>
           </div>
         ) : (
@@ -245,11 +250,11 @@ export const CodexTab: React.FC = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Email & ID</th>
-                  <th>Đường Dẫn Xác Thực (Auth Path)</th>
-                  <th>Trạng Thái</th>
-                  <th>Lỗi Gần Nhất</th>
-                  <th>Hành Động</th>
+                  <th>{t('codex.thEmailId')}</th>
+                  <th>{t('codex.thAuthPath')}</th>
+                  <th>{t('codex.thStatus')}</th>
+                  <th>{t('codex.thLastError')}</th>
+                  <th>{t('codex.thActions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -257,7 +262,7 @@ export const CodexTab: React.FC = () => {
                   <tr key={acc.id}>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {acc.email || 'Chưa định danh'}
+                        {acc.email || t('codex.unidentified')}
                       </div>
                       <div className="badge badge-neutral font-mono" style={{ fontSize: 11, marginTop: 4 }}>
                         id: {acc.id.slice(0, 10)}...
@@ -268,7 +273,7 @@ export const CodexTab: React.FC = () => {
                     </td>
                     <td>
                       <span className={`badge ${acc.is_active ?? acc.active ? 'badge-success' : 'badge-neutral'}`}>
-                        {acc.is_active ?? acc.active ? 'Kích hoạt' : 'Tạm dừng'}
+                        {acc.is_active ?? acc.active ? t('codex.statusActive') : t('codex.statusPaused')}
                       </span>
                     </td>
                     <td>
@@ -287,7 +292,7 @@ export const CodexTab: React.FC = () => {
                           {acc.last_error}
                         </div>
                       ) : (
-                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Bình thường</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t('codex.statusNormal')}</span>
                       )}
                     </td>
                     <td>
@@ -297,21 +302,22 @@ export const CodexTab: React.FC = () => {
                           onClick={() => handleToggle(acc)}
                           disabled={actionLoading}
                         >
-                          {acc.is_active ? 'Tắt' : 'Bật'}
+                          {acc.is_active ? t('codex.btnTurnOff') : t('codex.btnTurnOn')}
                         </button>
                         <button
                           className="btn btn-secondary btn-sm"
                           onClick={() => handleReset(acc)}
                           disabled={actionLoading}
-                          title="Reset cooldown"
+                          title={t('codex.resetTitle')}
                         >
-                          Reset
+                          {t('codex.btnReset')}
                         </button>
                         <button
                           className="btn btn-danger btn-sm btn-icon-only"
                           onClick={() => handleDelete(acc)}
                           disabled={actionLoading}
-                          title="Xóa tài khoản"
+                          title={t('codex.deleteTitle')}
+                          aria-label={t('codex.deleteTitle')}
                         >
                           <IconTrash size={14} />
                         </button>
@@ -330,10 +336,11 @@ export const CodexTab: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Thêm Tài Khoản Codex Mới</h3>
+              <h3 className="modal-title">{t('codex.modalAddTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowAddModal(false)}
+                aria-label={t('actions.close')}
               >
                 <IconX size={16} />
               </button>
@@ -341,7 +348,7 @@ export const CodexTab: React.FC = () => {
 
             <form onSubmit={handleAddAccount}>
               <div className="form-group">
-                <label>Email Người Dùng (tùy chọn)</label>
+                <label>{t('codex.labelEmail')}</label>
                 <input
                   type="text"
                   placeholder="user@example.com"
@@ -351,16 +358,16 @@ export const CodexTab: React.FC = () => {
               </div>
 
               <div className="form-group">
-                <label>Đường Dẫn Tệp Auth (auth_path)</label>
+                <label>{t('codex.labelAuthPath')}</label>
                 <input
                   type="text"
-                  placeholder="/home/user/.codex/auth.json"
+                  placeholder="/home/namhv/.codex/auth.json"
                   value={authPath}
                   onChange={(e) => setAuthPath(e.target.value)}
                   required
                 />
                 <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  Đường dẫn tệp JSON lưu trữ token và refresh token của Codex.
+                  {t('codex.authPathNote')}
                 </span>
               </div>
 
@@ -370,10 +377,10 @@ export const CodexTab: React.FC = () => {
                   className="btn btn-secondary"
                   onClick={() => setShowAddModal(false)}
                 >
-                  Hủy
+                  {t('actions.cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                  {actionLoading ? <div className="spinner" /> : 'Lưu Tài Khoản'}
+                  {actionLoading ? <div className="spinner" /> : t('codex.saveAccount')}
                 </button>
               </div>
             </form>
@@ -386,10 +393,11 @@ export const CodexTab: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowOAuthModal(false)}>
           <div className="modal-card" style={{ maxWidth: 540 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">Xác Thực Codex Qua OAuth</h3>
+              <h3 className="modal-title">{t('codex.modalOAuthTitle')}</h3>
               <button
                 className="btn btn-secondary btn-sm btn-icon-only"
                 onClick={() => setShowOAuthModal(false)}
+                aria-label={t('actions.close')}
               >
                 <IconX size={16} />
               </button>
@@ -397,7 +405,7 @@ export const CodexTab: React.FC = () => {
 
             <div>
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-                1. Mở liên kết bên dưới trên trình duyệt để cấp quyền tài khoản OpenAI/Codex:
+                {t('codex.oauthStep1')}
               </p>
               <div className="oauth-url-box">
                 <a
@@ -412,10 +420,10 @@ export const CodexTab: React.FC = () => {
 
               <form onSubmit={handleExchangeOAuth}>
                 <div className="form-group">
-                  <label>2. Dán mã Authorization Code hoặc URL trả về vào đây:</label>
+                  <label>{t('codex.oauthStep2')}</label>
                   <input
                     type="text"
-                    placeholder="Nhập code từ URL chuyển hướng..."
+                    placeholder={t('codex.oauthCodePlaceholder')}
                     value={oauthCode}
                     onChange={(e) => setOauthCode(e.target.value)}
                     required
@@ -428,10 +436,10 @@ export const CodexTab: React.FC = () => {
                     className="btn btn-secondary"
                     onClick={() => setShowOAuthModal(false)}
                   >
-                    Hủy
+                    {t('actions.cancel')}
                   </button>
                   <button type="submit" className="btn btn-primary" disabled={actionLoading}>
-                    {actionLoading ? <div className="spinner" /> : 'Hoàn Tất Xác Thực'}
+                    {actionLoading ? <div className="spinner" /> : t('codex.completeOAuth')}
                   </button>
                 </div>
               </form>

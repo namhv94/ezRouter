@@ -7,18 +7,21 @@ import {
   IconZap,
   IconX,
   IconPlayground,
+  IconImage,
   IconBookOpen,
   IconShield,
   IconTerminal,
   EzRouterMark,
 } from '../icons';
 import { HealthInfo } from '../types';
+import { useI18n } from '../i18n';
 
 export type TabType =
   | 'overview'
   | 'integration'
   | 'traffic'
   | 'playground'
+  | 'images'
   | 'requests'
   | 'providers'
   | 'accounts'
@@ -49,25 +52,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   totalProvidersCount,
   totalKeysCount,
 }) => {
+  const { t } = useI18n();
+
   const navItems = [
     {
       id: 'overview' as TabType,
-      label: 'Tổng quan',
+      label: t('nav.overview'),
       icon: <IconActivity size={18} />,
     },
     {
       id: 'requests' as TabType,
-      label: 'Lưu lượng',
+      label: t('nav.requests'),
       icon: <IconZap size={18} />,
     },
     {
       id: 'playground' as TabType,
-      label: 'Thử nghiệm',
+      label: t('nav.playground'),
       icon: <IconPlayground size={18} />,
     },
     {
+      id: 'images' as TabType,
+      label: t('nav.images'),
+      icon: <IconImage size={18} />,
+    },
+    {
       id: 'providers' as TabType,
-      label: 'Nhà cung cấp',
+      label: t('nav.providers'),
       icon: <IconServer size={18} />,
       badge:
         totalProvidersCount !== undefined || activeAccountsCount !== undefined
@@ -76,28 +86,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'combos' as TabType,
-      label: 'Combo',
+      label: t('nav.combos'),
       icon: <IconLayers size={18} />,
     },
     {
       id: 'token_saver' as TabType,
-      label: 'Token Saver',
+      label: t('nav.tokenSaver'),
       icon: <IconShield size={18} />,
     },
     {
       id: 'api_keys' as TabType,
-      label: 'Khóa API',
+      label: t('nav.apiKeys'),
       icon: <IconKey size={18} />,
       badge: totalKeysCount !== undefined ? String(totalKeysCount) : undefined,
     },
     {
       id: 'logs' as TabType,
-      label: 'Nhật ký',
+      label: t('nav.logsShort'),
       icon: <IconTerminal size={18} />,
     },
     {
       id: 'integration' as TabType,
-      label: 'Tích hợp',
+      label: t('nav.integration'),
       icon: <IconBookOpen size={18} />,
     },
   ];
@@ -147,12 +157,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="brand-ez">ez</span>
               <span className="brand-router">Router</span>
             </div>
-            <div className="sidebar-subtitle">Điều phối API AI</div>
+            <div className="sidebar-subtitle">{t('app.subtitle')}</div>
           </div>
           <button
             className="sidebar-close-btn"
             onClick={onClose}
-            aria-label="Đóng danh mục điều hướng"
+            aria-label={t('actions.closeNavAria')}
           >
             <IconX size={18} />
           </button>
@@ -177,10 +187,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className={`status-dot ${health?.status === 'ok' ? '' : 'error'}`} />
             <div>
               <div style={{ fontWeight: 600, fontSize: 12, color: '#e5e7eb' }}>
-                {health?.status === 'ok' ? 'ezRouter trực tuyến' : 'Đang kết nối...'}
+                {health?.status === 'ok' ? t('app.online') : t('app.offline')}
               </div>
               <div style={{ fontSize: 11, color: '#6b7280', fontFamily: 'var(--font-mono)' }}>
-                Cổng: {health?.port || 20229} ({health?.mode || 'staging'})
+                {t('app.portLabel', { port: health?.port || 20229, mode: health?.mode || 'staging' })}
               </div>
             </div>
           </div>

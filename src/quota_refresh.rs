@@ -58,7 +58,14 @@ pub fn sanitize_error_message(value: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct OpenRouterCreditsSummary {
+    pub total_credits: f64,
+    pub total_usage: f64,
+    pub updated_at: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct QuotaRefreshSummary {
     pub google_total: usize,
     pub google_refreshed: usize,
@@ -68,6 +75,8 @@ pub struct QuotaRefreshSummary {
     pub codex_refreshed: usize,
     pub codex_skipped_cooldown: usize,
     pub codex_skipped_inactive: usize,
+    #[serde(default)]
+    pub openrouter_refreshed: bool,
     pub errors: usize,
     pub duration_ms: u64,
 }
@@ -82,6 +91,8 @@ pub struct QuotaRefreshStatusResponse {
     pub last_error: Option<String>,
     pub is_refreshing: bool,
     pub last_summary: Option<QuotaRefreshSummary>,
+    #[serde(default)]
+    pub openrouter_credits: Option<OpenRouterCreditsSummary>,
 }
 
 struct RefreshGuard<'a>(&'a AtomicBool);
@@ -105,6 +116,7 @@ pub struct QuotaRefreshWorker {
     next_refresh: RwLock<Option<f64>>,
     last_error: RwLock<Option<String>>,
     last_summary: RwLock<Option<QuotaRefreshSummary>>,
+    pub openrouter_credits: RwLock<Option<OpenRouterCreditsSummary>>,
     notify: Arc<tokio::sync::Notify>,
 }
 
@@ -150,9 +162,8 @@ impl QuotaRefreshWorker {
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(DEFAULT_MAX_REFRESH_CONCURRENCY)
-            .max(1);
+            .clamp(1, 16);
 
-        // 5. Restore last refresh / error / summary from DB
         let last_refresh = db
             .get_quota_refresh_setting("last_refresh")
             .ok()
@@ -170,6 +181,12 @@ impl QuotaRefreshWorker {
             .ok()
             .flatten()
             .and_then(|s| serde_json::from_str::<QuotaRefreshSummary>(&s).ok());
+
+        let openrouter_credits = db
+            .get_quota_refresh_setting("openrouter_credits")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str::<OpenRouterCreditsSummary>(&s).ok());
 
         let now = current_time_secs();
         let next_refresh = if enabled {
@@ -191,6 +208,7 @@ impl QuotaRefreshWorker {
             next_refresh: RwLock::new(next_refresh),
             last_error: RwLock::new(last_error),
             last_summary: RwLock::new(last_summary),
+            openrouter_credits: RwLock::new(openrouter_credits),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
@@ -205,6 +223,16 @@ impl QuotaRefreshWorker {
             last_error: self.last_error.read().unwrap().clone(),
             is_refreshing: self.is_refreshing.load(Ordering::SeqCst),
             last_summary: self.last_summary.read().unwrap().clone(),
+            openrouter_credits: self.openrouter_credits.read().unwrap().clone(),
+        }
+    }
+
+    pub fn set_openrouter_credits(&self, credits: OpenRouterCreditsSummary) {
+        *self.openrouter_credits.write().unwrap() = Some(credits.clone());
+        if let Ok(c_json) = serde_json::to_string(&credits) {
+            let _ = self
+                .db
+                .set_quota_refresh_setting("openrouter_credits", &c_json);
         }
     }
 
@@ -369,6 +397,66 @@ impl QuotaRefreshWorker {
                     }
                     Err(e) => {
                         warn!("Codex quota refresh join error: {e}");
+                    }
+                }
+            }
+        }
+
+        // 3. OpenRouter Providers credits refresh
+        if let Ok(providers) = self.db.list_providers() {
+            let openrouter_provs: Vec<_> = providers
+                .into_iter()
+                .filter(|p| {
+                    (p.provider_type == "openrouter" || p.prefix == "openrouter")
+                        && p.is_active
+                        && !p.api_key.trim().is_empty()
+                })
+                .collect();
+
+            if !openrouter_provs.is_empty() {
+                if let Ok(client) = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(8))
+                    .build()
+                {
+                    for prov in openrouter_provs {
+                        let mut req = client.get("https://openrouter.ai/api/v1/credits");
+                        req = req.bearer_auth(&prov.api_key);
+                        match req.send().await {
+                            Ok(res) if res.status().is_success() => {
+                                if let Ok(json) = res.json::<serde_json::Value>().await {
+                                    if let Some(data) = json.get("data") {
+                                        let total_credits = data
+                                            .get("total_credits")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let total_usage = data
+                                            .get("total_usage")
+                                            .and_then(|v| v.as_f64())
+                                            .unwrap_or(0.0);
+                                        let credits = OpenRouterCreditsSummary {
+                                            total_credits,
+                                            total_usage,
+                                            updated_at: current_time_secs(),
+                                        };
+                                        self.set_openrouter_credits(credits.clone());
+                                        summary.openrouter_refreshed = true;
+                                        info!(
+                                            "OpenRouter credits auto-refreshed: total={}, usage={}",
+                                            total_credits, total_usage
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(res) => {
+                                warn!(
+                                    "OpenRouter credits auto-refresh returned status {}",
+                                    res.status()
+                                );
+                            }
+                            Err(e) => {
+                                warn!("OpenRouter credits auto-refresh failed: {e}");
+                            }
+                        }
                     }
                 }
             }

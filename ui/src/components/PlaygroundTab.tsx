@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ModelEntry } from '../types';
 import { api, getStoredAdminKey } from '../api';
+import { useI18n } from '../i18n';
 import {
   IconPlayground,
   IconZap,
@@ -25,9 +26,14 @@ const DEFAULT_AG_MODELS = [
 ];
 
 const DEFAULT_CX_MODELS = [
+  'cx/gpt-6.1-sol',
+  'cx/gpt-6-sol',
+  'cx/gpt-6-luna',
+  'cx/gpt-6-astra',
   'cx/gpt-5.6-sol',
   'cx/gpt-5.6-terra',
   'cx/gpt-5.6-luna',
+  'cx/gpt-reserve',
   'cx/gpt-5.5',
 ];
 
@@ -36,6 +42,8 @@ interface PlaygroundTabProps {
 }
 
 export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
+  const { t, locale } = useI18n();
+
   // Model state
   const [models, setModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_AG_MODELS[0]);
@@ -51,10 +59,10 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
   // Mode & prompts
   const [isStream, setIsStream] = useState<boolean>(true);
   const [systemPrompt, setSystemPrompt] = useState<string>(
-    'Bạn là một trợ lý AI thông minh, hỗ trợ trả lời bằng tiếng Việt một cách súc tích, chính xác và chuyên nghiệp.'
+    t('playground.defaultSystemPrompt')
   );
   const [userPrompt, setUserPrompt] = useState<string>(
-    'Xin chào! Hãy giới thiệu bạn là mô hình AI nào và 3 khả năng nổi bật nhất của bạn.'
+    t('playground.defaultUserPrompt')
   );
 
   // Request execution state
@@ -166,11 +174,11 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeModel) {
-      setError('Vui lòng chọn hoặc nhập tên model cần thử nghiệm.');
+      setError(t('playground.errSelectModel'));
       return;
     }
     if (!userPrompt.trim()) {
-      setError('Vui lòng nhập nội dung prompt người dùng.');
+      setError(t('playground.errEnterPrompt'));
       return;
     }
 
@@ -221,7 +229,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
       setResponseStatus(res.status);
 
       if (!res.ok) {
-        let errMsg = `Máy chủ phản hồi lỗi (${res.status})`;
+        let errMsg = t('playground.errServerStatus', { status: res.status });
         let errJson: any = null;
         try {
           errJson = await res.json();
@@ -269,7 +277,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
 
       // Handle streaming response (SSE)
       if (!res.body) {
-        throw new Error('Trình duyệt không nhận được luồng ReadableStream.');
+        throw new Error(t('playground.errNoStream'));
       }
 
       const reader = res.body.getReader();
@@ -320,9 +328,9 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
       setStreaming(false);
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        setError('Yêu cầu đã được hủy bởi người dùng.');
+        setError(t('playground.errAborted'));
       } else {
-        setError(err?.message || 'Đã xảy ra lỗi khi gửi yêu cầu tới máy chủ.');
+        setError(err?.message || t('playground.errSend'));
       }
       setDurationMs(Math.round(performance.now() - startTime));
       setLoading(false);
@@ -347,11 +355,20 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
         <div>
           <h2 className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <IconPlayground size={22} style={{ color: 'var(--accent-primary)' }} />
-            Playground / Thử Nghiệm Mô Hình
+            {t('playground.title')}
           </h2>
           <p className="section-desc">
-            Kiểm thử chat completions trực tiếp tới các mô hình Antigravity (<code>ag/*</code>),
-            OpenAI Codex (<code>cx/*</code>) và Upstream qua cổng <code>/v1/chat/completions</code>.
+            {locale === 'vi' ? (
+              <>
+                Kiểm thử chat completions trực tiếp tới các mô hình Antigravity (<code>ag/*</code>),
+                OpenAI Codex (<code>cx/*</code>) và Upstream qua cổng <code>/v1/chat/completions</code>.
+              </>
+            ) : (
+              <>
+                Test chat completions directly against Antigravity (<code>ag/*</code>),
+                OpenAI Codex (<code>cx/*</code>), and Upstream models via <code>/v1/chat/completions</code>.
+              </>
+            )}
           </p>
         </div>
         <button
@@ -371,10 +388,10 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
               .finally(() => setLoadingModels(false));
           }}
           disabled={loadingModels}
-          title="Tải lại danh sách models"
+          title={t('playground.refreshModelsTitle')}
         >
           <IconRefresh size={14} className={loadingModels ? 'spinner' : ''} />
-          <span>Làm Mới Models</span>
+          <span>{t('playground.refreshModels')}</span>
         </button>
       </div>
 
@@ -384,7 +401,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Cấu Hình Yêu Cầu (Request)
+              {t('playground.configTitle')}
             </h3>
             <span className="badge badge-neutral" style={{ fontSize: 11 }}>
               POST /v1/chat/completions
@@ -395,7 +412,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             {/* Model Selection */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label htmlFor="model-select">Chọn Mô Hình (Model):</label>
+                <label htmlFor="model-select">{t('playground.modelLabel')}</label>
                 <button
                   type="button"
                   style={{
@@ -408,7 +425,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   }}
                   onClick={() => setIsCustomModel(!isCustomModel)}
                 >
-                  {isCustomModel ? '← Chọn từ danh sách' : '+ Nhập model tùy chỉnh'}
+                  {isCustomModel ? t('playground.selectFromList') : t('playground.customModelInput')}
                 </button>
               </div>
 
@@ -419,14 +436,14 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   disabled={loading}
                 >
-                  <optgroup label="Mô hình Google Antigravity (ag/*)">
+                  <optgroup label={t('playground.groupAg')}>
                     {agModels.map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>
                     ))}
                   </optgroup>
-                  <optgroup label="Mô hình OpenAI Codex (cx/*)">
+                  <optgroup label={t('playground.groupCx')}>
                     {cxModels.map((m) => (
                       <option key={m} value={m}>
                         {m}
@@ -434,7 +451,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                     ))}
                   </optgroup>
                   {otherModels.length > 0 && (
-                    <optgroup label="Mô hình Upstream / Khác">
+                    <optgroup label={t('playground.groupOther')}>
                       {otherModels.map((m) => (
                         <option key={m} value={m}>
                           {m}
@@ -446,7 +463,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
               ) : (
                 <input
                   type="text"
-                  placeholder="Ví dụ: ag/gemini-3.8-flash-high hoặc cx/gpt-5.6-sol"
+                  placeholder={t('playground.customModelPlaceholder')}
                   value={customModel}
                   onChange={(e) => setCustomModel(e.target.value)}
                   disabled={loading}
@@ -458,7 +475,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             {/* Auth Key Input */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label htmlFor="auth-key-input">Khóa Xác Thực (API Key):</label>
+                <label htmlFor="auth-key-input">{t('playground.authKeyLabel')}</label>
                 <button
                   type="button"
                   style={{
@@ -471,25 +488,25 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   }}
                   onClick={() => setShowAuthKey(!showAuthKey)}
                 >
-                  {showAuthKey ? 'Ẩn khóa' : 'Hiện khóa'}
+                  {showAuthKey ? t('playground.hideKey') : t('playground.showKey')}
                 </button>
               </div>
               <input
                 id="auth-key-input"
                 type={showAuthKey ? 'text' : 'password'}
-                placeholder="Bearer API Key (mặc định lấy từ phiên đăng nhập)"
+                placeholder={t('playground.authKeyPlaceholder')}
                 value={authKey}
                 onChange={(e) => setAuthKey(e.target.value)}
                 disabled={loading}
               />
               <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                Mặc định sử dụng khóa quản trị hệ thống. Bạn có thể dán API Key khách hàng để kiểm thử quyền.
+                {t('playground.authKeyHelp')}
               </span>
             </div>
 
             {/* Stream Mode Toggle */}
             <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Chế Độ Nhận Phản Hồi (Response Mode):</label>
+              <label>{t('playground.responseModeLabel')}</label>
               <div className="stream-toggle-group">
                 <button
                   type="button"
@@ -497,7 +514,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   onClick={() => setIsStream(true)}
                   disabled={loading}
                 >
-                  Stream (SSE)
+                  {t('playground.streamSse')}
                 </button>
                 <button
                   type="button"
@@ -505,62 +522,46 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   onClick={() => setIsStream(false)}
                   disabled={loading}
                 >
-                  Non-stream (JSON)
+                  {t('playground.nonStreamJson')}
                 </button>
               </div>
             </div>
 
             {/* Preset prompts */}
             <div>
-              <label style={{ display: 'block', marginBottom: 4 }}>Mẫu Prompt Nhanh:</label>
+              <label style={{ display: 'block', marginBottom: 4 }}>{t('playground.quickPresetsLabel')}</label>
               <div className="playground-presets">
                 <button
                   type="button"
                   className="preset-btn"
-                  onClick={() =>
-                    applyPreset(
-                      'Xin chào! Hãy giới thiệu bạn là mô hình AI nào và 3 khả năng nổi bật nhất của bạn.'
-                    )
-                  }
+                  onClick={() => applyPreset(t('playground.presetIntroText'))}
                   disabled={loading}
                 >
-                  👋 Giới thiệu
+                  {t('playground.presetIntro')}
                 </button>
                 <button
                   type="button"
                   className="preset-btn"
-                  onClick={() =>
-                    applyPreset(
-                      'Trả lời trong 1 câu: Thủ đô của Việt Nam là gì và thành phố nào có mật độ dân số cao nhất?'
-                    )
-                  }
+                  onClick={() => applyPreset(t('playground.presetQuickTestText'))}
                   disabled={loading}
                 >
-                  ⚡ Test nhanh
+                  {t('playground.presetQuickTest')}
                 </button>
                 <button
                   type="button"
                   className="preset-btn"
-                  onClick={() =>
-                    applyPreset(
-                      'Viết một hàm Python tính số Fibonacci thứ n với độ phức tạp thời gian O(n) và giải thích ngắn gọn.'
-                    )
-                  }
+                  onClick={() => applyPreset(t('playground.presetPythonText'))}
                   disabled={loading}
                 >
-                  🐍 Code Python
+                  {t('playground.presetPython')}
                 </button>
                 <button
                   type="button"
                   className="preset-btn"
-                  onClick={() =>
-                    applyPreset(
-                      'Dịch câu sau sang tiếng Việt tự nhiên: "Antigravity routing distributes AI inference across specialized upstream clusters with minimal latency."'
-                    )
-                  }
+                  onClick={() => applyPreset(t('playground.presetTranslateText'))}
                   disabled={loading}
                 >
-                  🇻🇳 Dịch thuật
+                  {t('playground.presetTranslate')}
                 </button>
               </div>
             </div>
@@ -568,14 +569,14 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             {/* Collapsible System Prompt */}
             <details style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               <summary style={{ cursor: 'pointer', padding: '4px 0', fontWeight: 500, color: 'var(--accent-primary)' }}>
-                ▼ Cấu hình System Prompt (tùy chọn)
+                {t('playground.systemPromptToggle')}
               </summary>
               <div style={{ marginTop: 8 }}>
                 <textarea
                   rows={2}
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
-                  placeholder="System instructions cho mô hình..."
+                  placeholder={t('playground.systemPromptPlaceholder')}
                   disabled={loading}
                 />
               </div>
@@ -584,7 +585,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             {/* User Prompt Textarea */}
             <div className="form-group" style={{ marginBottom: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label htmlFor="user-prompt">User Prompt (Chỉ thị câu hỏi):</label>
+                <label htmlFor="user-prompt">{t('playground.userPromptLabel')}</label>
                 {userPrompt && (
                   <button
                     type="button"
@@ -599,7 +600,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                     onClick={() => setUserPrompt('')}
                     disabled={loading}
                   >
-                    Xóa prompt
+                    {t('playground.clearPrompt')}
                   </button>
                 )}
               </div>
@@ -608,7 +609,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                 rows={5}
                 value={userPrompt}
                 onChange={(e) => setUserPrompt(e.target.value)}
-                placeholder="Nhập câu hỏi hoặc chỉ thị cho mô hình..."
+                placeholder={t('playground.userPromptPlaceholder')}
                 disabled={loading}
               />
             </div>
@@ -624,12 +625,12 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                 {loading ? (
                   <>
                     <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-                    <span>{streaming ? 'Đang nhận stream...' : 'Đang gửi...'}</span>
+                    <span>{streaming ? t('playground.receivingStream') : t('playground.sending')}</span>
                   </>
                 ) : (
                   <>
                     <IconZap size={16} />
-                    <span>Gửi Yêu Cầu</span>
+                    <span>{t('playground.sendRequest')}</span>
                   </>
                 )}
               </button>
@@ -641,7 +642,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   onClick={handleCancelRequest}
                 >
                   <IconX size={16} />
-                  <span>Hủy</span>
+                  <span>{t('playground.cancel')}</span>
                 </button>
               )}
             </div>
@@ -653,7 +654,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
           {/* Header Bar of Output Card */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10, flexWrap: 'wrap', gap: 8 }}>
             <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
-              Kết Quả Phản Hồi (Response)
+              {t('playground.responseTitle')}
             </h3>
 
             {/* Actions for output */}
@@ -674,7 +675,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                       }}
                       onClick={() => setViewMode('formatted')}
                     >
-                      Văn Bản
+                      {t('playground.viewFormatted')}
                     </button>
                     <button
                       type="button"
@@ -689,7 +690,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                       }}
                       onClick={() => setViewMode('raw')}
                     >
-                      JSON Gốc
+                      {t('playground.viewRaw')}
                     </button>
                   </div>
 
@@ -697,18 +698,18 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={handleCopy}
-                    title="Sao chép phản hồi"
+                    title={t('playground.copyResponseTitle')}
                     style={{ minHeight: 32, padding: '4px 8px' }}
                   >
                     {copied ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                    <span>{copied ? 'Đã chép!' : 'Sao chép'}</span>
+                    <span>{copied ? t('playground.copied') : t('playground.copy')}</span>
                   </button>
 
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
                     onClick={handleClearOutput}
-                    title="Xóa kết quả"
+                    title={t('playground.clearOutputTitle')}
                     style={{ minHeight: 32, padding: '4px 8px' }}
                   >
                     <IconTrash size={14} />
@@ -723,14 +724,14 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             {loading ? (
               <span className="badge badge-warning" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <span className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
-                {streaming ? 'Đang Stream dữ liệu...' : 'Đang xử lý yêu cầu...'}
+                {streaming ? t('playground.statusStreaming') : t('playground.statusProcessing')}
               </span>
             ) : responseStatus !== null ? (
               <span className={`badge ${responseStatus >= 200 && responseStatus < 300 ? 'badge-success' : 'badge-error'}`}>
                 {responseStatus} {responseStatus === 200 ? 'OK' : 'Error'}
               </span>
             ) : (
-              <span className="badge badge-neutral">Chưa có dữ liệu</span>
+              <span className="badge badge-neutral">{t('playground.statusNoData')}</span>
             )}
 
             {modelUsed && (
@@ -746,8 +747,8 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             )}
 
             {usage && (
-              <span className="badge badge-neutral" title={`Prompt: ${usage.prompt_tokens || 0}, Completion: ${usage.completion_tokens || 0}`}>
-                Tokens: {usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0)}
+              <span className="badge badge-neutral" title={t('playground.tokensDetail', { prompt: usage.prompt_tokens || 0, completion: usage.completion_tokens || 0 })}>
+                {t('playground.tokensCount', { count: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) })}
               </span>
             )}
 
@@ -763,16 +764,17 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             <div className="alert alert-error" style={{ marginBottom: 0 }}>
               <IconAlertCircle size={18} style={{ flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600 }}>Lỗi phản hồi từ hệ thống</div>
+                <div style={{ fontWeight: 600 }}>{t('playground.errorTitle')}</div>
                 <div style={{ marginTop: 2, wordBreak: 'break-word' }}>{error}</div>
                 {error.includes('Upstream base URL is not configured') && (
                   <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
-                    Gợi ý: Mô hình này cần được gắn Upstream Provider hoặc tài khoản Antigravity/Codex có phiên hoạt động trong trang <strong>Nhà Cung Cấp</strong>.
+                    {t('playground.errUpstreamHint')}{' '}
+                    <strong>{t('playground.errUpstreamHintProviderTab')}</strong>.
                   </div>
                 )}
                 {error.includes('Invalid API key') && (
                   <div style={{ marginTop: 6, fontSize: 12, opacity: 0.9 }}>
-                    Gợi ý: Vui lòng kiểm tra lại khóa API trong ô "Khóa Xác Thực (API Key)" ở bên trái.
+                    {t('playground.errInvalidKeyHint')}
                   </div>
                 )}
               </div>
@@ -784,20 +786,28 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             <div className="state-container" style={{ minHeight: 280, backgroundColor: 'var(--bg-app)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <div className="spinner" style={{ width: 28, height: 28 }} />
               <p style={{ marginTop: 12, fontSize: 13 }}>
-                Đang kết nối tới mô hình {activeModel}...
+                {t('playground.connectingModel', { model: activeModel })}
               </p>
               <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                Chờ đợi phản hồi qua cổng API /v1/chat/completions
+                {t('playground.waitingResponse')}
               </p>
             </div>
           ) : !responseText && !error ? (
             <div className="state-container" style={{ minHeight: 280, backgroundColor: 'var(--bg-app)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-subtle)' }}>
               <IconPlayground size={36} style={{ color: 'var(--text-muted)', opacity: 0.6 }} />
               <p style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 8 }}>
-                Playground sẵn sàng
+                {t('playground.readyTitle')}
               </p>
               <p style={{ fontSize: 12, maxWidth: 360 }}>
-                Chọn mô hình <code>ag/*</code> hoặc <code>cx/*</code>, nhập câu hỏi và bấm nút <strong>Gửi Yêu Cầu</strong> để kiểm thử phản hồi thời gian thực.
+                {locale === 'vi' ? (
+                  <>
+                    Chọn mô hình <code>ag/*</code> hoặc <code>cx/*</code>, nhập câu hỏi và bấm nút <strong>Gửi Yêu Cầu</strong> để kiểm thử phản hồi thời gian thực.
+                  </>
+                ) : (
+                  <>
+                    Select an <code>ag/*</code> or <code>cx/*</code> model, enter your question, and click <strong>Send Request</strong> to test real-time responses.
+                  </>
+                )}
               </p>
             </div>
           ) : viewMode === 'formatted' && responseText ? (

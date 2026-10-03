@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { api, setStoredAdminKey } from '../api';
 import { IconKey, IconAlertCircle, EzRouterMark } from '../icons';
+import { useI18n } from '../i18n';
 
 interface LoginModalProps {
   onSuccess: (key: string) => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
+  const { t } = useI18n();
   const [keyInput, setKeyInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +17,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
     e.preventDefault();
     const trimmed = keyInput.trim();
     if (!trimmed) {
-      setError('Vui lòng nhập Khóa Quản Trị API.');
+      setError(t('auth.emptyKey'));
       return;
     }
 
@@ -27,7 +29,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
       setStoredAdminKey(trimmed);
       onSuccess(trimmed);
     } catch (err: any) {
-      setError(err?.message || 'Khóa quản trị không hợp lệ hoặc máy chủ từ chối kết nối.');
+      setError(err?.message || t('auth.invalidKey'));
     } finally {
       setLoading(false);
     }
@@ -51,10 +53,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
             <EzRouterMark size={40} />
           </div>
           <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em' }}>
-            Đăng Nhập <span style={{ color: '#10b981' }}>ezRouter</span>
+            {t('auth.title')} <span style={{ color: '#10b981' }}>ezRouter</span>
           </h2>
           <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Nhập khóa quản trị (Admin Key) để mở bảng điều khiển
+            {t('auth.subtitle')}
           </p>
         </div>
 
@@ -67,12 +69,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="adminKey">Khóa Quản Trị (Admin Bearer Key)</label>
+            <label htmlFor="adminKey">{t('auth.keyLabel')}</label>
             <div style={{ position: 'relative' }}>
               <input
                 id="adminKey"
                 type="password"
-                placeholder="sk-... hoặc admin key"
+                placeholder={t('auth.keyPlaceholder')}
                 value={keyInput}
                 onChange={(e) => setKeyInput(e.target.value)}
                 autoFocus
@@ -93,7 +95,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
               </span>
             </div>
             <span style={{ fontSize: 12, color: '#64748b', marginTop: 6, display: 'block' }}>
-              Khóa được lưu bảo mật trong bộ nhớ trình duyệt cục bộ.
+              {t('auth.storedLocally')}
             </span>
           </div>
 
@@ -103,7 +105,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
             style={{ width: '100%', marginTop: 8 }}
             disabled={loading}
           >
-            {loading ? <div className="spinner" /> : 'Xác Thực & Truy Cập'}
+            {loading ? <div className="spinner" /> : t('auth.submit')}
           </button>
         </form>
       </div>

@@ -16,8 +16,10 @@ import {
 import { Sidebar, TabType } from './components/Sidebar';
 import { Navbar } from './components/Navbar';
 import { LoginModal } from './components/LoginModal';
+import { useI18n } from './i18n';
 import { OverviewTab } from './components/OverviewTab';
 import { PlaygroundTab } from './components/PlaygroundTab';
+import { ImagesTab } from './components/ImagesTab';
 import { IntegrationTab } from './components/IntegrationTab';
 import { RequestsTab } from './components/RequestsTab';
 import { ProvidersTab } from './components/ProvidersTab';
@@ -27,6 +29,7 @@ import { TokenSaverTab } from './components/TokenSaverTab';
 import { ConsoleLogTab } from './components/ConsoleLogTab';
 
 export const App: React.FC = () => {
+  const { t } = useI18n();
   const [adminKey, setAdminKey] = useState<string>(getStoredAdminKey());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [initialChecking, setInitialChecking] = useState<boolean>(true);
@@ -107,16 +110,16 @@ export const App: React.FC = () => {
           clearStoredAdminKey();
           setIsAuthenticated(false);
         } else {
-          setError(err?.message || 'Không thể đồng bộ số liệu thống kê.');
+          setError(err?.message || t('overview.syncError'));
         }
       }
     } catch (err: any) {
-      setError(err?.message || 'Lỗi khi làm mới dữ liệu.');
+      setError(err?.message || t('overview.refreshError'));
     } finally {
       setRefreshing(false);
       setLoading(false);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, t]);
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -138,18 +141,19 @@ export const App: React.FC = () => {
   };
 
   const tabTitles: Record<TabType, string> = {
-    overview: 'Tổng quan',
-    integration: 'Tích hợp',
-    traffic: 'Lưu lượng',
-    playground: 'Thử nghiệm',
-    requests: 'Lưu lượng',
-    providers: 'Nhà cung cấp',
-    accounts: 'Tài khoản Antigravity',
-    codex: 'Tài khoản Codex',
-    combos: 'Combo',
-    api_keys: 'Khóa API',
-    token_saver: 'Token Saver',
-    logs: 'Nhật ký hệ thống',
+    overview: t('nav.overview'),
+    integration: t('nav.integration'),
+    traffic: t('nav.traffic'),
+    playground: t('nav.playground'),
+    images: t('nav.images'),
+    requests: t('nav.requests'),
+    providers: t('nav.providers'),
+    accounts: t('nav.accounts'),
+    codex: t('nav.codex'),
+    combos: t('nav.combos'),
+    api_keys: t('nav.apiKeys'),
+    token_saver: t('nav.tokenSaver'),
+    logs: t('nav.logs'),
   };
 
   if (initialChecking) {
@@ -159,7 +163,7 @@ export const App: React.FC = () => {
         style={{ minHeight: '100vh', justifyContent: 'center' }}
       >
         <div className="spinner" />
-        <p style={{ marginTop: 12 }}>Đang kết nối ezRouter...</p>
+        <p style={{ marginTop: 12 }}>{t('app.connecting')}</p>
       </div>
     );
   }
@@ -215,6 +219,10 @@ export const App: React.FC = () => {
 
           {currentTab === 'playground' && (
             <PlaygroundTab adminKey={adminKey} />
+          )}
+
+          {currentTab === 'images' && (
+            <ImagesTab adminKey={adminKey} />
           )}
 
           {(currentTab === 'traffic' || currentTab === 'requests') && <RequestsTab />}
