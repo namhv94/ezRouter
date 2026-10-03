@@ -107,6 +107,8 @@ pub const AG_QUOTA_URL: &str =
     "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary";
 pub const AG_MODELS_URL: &str =
     "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
+pub const AG_LOAD_CODE_ASSIST_URL: &str =
+    "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 pub const AG_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
 pub const AG_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const AG_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
@@ -280,6 +282,7 @@ pub struct DefaultGoogleQuotaFetcher {
     client: reqwest::Client,
     quota_url: String,
     models_url: String,
+    load_code_assist_url: String,
 }
 
 impl Default for DefaultGoogleQuotaFetcher {
@@ -293,16 +296,30 @@ impl DefaultGoogleQuotaFetcher {
         let quota_url = std::env::var("AG_QUOTA_URL").unwrap_or_else(|_| AG_QUOTA_URL.to_string());
         let models_url =
             std::env::var("AG_MODELS_URL").unwrap_or_else(|_| AG_MODELS_URL.to_string());
-        Self::with_urls(quota_url, models_url)
+        let load_code_assist_url = std::env::var("AG_LOAD_CODE_ASSIST_URL")
+            .unwrap_or_else(|_| AG_LOAD_CODE_ASSIST_URL.to_string());
+        Self::with_all_urls(quota_url, models_url, load_code_assist_url)
     }
 
     pub fn with_url(quota_url: impl Into<String>) -> Self {
         let models_url =
             std::env::var("AG_MODELS_URL").unwrap_or_else(|_| AG_MODELS_URL.to_string());
-        Self::with_urls(quota_url, models_url)
+        let load_code_assist_url = std::env::var("AG_LOAD_CODE_ASSIST_URL")
+            .unwrap_or_else(|_| AG_LOAD_CODE_ASSIST_URL.to_string());
+        Self::with_all_urls(quota_url, models_url, load_code_assist_url)
     }
 
     pub fn with_urls(quota_url: impl Into<String>, models_url: impl Into<String>) -> Self {
+        let load_code_assist_url = std::env::var("AG_LOAD_CODE_ASSIST_URL")
+            .unwrap_or_else(|_| AG_LOAD_CODE_ASSIST_URL.to_string());
+        Self::with_all_urls(quota_url, models_url, load_code_assist_url)
+    }
+
+    pub fn with_all_urls(
+        quota_url: impl Into<String>,
+        models_url: impl Into<String>,
+        load_code_assist_url: impl Into<String>,
+    ) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(15))
@@ -310,8 +327,69 @@ impl DefaultGoogleQuotaFetcher {
                 .expect("Failed to build DefaultGoogleQuotaFetcher client"),
             quota_url: quota_url.into(),
             models_url: models_url.into(),
+            load_code_assist_url: load_code_assist_url.into(),
         }
     }
+}
+
+pub fn parse_antigravity_plan_tier(json: &serde_json::Value) -> (String, Option<String>) {
+    // 1. Check paidTier first (highest priority)
+    if let Some(paid_tier) = json.get("paidTier").and_then(|p| p.as_object()) {
+        let paid_id = paid_tier
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let paid_name = paid_tier
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        if paid_id.contains("ultra") {
+            return (
+                "Ultra".to_string(),
+                paid_name.or_else(|| Some("Google AI Ultra".to_string())),
+            );
+        } else if paid_id.contains("pro") {
+            return (
+                "Pro".to_string(),
+                paid_name.or_else(|| Some("Google AI Pro".to_string())),
+            );
+        } else if !paid_id.is_empty() && paid_id != "free-tier" {
+            let label = paid_name.clone().unwrap_or_else(|| paid_id.clone());
+            return (label, paid_name);
+        }
+    }
+
+    // 2. Check currentTier
+    if let Some(current_tier) = json.get("currentTier").and_then(|p| p.as_object()) {
+        let current_id = current_tier
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        let current_name = current_tier
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(ToString::to_string);
+        if current_id.contains("ultra") {
+            return (
+                "Ultra".to_string(),
+                current_name.or_else(|| Some("Google AI Ultra".to_string())),
+            );
+        } else if current_id.contains("pro") {
+            return (
+                "Pro".to_string(),
+                current_name.or_else(|| Some("Google AI Pro".to_string())),
+            );
+        } else if current_id == "free-tier" || current_id.contains("free") {
+            return ("Free".to_string(), Some("Free".to_string()));
+        } else if !current_id.is_empty() {
+            let label = current_name.clone().unwrap_or_else(|| current_id.clone());
+            return (label, current_name);
+        }
+    }
+
+    ("Free".to_string(), Some("Free".to_string()))
 }
 
 pub fn parse_google_quota_summary(payload: &serde_json::Value) -> serde_json::Value {
@@ -380,6 +458,13 @@ pub fn parse_google_quota_summary(payload: &serde_json::Value) -> serde_json::Va
         }
     }
 
+    if let Some(plan_tier) = payload.get("plan_tier") {
+        normalized["plan_tier"] = plan_tier.clone();
+    }
+    if let Some(plan_name) = payload.get("plan_name") {
+        normalized["plan_name"] = plan_name.clone();
+    }
+
     normalized
 }
 
@@ -438,6 +523,41 @@ impl GoogleQuotaFetcher for DefaultGoogleQuotaFetcher {
                         if let Some(models_obj) = m_json.get("models").and_then(|m| m.as_object()) {
                             let model_keys: Vec<String> = models_obj.keys().cloned().collect();
                             normalized["models"] = serde_json::json!(model_keys);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Best-effort fetch subscription / plan tier
+        let code_assist_res = self
+            .client
+            .post(&self.load_code_assist_url)
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {access_token}"),
+            )
+            .header(reqwest::header::USER_AGENT, AG_USER_AGENT)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .json(&serde_json::json!({
+                "metadata": {
+                    "ideType": 9,
+                    "platform": 2,
+                    "pluginType": 2
+                },
+                "mode": 1
+            }))
+            .send()
+            .await;
+
+        if let Ok(ca_resp) = code_assist_res {
+            if ca_resp.status().is_success() {
+                if let Ok(ca_body) = ca_resp.text().await {
+                    if let Ok(ca_json) = serde_json::from_str::<serde_json::Value>(&ca_body) {
+                        let (tier, name) = parse_antigravity_plan_tier(&ca_json);
+                        normalized["plan_tier"] = serde_json::json!(tier);
+                        if let Some(n) = name {
+                            normalized["plan_name"] = serde_json::json!(n);
                         }
                     }
                 }
@@ -528,6 +648,10 @@ pub struct AccountResponse {
     pub token_valid: bool,
     pub recent_rpm: usize,
     pub quota: serde_json::Value,
+    #[serde(default)]
+    pub plan_tier: Option<String>,
+    #[serde(default)]
+    pub plan_name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -925,6 +1049,16 @@ impl AccountPool {
                     .iter()
                     .filter(|&&t| t > now - 60.0)
                     .count();
+                let plan_tier = item
+                    .quota_cache
+                    .get("plan_tier")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
+                let plan_name = item
+                    .quota_cache
+                    .get("plan_name")
+                    .and_then(|v| v.as_str())
+                    .map(ToString::to_string);
                 AccountResponse {
                     id: item.record.id.clone(),
                     email: item.record.email.clone(),
@@ -941,6 +1075,8 @@ impl AccountPool {
                     token_valid: item.record.expires_at > now,
                     recent_rpm,
                     quota: item.quota_cache.clone(),
+                    plan_tier,
+                    plan_name,
                 }
             })
             .collect();
@@ -957,6 +1093,16 @@ impl AccountPool {
                 .iter()
                 .filter(|&&t| t > now - 60.0)
                 .count();
+            let plan_tier = item
+                .quota_cache
+                .get("plan_tier")
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string);
+            let plan_name = item
+                .quota_cache
+                .get("plan_name")
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string);
             AccountResponse {
                 id: item.record.id.clone(),
                 email: item.record.email.clone(),
@@ -973,6 +1119,8 @@ impl AccountPool {
                 token_valid: item.record.expires_at > now,
                 recent_rpm,
                 quota: item.quota_cache.clone(),
+                plan_tier,
+                plan_name,
             }
         })
     }
@@ -2459,5 +2607,192 @@ mod tests {
         assert_eq!(active, 1);
         assert_eq!(cooldown, 0);
         assert_eq!(live_rpm, 2);
+    }
+
+    #[test]
+    fn test_parse_antigravity_plan_tier() {
+        // 1. Pro plan with paidTier
+        let pro_fixture = serde_json::json!({
+            "currentTier": {
+                "id": "free-tier",
+                "name": "Antigravity"
+            },
+            "paidTier": {
+                "id": "g1-pro-tier",
+                "name": "Google AI Pro"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&pro_fixture);
+        assert_eq!(tier, "Pro");
+        assert_eq!(name, Some("Google AI Pro".to_string()));
+
+        // 2. Ultra plan with paidTier
+        let ultra_fixture = serde_json::json!({
+            "currentTier": {
+                "id": "standard-tier",
+                "name": "Antigravity"
+            },
+            "paidTier": {
+                "id": "g1-ultra-tier",
+                "name": "Google AI Ultra"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&ultra_fixture);
+        assert_eq!(tier, "Ultra");
+        assert_eq!(name, Some("Google AI Ultra".to_string()));
+
+        // 3. Free plan without paidTier
+        let free_fixture = serde_json::json!({
+            "currentTier": {
+                "id": "free-tier",
+                "name": "Antigravity"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&free_fixture);
+        assert_eq!(tier, "Free");
+        assert_eq!(name, Some("Free".to_string()));
+
+        // 4. Pro / Ultra with id only (no name property)
+        let pro_id_only = serde_json::json!({
+            "paidTier": {
+                "id": "g1-pro-tier"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&pro_id_only);
+        assert_eq!(tier, "Pro");
+        assert_eq!(name, Some("Google AI Pro".to_string()));
+
+        let ultra_id_only = serde_json::json!({
+            "paidTier": {
+                "id": "g1-ultra-tier"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&ultra_id_only);
+        assert_eq!(tier, "Ultra");
+        assert_eq!(name, Some("Google AI Ultra".to_string()));
+
+        // 5. Empty JSON and non-object / unexpected payloads
+        assert_eq!(
+            parse_antigravity_plan_tier(&serde_json::json!({})),
+            ("Free".to_string(), Some("Free".to_string()))
+        );
+        assert_eq!(
+            parse_antigravity_plan_tier(&serde_json::Value::Null),
+            ("Free".to_string(), Some("Free".to_string()))
+        );
+        assert_eq!(
+            parse_antigravity_plan_tier(&serde_json::json!(["unexpected", "array"])),
+            ("Free".to_string(), Some("Free".to_string()))
+        );
+        assert_eq!(
+            parse_antigravity_plan_tier(&serde_json::json!("string_value")),
+            ("Free".to_string(), Some("Free".to_string()))
+        );
+        assert_eq!(
+            parse_antigravity_plan_tier(
+                &serde_json::json!({"paidTier": null, "currentTier": null})
+            ),
+            ("Free".to_string(), Some("Free".to_string()))
+        );
+
+        // 6. paidTier with free-tier falling back to currentTier
+        let fallback_fixture = serde_json::json!({
+            "paidTier": {
+                "id": "free-tier"
+            },
+            "currentTier": {
+                "id": "free-tier",
+                "name": "Gemini Code Assist for individuals"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&fallback_fixture);
+        assert_eq!(tier, "Free");
+        assert_eq!(name, Some("Free".to_string()));
+
+        // 7. Custom / Enterprise tier
+        let custom_fixture = serde_json::json!({
+            "currentTier": {
+                "id": "enterprise-tier",
+                "name": "Gemini Enterprise"
+            }
+        });
+        let (tier, name) = parse_antigravity_plan_tier(&custom_fixture);
+        assert_eq!(tier, "Gemini Enterprise");
+        assert_eq!(name, Some("Gemini Enterprise".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_default_google_quota_fetcher_load_code_assist_failure_tolerance() {
+        use axum::http::StatusCode;
+        use axum::response::IntoResponse;
+        use tokio::net::TcpListener;
+
+        let quota_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let quota_port = quota_listener.local_addr().unwrap().port();
+        let quota_server = axum::Router::new().route(
+            "/quota",
+            axum::routing::post(|| async move {
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/json")],
+                    serde_json::json!({
+                        "groups": [
+                            {
+                                "displayName": "Gemini Models",
+                                "buckets": [
+                                    {
+                                        "bucketId": "gemini-5h",
+                                        "remainingFraction": 0.8
+                                    }
+                                ]
+                            }
+                        ]
+                    })
+                    .to_string(),
+                )
+                    .into_response()
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(quota_listener, quota_server).await.unwrap();
+        });
+
+        let failing_assist_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let assist_port = failing_assist_listener.local_addr().unwrap().port();
+        let assist_server = axum::Router::new().route(
+            "/assist",
+            axum::routing::post(|| async move {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [("content-type", "application/json")],
+                    r#"{"error":{"code":500,"message":"Internal Code Assist Error"}}"#,
+                )
+                    .into_response()
+            }),
+        );
+        tokio::spawn(async move {
+            axum::serve(failing_assist_listener, assist_server)
+                .await
+                .unwrap();
+        });
+
+        let fetcher = DefaultGoogleQuotaFetcher::with_all_urls(
+            format!("http://127.0.0.1:{quota_port}/quota"),
+            format!("http://127.0.0.1:1/invalid_models_port"), // network failure tolerance
+            format!("http://127.0.0.1:{assist_port}/assist"),  // 500 error tolerance
+        );
+
+        let result = fetcher.fetch_quota("dummy-token").await;
+        assert!(
+            result.is_ok(),
+            "fetch_quota should not fail when loadCodeAssist returns 500"
+        );
+        let quota = result.unwrap();
+        assert!(quota.get("gemini_5h").is_some());
+        assert_eq!(
+            quota["gemini_5h"]["remaining_percent"].as_f64().unwrap(),
+            80.0
+        );
+        assert!(quota.get("plan_tier").is_none());
     }
 }

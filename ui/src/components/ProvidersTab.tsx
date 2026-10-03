@@ -119,6 +119,58 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   const openrouterProv = providers.find((p) => p.type === 'openrouter' || p.prefix === 'openrouter');
   const otherProviders = providers.filter((p) => p.type !== 'openrouter' && p.prefix !== 'openrouter');
 
+  const renderPlanBadge = (tier?: string, planName?: string) => {
+    if (!tier) return null;
+    const tLower = tier.toLowerCase();
+    let badgeClass = 'badge-neutral';
+    let badgeStyle: React.CSSProperties = {
+      fontSize: 10,
+      fontWeight: 700,
+      padding: '1px 6px',
+      borderRadius: '4px',
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 3,
+    };
+
+    if (tLower.includes('ultra')) {
+      badgeStyle = {
+        ...badgeStyle,
+        background: 'linear-gradient(135deg, #7c3aed 0%, #c026d3 100%)',
+        color: '#fff',
+        border: 'none',
+        boxShadow: '0 0 8px rgba(192, 38, 211, 0.4)',
+      };
+    } else if (tLower.includes('pro')) {
+      badgeStyle = {
+        ...badgeStyle,
+        background: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)',
+        color: '#fff',
+        border: 'none',
+        boxShadow: '0 0 6px rgba(56, 189, 248, 0.35)',
+      };
+    } else {
+      badgeStyle = {
+        ...badgeStyle,
+        background: 'rgba(255, 255, 255, 0.08)',
+        color: 'var(--text-muted)',
+        border: '1px solid rgba(255, 255, 255, 0.15)',
+      };
+    }
+
+    return (
+      <span
+        className={`badge ${badgeClass}`}
+        style={badgeStyle}
+        title={planName ? `${planName} (${tier})` : `Tier: ${tier}`}
+      >
+        {tier}
+      </span>
+    );
+  };
+
   const CURATED_OPENROUTER_MODELS = [
     'deepseek/deepseek-r1',
     'deepseek/deepseek-chat',
@@ -1908,8 +1960,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           return (
                             <tr key={acc.id}>
                               <td>
-                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                                  {acc.email}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                    {acc.email}
+                                  </span>
+                                  {renderPlanBadge(acc.plan_tier || acc.quota?.plan_tier, acc.plan_name || acc.quota?.plan_name)}
                                 </div>
                                 <span className="badge badge-neutral font-mono" style={{ fontSize: 10, marginTop: 2 }}>
                                   id: {acc.id.slice(0, 8)}...

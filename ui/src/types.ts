@@ -214,6 +214,8 @@ export interface AccountResponse {
   token_valid: boolean;
   recent_rpm: number;
   quota: any;
+  plan_tier?: string;
+  plan_name?: string;
 }
 
 export interface ListAccountsResponse {
