@@ -4,6 +4,7 @@ pub mod chat;
 pub mod embeddings;
 pub mod health;
 pub mod images;
+pub mod messages;
 pub mod models;
 pub mod responses;
 pub mod ui;

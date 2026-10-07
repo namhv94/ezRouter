@@ -15,8 +15,9 @@ export const IntegrationTab: React.FC = () => {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState('ag-proxy-key');
   const [selectedModel, setSelectedModel] = useState<string>('ag/gemini-3.8-flash-high');
-  const [activeTab, setActiveTab] = useState<'hermes' | 'codex' | 'python' | 'curl' | 'node'>('hermes');
+  const [activeTab, setActiveTab] = useState<'hermes' | 'claude' | 'codex' | 'copilot' | 'python' | 'curl' | 'node'>('hermes');
   const [codexOs, setCodexOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
+  const [claudeOs, setClaudeOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const defaultBaseUrl = 'https://router.namhv.vip/v1';
@@ -103,6 +104,72 @@ stream_idle_timeout_ms = 300000
   const codexCliSnippet = `# Kiểm tra gọi thử model từ Terminal
 codex -m ${codexModel} "Xin chào! Giới thiệu bản thân ngắn gọn"
 `;
+
+  // Claude Code CLI Snippets
+  const claudeModel = 'ag/claude-sonnet-5-5-high';
+  const claudeOneStepBash = `curl -fsSL ${rootUrl}/setup-claude-code.sh | bash -s -- ${rootUrl} ${activeKey} ${claudeModel}`;
+  const claudeOneStepPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/setup-claude-code.ps1))) -RouterUrl '${rootUrl}' -ApiKey '${activeKey}' -Model '${claudeModel}'"`;
+  const claudeOneStepBat = `curl -fsSL ${rootUrl}/setup-claude-code.bat -o setup-claude-code.bat && setup-claude-code.bat ${rootUrl} ${activeKey} ${claudeModel}`;
+
+  const claudeUninstallBash = `curl -fsSL ${rootUrl}/uninstall-claude-code.sh | bash`;
+  const claudeUninstallPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/uninstall-claude-code.ps1)))"`;
+  const claudeUninstallBat = `curl -fsSL ${rootUrl}/uninstall-claude-code.bat -o uninstall-claude-code.bat && uninstall-claude-code.bat`;
+
+  const claudeEnvSnippet = `# ~/.bashrc hoặc ~/.zshrc
+export ANTHROPIC_BASE_URL="${rootUrl}"
+export ANTHROPIC_API_KEY="${activeKey}"
+export ANTHROPIC_MODEL="${claudeModel}"
+`;
+
+  const claudeCliSnippet = `# Chạy Claude Code CLI ngay
+claude
+`;
+
+  // VS Code & GitHub Copilot Snippets
+  const copilotVsCodeSnippet = `// .vscode/settings.json hoặc User Settings (Ctrl+,)
+{
+  "github.copilot.advanced": {
+    "debug.overrideEngine": "${selectedModel}",
+    "debug.overrideProxyUrl": "${baseUrl}"
+  },
+  "http.proxy": "${rootUrl}",
+  "http.proxyStrictSSL": false
+}`;
+
+  const continueConfigSnippet = `// ~/.continue/config.json
+{
+  "models": [
+    {
+      "title": "ezRouter - Claude 3.5 Sonnet",
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022",
+      "apiBase": "${rootUrl}",
+      "apiKey": "${activeKey}"
+    },
+    {
+      "title": "ezRouter - Codex GPT-6.1 Sol",
+      "provider": "openai",
+      "model": "cx/gpt-6.1-sol",
+      "apiBase": "${baseUrl}",
+      "apiKey": "${activeKey}"
+    },
+    {
+      "title": "ezRouter - Gemini 3.8 Flash",
+      "provider": "openai",
+      "model": "ag/gemini-3.8-flash-high",
+      "apiBase": "${baseUrl}",
+      "apiKey": "${activeKey}"
+    }
+  ]
+}`;
+
+  const clineConfigSnippet = `// Cài đặt trong tiện ích Cline / Roo Code (VS Code Extension):
+// 1. Chọn API Provider: OpenAI Compatible hoặc Anthropic
+// 2. Base URL:
+//    - Nếu chọn Anthropic: ${rootUrl}
+//    - Nếu chọn OpenAI:    ${baseUrl}
+// 3. API Key: ${activeKey}
+// 4. Model ID: ${selectedModel} (hoặc ag/claude-sonnet-5-5-high, cx/gpt-6.1-sol)`;
 
   const pythonSdkSnippet = `import os
 from openai import OpenAI
@@ -451,11 +518,27 @@ callRouter();
           </button>
           <button
             type="button"
+            className={`integration-tab-btn ${activeTab === 'claude' ? 'active' : ''}`}
+            onClick={() => setActiveTab('claude')}
+          >
+            <IconTerminal size={16} />
+            <span>Claude Code CLI</span>
+          </button>
+          <button
+            type="button"
             className={`integration-tab-btn ${activeTab === 'codex' ? 'active' : ''}`}
             onClick={() => setActiveTab('codex')}
           >
             <IconTerminal size={16} />
             <span>Codex CLI</span>
+          </button>
+          <button
+            type="button"
+            className={`integration-tab-btn ${activeTab === 'copilot' ? 'active' : ''}`}
+            onClick={() => setActiveTab('copilot')}
+          >
+            <IconCode size={16} />
+            <span>VS Code & Copilot</span>
           </button>
           <button
             type="button"
@@ -526,6 +609,231 @@ callRouter();
               </div>
               <pre className="code-card-pre">
                 <code>{hermesCliEnvSnippet}</code>
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: Claude Code CLI */}
+        {activeTab === 'claude' && (
+          <div className="integration-tab-pane">
+            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+              {t('integration.claudeTitle')}
+            </h4>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+              {t('integration.claudeDesc')}
+            </p>
+
+            {/* 1-Step Setup Box */}
+            <div
+              style={{
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                background: 'rgba(16, 185, 129, 0.05)',
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--success, #10b981)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <IconZap size={16} /> {t('integration.claudeOneStepTitle')}
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('bash')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeMacLinux')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('powershell')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeWinPs')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('bat')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeWinBat')}
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                {t('integration.claudeOneStepDesc')}
+              </p>
+
+              <div className="code-card" style={{ marginBottom: 0 }}>
+                <div className="code-card-header">
+                  <span className="code-file-tag">
+                    {claudeOs === 'bash'
+                      ? 'Terminal (macOS / Linux)'
+                      : claudeOs === 'powershell'
+                      ? 'PowerShell (Windows)'
+                      : 'Command Prompt (Windows)'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        claudeOs === 'bash'
+                          ? claudeOneStepBash
+                          : claudeOs === 'powershell'
+                          ? claudeOneStepPowerShell
+                          : claudeOneStepBat,
+                        'claude-onestep'
+                      )
+                    }
+                  >
+                    {copiedId === 'claude-onestep' ? (
+                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <IconCopy size={14} />
+                    )}
+                    <span>{copiedId === 'claude-onestep' ? t('actions.copied') : t('actions.copy')}</span>
+                  </button>
+                </div>
+                <pre className="code-card-pre">
+                  <code>
+                    {claudeOs === 'bash'
+                      ? claudeOneStepBash
+                      : claudeOs === 'powershell'
+                      ? claudeOneStepPowerShell
+                      : claudeOneStepBat}
+                  </code>
+                </pre>
+              </div>
+            </div>
+
+            {/* Uninstall / Revert Box */}
+            <div
+              style={{
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                background: 'rgba(239, 68, 68, 0.04)',
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <IconAlertCircle size={16} /> {t('integration.claudeUninstallTitle')}
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('bash')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeMacLinux')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('powershell')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeWinPs')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${claudeOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setClaudeOs('bat')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.claudeWinBat')}
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                {t('integration.claudeUninstallDesc')}
+              </p>
+
+              <div className="code-card" style={{ marginBottom: 0 }}>
+                <div className="code-card-header">
+                  <span className="code-file-tag">
+                    {claudeOs === 'bash'
+                      ? 'Terminal (macOS / Linux)'
+                      : claudeOs === 'powershell'
+                      ? 'PowerShell (Windows)'
+                      : 'Command Prompt (Windows)'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        claudeOs === 'bash'
+                          ? claudeUninstallBash
+                          : claudeOs === 'powershell'
+                          ? claudeUninstallPowerShell
+                          : claudeUninstallBat,
+                        'claude-uninstall'
+                      )
+                    }
+                  >
+                    {copiedId === 'claude-uninstall' ? (
+                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <IconCopy size={14} />
+                    )}
+                    <span>{copiedId === 'claude-uninstall' ? t('actions.copied') : t('actions.copy')}</span>
+                  </button>
+                </div>
+                <pre className="code-card-pre">
+                  <code>
+                    {claudeOs === 'bash'
+                      ? claudeUninstallBash
+                      : claudeOs === 'powershell'
+                      ? claudeUninstallPowerShell
+                      : claudeUninstallBat}
+                  </code>
+                </pre>
+              </div>
+            </div>
+
+            {/* Manual Config */}
+            <div className="code-card">
+              <div className="code-card-header">
+                <span className="code-file-tag">{t('integration.claudeEnvVarsTag')}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => copyToClipboard(claudeEnvSnippet, 'claude-env')}
+                >
+                  {copiedId === 'claude-env' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                  <span>{copiedId === 'claude-env' ? t('actions.copied') : t('actions.copy')}</span>
+                </button>
+              </div>
+              <pre className="code-card-pre">
+                <code>{claudeEnvSnippet}</code>
+              </pre>
+            </div>
+
+            <div className="code-card" style={{ marginTop: 14 }}>
+              <div className="code-card-header">
+                <span className="code-file-tag">{t('integration.claudeCliTag')}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => copyToClipboard(claudeCliSnippet, 'claude-cli')}
+                >
+                  {copiedId === 'claude-cli' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                  <span>{copiedId === 'claude-cli' ? t('actions.copied') : t('actions.copy')}</span>
+                </button>
+              </div>
+              <pre className="code-card-pre">
+                <code>{claudeCliSnippet}</code>
               </pre>
             </div>
           </div>
@@ -750,6 +1058,72 @@ callRouter();
               </div>
               <pre className="code-card-pre">
                 <code>{codexCliSnippet}</code>
+              </pre>
+            </div>
+          </div>
+        )}
+
+        {/* Tab Content: VS Code & GitHub Copilot */}
+        {activeTab === 'copilot' && (
+          <div className="integration-tab-pane">
+            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
+              {t('integration.copilotTitle')}
+            </h4>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
+              {t('integration.copilotDesc')}
+            </p>
+
+            {/* VS Code Copilot Settings */}
+            <div className="code-card">
+              <div className="code-card-header">
+                <span className="code-file-tag">{t('integration.copilotVsCodeSettingsTag')}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => copyToClipboard(copilotVsCodeSnippet, 'copilot-settings')}
+                >
+                  {copiedId === 'copilot-settings' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                  <span>{copiedId === 'copilot-settings' ? t('actions.copied') : t('actions.copy')}</span>
+                </button>
+              </div>
+              <pre className="code-card-pre">
+                <code>{copilotVsCodeSnippet}</code>
+              </pre>
+            </div>
+
+            {/* Continue Extension Config */}
+            <div className="code-card" style={{ marginTop: 14 }}>
+              <div className="code-card-header">
+                <span className="code-file-tag">{t('integration.copilotContinueTag')}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => copyToClipboard(continueConfigSnippet, 'continue-config')}
+                >
+                  {copiedId === 'continue-config' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                  <span>{copiedId === 'continue-config' ? t('actions.copied') : t('actions.copy')}</span>
+                </button>
+              </div>
+              <pre className="code-card-pre">
+                <code>{continueConfigSnippet}</code>
+              </pre>
+            </div>
+
+            {/* Cline / Roo Code Config */}
+            <div className="code-card" style={{ marginTop: 14 }}>
+              <div className="code-card-header">
+                <span className="code-file-tag">{t('integration.copilotClineTag')}</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => copyToClipboard(clineConfigSnippet, 'cline-config')}
+                >
+                  {copiedId === 'cline-config' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                  <span>{copiedId === 'cline-config' ? t('actions.copied') : t('actions.copy')}</span>
+                </button>
+              </div>
+              <pre className="code-card-pre">
+                <code>{clineConfigSnippet}</code>
               </pre>
             </div>
           </div>
