@@ -66,6 +66,7 @@ pub struct ActiveRequestsResponse {
 
 pub struct ActiveRequestRegistry {
     requests: RwLock<HashMap<String, ActiveRequestItem>>,
+    broadcaster: tokio::sync::broadcast::Sender<ActiveRequestsResponse>,
 }
 
 impl Default for ActiveRequestRegistry {
@@ -76,9 +77,20 @@ impl Default for ActiveRequestRegistry {
 
 impl ActiveRequestRegistry {
     pub fn new() -> Self {
+        let (broadcaster, _) = tokio::sync::broadcast::channel(64);
         Self {
             requests: RwLock::new(HashMap::new()),
+            broadcaster,
         }
+    }
+
+    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<ActiveRequestsResponse> {
+        self.broadcaster.subscribe()
+    }
+
+    fn broadcast_current(&self) {
+        let active = self.get_active();
+        let _ = self.broadcaster.send(active);
     }
 
     fn now_secs() -> f64 {
@@ -108,6 +120,7 @@ impl ActiveRequestRegistry {
         if let Ok(mut map) = self.requests.write() {
             map.insert(id, item);
         }
+        self.broadcast_current();
     }
 
     pub fn update_routing(&self, id: &str, provider: &str, model: &str, account: &str) {
@@ -119,6 +132,7 @@ impl ActiveRequestRegistry {
                 item.status = "generating".to_string();
             }
         }
+        self.broadcast_current();
     }
 
     pub fn record_first_token(&self, id: &str, ttft_ms: f64) {
@@ -130,6 +144,7 @@ impl ActiveRequestRegistry {
                 }
             }
         }
+        self.broadcast_current();
     }
 
     pub fn finish(&self, id: &str, status: &str) {
@@ -141,6 +156,7 @@ impl ActiveRequestRegistry {
                 item.elapsed_ms = ((now - item.started_at) * 1000.0).max(0.0) as u64;
             }
         }
+        self.broadcast_current();
     }
 
     pub fn get_active(&self) -> ActiveRequestsResponse {

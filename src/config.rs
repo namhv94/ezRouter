@@ -12,6 +12,7 @@ pub const DEFAULT_UPSTREAM_CONNECT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_UPSTREAM_READ_TIMEOUT_SECS: u64 = 60;
 pub const DEFAULT_UPSTREAM_REQUEST_TIMEOUT_SECS: u64 = 120;
 pub const DEFAULT_OAUTH_REDIRECT_URI: &str = "http://localhost:20229/auth/callback";
+pub const DEFAULT_LOG_RETENTION_DAYS: u32 = 7;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
@@ -31,6 +32,9 @@ pub struct Config {
     pub codex_context_optimizer_enabled: bool,
     pub codex_context_max_messages: usize,
     pub codex_context_max_bytes: usize,
+    pub request_log_retention_days: u32,
+    pub allow_production_port: bool,
+    pub compat_port: Option<u16>,
 }
 
 impl fmt::Debug for Config {
@@ -116,17 +120,32 @@ impl Config {
             None => DEFAULT_PORT,
         };
 
-        if port == PROD_FORBIDDEN_PORT {
+        let allow_production_port = env::var("AG_ALLOW_PROD_PORT")
+            .or_else(|_| env::var("AG_CUTOVER_ENABLED"))
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
+
+        if port == PROD_FORBIDDEN_PORT && !allow_production_port {
             return Err(format!(
                 "Port {PROD_FORBIDDEN_PORT} is reserved for production Python ag-proxy. \
-                 ag-proxy-rust staging must use port {DEFAULT_PORT} or another non-production port."
+                 Set AG_ALLOW_PROD_PORT=true or AG_CUTOVER_ENABLED=true to allow binding to production port."
             ));
         }
+
+        let compat_port: Option<u16> = env::var("AG_COMPAT_PORT")
+            .ok()
+            .and_then(|p| p.parse::<u16>().ok());
+
+        let request_log_retention_days = env::var("AG_LOG_RETENTION_DAYS")
+            .or_else(|_| env::var("EZROUTER_LOG_RETENTION_DAYS"))
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(DEFAULT_LOG_RETENTION_DAYS);
 
         let data_dir_str = data_dir_val.unwrap_or_else(|| DEFAULT_DATA_DIR.to_string());
         let data_dir = PathBuf::from(&data_dir_str);
 
-        if Self::is_prod_data_dir(&data_dir) {
+        if Self::is_prod_data_dir(&data_dir) && !allow_production_port {
             return Err(format!(
                 "Data directory '{data_dir_str}' conflicts with production ag-proxy. \
                  ag-proxy-rust must use isolated staging data dir (default: {DEFAULT_DATA_DIR})."
@@ -160,6 +179,9 @@ impl Config {
             codex_context_optimizer_enabled: false,
             codex_context_max_messages: 0,
             codex_context_max_bytes: 0,
+            request_log_retention_days,
+            allow_production_port,
+            compat_port,
         })
     }
 
