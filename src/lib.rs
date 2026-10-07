@@ -94,6 +94,30 @@ pub fn app_router(state: AppState) -> Router {
             "/uninstall-codex.ps1",
             get(routes::ui::serve_uninstall_codex_ps1),
         )
+        .route(
+            "/setup-claude-code.sh",
+            get(routes::ui::serve_setup_claude_code_sh),
+        )
+        .route(
+            "/setup-claude-code.bat",
+            get(routes::ui::serve_setup_claude_code_bat),
+        )
+        .route(
+            "/setup-claude-code.ps1",
+            get(routes::ui::serve_setup_claude_code_ps1),
+        )
+        .route(
+            "/uninstall-claude-code.sh",
+            get(routes::ui::serve_uninstall_claude_code_sh),
+        )
+        .route(
+            "/uninstall-claude-code.bat",
+            get(routes::ui::serve_uninstall_claude_code_bat),
+        )
+        .route(
+            "/uninstall-claude-code.ps1",
+            get(routes::ui::serve_uninstall_claude_code_ps1),
+        )
         .route("/health", get(routes::health::health))
         .route("/auth/login", get(routes::auth::auth_login))
         .route("/auth/callback", get(routes::auth::auth_callback))
@@ -101,6 +125,7 @@ pub fn app_router(state: AppState) -> Router {
         .route("/v1/models", get(routes::models::list_models))
         .route("/v1/models/*model_id", get(routes::models::retrieve_model))
         .route("/v1/chat/completions", post(routes::chat::chat_completions))
+        .route("/v1/messages", post(routes::messages::post_messages))
         .route(
             "/v1/responses",
             post(routes::responses::post_responses).get(routes::responses::get_responses),

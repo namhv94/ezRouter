@@ -151,6 +151,14 @@ where
         let auth_header = parts.headers.get(AUTHORIZATION);
         if auth_header.is_some() {
             verify_token_with_db(auth_header, &app_state.db, &app_state.config.api_key)
+        } else if let Some(x_key) = parts.headers.get("x-api-key") {
+            let bearer_str = format!("Bearer {}", x_key.to_str().unwrap_or(""));
+            let header_val = axum::http::HeaderValue::from_str(&bearer_str).ok();
+            verify_token_with_db(
+                header_val.as_ref(),
+                &app_state.db,
+                &app_state.config.api_key,
+            )
         } else {
             let path = parts.uri.path();
             let is_sse_allowed = (path == "/admin/active-requests"
@@ -265,5 +273,18 @@ mod tests {
         assert_eq!(admin_user.key_id, admin_key.id);
         assert_eq!(admin_user.role, "admin");
         assert!(admin_user.is_admin());
+    }
+
+    #[test]
+    fn test_x_api_key_header_support() {
+        let db = Database::open_in_memory(Some("fallback-key")).unwrap();
+        let dyn_key = db.create_key("Claude Key", Some("sk-ant-test")).unwrap();
+
+        // Convert x-api-key to Bearer format as done in extractor
+        let bearer_val = "Bearer sk-ant-test".to_string();
+        let header = HeaderValue::from_str(&bearer_val).unwrap();
+        let user = verify_token_with_db(Some(&header), &db, "fallback-key").unwrap();
+        assert_eq!(user.key_id, dyn_key.id);
+        assert_eq!(user.key, "sk-ant-test");
     }
 }
