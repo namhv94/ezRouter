@@ -1208,7 +1208,8 @@ export const RequestsTab: React.FC = () => {
                               const isOk =
                                 item.status === '200' ||
                                 item.status === 'ok' ||
-                                item.status === 'success';
+                                item.status === 'success' ||
+                                item.status === 'completed';
                               const isCancelled = item.status === 'cancelled';
 
                               if (isQuota) {
@@ -1398,7 +1399,8 @@ export const RequestsTab: React.FC = () => {
                       ? 'badge-warning'
                       : inspectItem.status === '200' ||
                         inspectItem.status === 'ok' ||
-                        inspectItem.status === 'success'
+                        inspectItem.status === 'success' ||
+                        inspectItem.status === 'completed'
                       ? 'badge-success'
                       : inspectItem.status === 'cancelled'
                       ? 'badge-neutral'
@@ -1430,7 +1432,8 @@ export const RequestsTab: React.FC = () => {
                     ? '⚡ Hết Quota'
                     : inspectItem.status === '200' ||
                       inspectItem.status === 'ok' ||
-                      inspectItem.status === 'success'
+                      inspectItem.status === 'success' ||
+                      inspectItem.status === 'completed'
                     ? 'Thành công'
                     : inspectItem.status === 'cancelled'
                     ? 'Đã hủy'

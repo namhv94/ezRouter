@@ -1903,16 +1903,27 @@ impl AccountPool {
             return Some(lease);
         }
 
-        if self.min_gap_secs > 0.0 {
+        let timeout_secs = 30.0_f64;
+        let start = std::time::Instant::now();
+        let poll_interval = tokio::time::Duration::from_millis(150);
+
+        loop {
+            if start.elapsed().as_secs_f64() >= timeout_secs {
+                tracing::warn!(
+                    elapsed_s = start.elapsed().as_secs_f64(),
+                    "Google Antigravity pool lease queue timed out waiting for in-flight request"
+                );
+                return None;
+            }
+
             let now = current_time_secs();
-            let shortest_wait = {
+            let (has_candidate, shortest_gap) = {
                 let map = self.accounts.read().unwrap();
-                let mut min_w: Option<f64> = None;
+                let mut can_wait = false;
+                let mut min_gap: Option<f64> = None;
+
                 for item in map.values() {
                     if !item.record.is_active || item.record.cooldown_until > now {
-                        continue;
-                    }
-                    if item.in_flight.load(Ordering::SeqCst) >= self.max_concurrency {
                         continue;
                     }
                     if let Some(m) = model_id {
@@ -1935,21 +1946,37 @@ impl AccountPool {
                             }
                         }
                     }
-                    let gap_rem = self.min_gap_secs - (now - item.record.last_used_at);
-                    if gap_rem > 0.0 && gap_rem <= self.min_gap_secs.max(2.0) {
-                        min_w = Some(min_w.map(|w: f64| w.min(gap_rem)).unwrap_or(gap_rem));
+
+                    if item.in_flight.load(Ordering::SeqCst) > 0 {
+                        can_wait = true;
+                    }
+                    if self.min_gap_secs > 0.0 {
+                        let gap_rem = self.min_gap_secs - (now - item.record.last_used_at);
+                        if gap_rem > 0.0 {
+                            can_wait = true;
+                            min_gap = Some(min_gap.map(|w: f64| w.min(gap_rem)).unwrap_or(gap_rem));
+                        }
                     }
                 }
-                min_w
+                (can_wait, min_gap)
             };
 
-            if let Some(wait_secs) = shortest_wait {
-                tokio::time::sleep(tokio::time::Duration::from_secs_f64(wait_secs)).await;
-                return self.acquire_lease(model_id).await;
+            if !has_candidate {
+                return None;
+            }
+
+            let sleep_dur = if let Some(gap) = shortest_gap {
+                poll_interval.min(tokio::time::Duration::from_secs_f64(gap.max(0.05)))
+            } else {
+                poll_interval
+            };
+
+            tokio::time::sleep(sleep_dur).await;
+
+            if let Some(lease) = self.acquire_lease(model_id).await {
+                return Some(lease);
             }
         }
-
-        None
     }
 
     pub async fn pick_account(&self, model_id: Option<&str>) -> Option<AccountRecord> {
@@ -2778,8 +2805,8 @@ mod tests {
 
         let fetcher = DefaultGoogleQuotaFetcher::with_all_urls(
             format!("http://127.0.0.1:{quota_port}/quota"),
-            format!("http://127.0.0.1:1/invalid_models_port"), // network failure tolerance
-            format!("http://127.0.0.1:{assist_port}/assist"),  // 500 error tolerance
+            "http://127.0.0.1:1/invalid_models_port".to_string(), // network failure tolerance
+            format!("http://127.0.0.1:{assist_port}/assist"),     // 500 error tolerance
         );
 
         let result = fetcher.fetch_quota("dummy-token").await;

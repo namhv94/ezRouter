@@ -17,6 +17,7 @@ pub enum AppError {
     BadGateway(String),
     GatewayTimeout(String),
     ServiceUnavailable(String),
+    RateLimit(String),
 }
 
 impl IntoResponse for AppError {
@@ -71,6 +72,12 @@ impl IntoResponse for AppError {
                 "service_unavailable",
                 msg,
             ),
+            AppError::RateLimit(msg) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "requests",
+                "rate_limit_exceeded",
+                msg,
+            ),
         };
 
         let body = Json(json!({
@@ -82,6 +89,10 @@ impl IntoResponse for AppError {
             },
             "detail": message,
         }));
+
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            return (status, [(axum::http::header::RETRY_AFTER, "3")], body).into_response();
+        }
 
         (status, body).into_response()
     }
@@ -99,6 +110,7 @@ impl std::fmt::Display for AppError {
             AppError::BadGateway(msg) => write!(f, "Bad Gateway: {msg}"),
             AppError::GatewayTimeout(msg) => write!(f, "Gateway Timeout: {msg}"),
             AppError::ServiceUnavailable(msg) => write!(f, "Service Unavailable: {msg}"),
+            AppError::RateLimit(msg) => write!(f, "Rate Limit: {msg}"),
         }
     }
 }
@@ -158,5 +170,10 @@ mod tests {
         let err = AppError::ServiceUnavailable("overloaded".to_string());
         let resp = err.into_response();
         assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let err = AppError::RateLimit("rate limited".to_string());
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(resp.headers().get("retry-after").unwrap(), "3");
     }
 }

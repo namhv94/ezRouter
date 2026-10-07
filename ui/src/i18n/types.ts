@@ -847,6 +847,13 @@ export interface TranslationSchema {
     terminalEnvVars: string;
     codexTitle: string;
     codexDesc: string;
+    codexOneStepTitle: string;
+    codexOneStepDesc: string;
+    codexUninstallTitle: string;
+    codexUninstallDesc: string;
+    codexMacLinux: string;
+    codexWinPs: string;
+    codexWinBat: string;
     codexCliTag: string;
     pythonTitle: string;
     pythonDesc: string;

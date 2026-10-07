@@ -5,4 +5,5 @@ pub mod embeddings;
 pub mod health;
 pub mod images;
 pub mod models;
+pub mod responses;
 pub mod ui;

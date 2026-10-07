@@ -58,6 +58,9 @@ pub fn get_mime_type(path: &StdPath) -> &'static str {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("ico") => "image/x-icon",
         Some("json") => "application/json; charset=utf-8",
+        Some("sh") => "text/x-shellscript; charset=utf-8",
+        Some("bat") | Some("cmd") => "text/plain; charset=utf-8",
+        Some("ps1") => "text/plain; charset=utf-8",
         Some("wasm") => "application/wasm",
         Some("woff") => "font/woff",
         Some("woff2") => "font/woff2",
@@ -138,6 +141,70 @@ pub async fn serve_favicon() -> Response {
     } else {
         StatusCode::NOT_FOUND.into_response()
     }
+}
+
+pub fn get_scripts_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("AG_SCRIPTS_DIR") {
+        let p = PathBuf::from(dir);
+        if p.exists() {
+            return p;
+        }
+    }
+    let p = PathBuf::from("scripts");
+    if p.exists() {
+        return p;
+    }
+    let manifest_p = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts");
+    if manifest_p.exists() {
+        return manifest_p;
+    }
+    p
+}
+
+pub async fn serve_scripts(Path(path): Path<String>) -> Response {
+    let scripts_dir = get_scripts_dir();
+
+    if let Some(target_file) = resolve_safe_static_path(&scripts_dir, &path) {
+        let mime = get_mime_type(&target_file);
+        match tokio::fs::read(&target_file).await {
+            Ok(bytes) => (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, mime),
+                    (header::CACHE_CONTROL, "public, max-age=300"),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
+}
+
+pub async fn serve_setup_codex_sh() -> Response {
+    serve_scripts(Path("setup-codex.sh".to_string())).await
+}
+
+pub async fn serve_setup_codex_bat() -> Response {
+    serve_scripts(Path("setup-codex.bat".to_string())).await
+}
+
+pub async fn serve_setup_codex_ps1() -> Response {
+    serve_scripts(Path("setup-codex.ps1".to_string())).await
+}
+
+pub async fn serve_uninstall_codex_sh() -> Response {
+    serve_scripts(Path("uninstall-codex.sh".to_string())).await
+}
+
+pub async fn serve_uninstall_codex_bat() -> Response {
+    serve_scripts(Path("uninstall-codex.bat".to_string())).await
+}
+
+pub async fn serve_uninstall_codex_ps1() -> Response {
+    serve_scripts(Path("uninstall-codex.ps1".to_string())).await
 }
 
 #[cfg(test)]

@@ -168,9 +168,9 @@ impl SystemLogBuffer {
 
 fn parse_journal_line(line: &str) -> Option<SystemLogEntry> {
     // Typical line:
-    // Thg 9 23 21:49:23 namhv ag-proxy-rust[2057064]: 2026-09-23T14:49:23.647678Z  INFO ezrouter: Initializing Router Rust service...
+    // Thg 9 23 21:49:23 namhv ag-proxy-rust[2057064]: 2026-09-23T14:49:23.647678Z  INFO ag_proxy_rust: Initializing Router Rust service...
     // Or without prefix:
-    // 2026-09-23T14:49:23.647678Z  INFO ezrouter: Initializing Router Rust service...
+    // 2026-09-23T14:49:23.647678Z  INFO ag_proxy_rust: Initializing Router Rust service...
     let content = if let Some((_, rest)) = line.split_once("]: ") {
         rest.trim()
     } else {
@@ -294,10 +294,10 @@ mod tests {
 
     #[test]
     fn test_parse_journal_line() {
-        let line = "Thg 9 23 21:49:23 namhv ag-proxy-rust[2057064]: 2026-09-23T14:49:23.647678Z  INFO ezrouter: Initializing Router Rust service...";
+        let line = "Thg 9 23 21:49:23 namhv ag-proxy-rust[2057064]: 2026-09-23T14:49:23.647678Z  INFO ag_proxy_rust: Initializing Router Rust service...";
         let entry = parse_journal_line(line).expect("Should parse");
         assert_eq!(entry.level, "INFO");
-        assert_eq!(entry.target, "ezrouter");
+        assert_eq!(entry.target, "ag_proxy_rust");
         assert_eq!(entry.message, "Initializing Router Rust service...");
     }
 }

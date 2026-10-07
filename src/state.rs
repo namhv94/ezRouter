@@ -18,6 +18,7 @@ pub struct AppState {
     pub account_pool: Arc<AccountPool>,
     pub codex_pool: Arc<CodexAccountPool>,
     pub codex_provider: Arc<dyn Provider>,
+    pub codex_raw_provider: Arc<CodexProvider>,
     pub quota_worker: Arc<QuotaRefreshWorker>,
     pub live_registry: Arc<ActiveRequestRegistry>,
     pub system_logs: Arc<crate::system_log::SystemLogBuffer>,
@@ -34,6 +35,7 @@ impl std::fmt::Debug for AppState {
             .field("account_pool", &self.account_pool)
             .field("codex_pool", &self.codex_pool)
             .field("codex_provider", &self.codex_provider)
+            .field("codex_raw_provider", &self.codex_raw_provider)
             .field("quota_worker", &"[QuotaRefreshWorker]")
             .field("live_registry", &"[ActiveRequestRegistry]")
             .field("system_logs", &"[SystemLogBuffer]")
@@ -103,14 +105,15 @@ impl AppState {
             config.codex_latency_telemetry_enabled,
         ));
 
+        let codex_raw_provider = Arc::new(
+            CodexProvider::new(codex_pool.clone())
+                .with_latency_store(latency_store.clone())
+                .with_native_non_stream(config.codex_native_non_stream_enabled),
+        );
         let codex_provider: Arc<dyn Provider> = if config.use_mock_provider {
             Arc::new(MockProvider::new())
         } else {
-            Arc::new(
-                CodexProvider::new(codex_pool.clone())
-                    .with_latency_store(latency_store.clone())
-                    .with_native_non_stream(config.codex_native_non_stream_enabled),
-            )
+            codex_raw_provider.clone()
         };
 
         let quota_worker = Arc::new(QuotaRefreshWorker::new(
@@ -128,6 +131,7 @@ impl AppState {
             account_pool: pool,
             codex_pool,
             codex_provider,
+            codex_raw_provider,
             quota_worker,
             live_registry: Arc::new(ActiveRequestRegistry::new()),
             system_logs: crate::system_log::SystemLogBuffer::global(),
@@ -171,6 +175,7 @@ impl AppState {
         };
 
         let codex_provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
+        let codex_raw_provider = Arc::new(CodexProvider::new(codex_pool.clone()));
         let quota_worker = Arc::new(QuotaRefreshWorker::new(
             db.clone(),
             pool.clone(),
@@ -185,6 +190,7 @@ impl AppState {
             account_pool: pool,
             codex_pool,
             codex_provider,
+            codex_raw_provider,
             quota_worker,
             live_registry: Arc::new(ActiveRequestRegistry::new()),
             system_logs: crate::system_log::SystemLogBuffer::global(),
@@ -209,6 +215,8 @@ impl AppState {
             codex_pool.clone(),
         ));
 
+        let codex_raw_provider = Arc::new(CodexProvider::new(codex_pool.clone()));
+
         Self {
             config: Arc::new(config),
             models: Arc::new(ModelRegistry::new()),
@@ -217,6 +225,7 @@ impl AppState {
             account_pool: pool,
             codex_pool,
             codex_provider,
+            codex_raw_provider,
             quota_worker,
             live_registry: Arc::new(ActiveRequestRegistry::new()),
             system_logs: crate::system_log::SystemLogBuffer::global(),
@@ -243,6 +252,7 @@ impl AppState {
         let codex_pool = Arc::new(CodexAccountPool::new(db.clone()));
         let _ = codex_pool.load_from_db();
         let codex_provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
+        let codex_raw_provider = Arc::new(CodexProvider::new(codex_pool.clone()));
         let quota_worker = Arc::new(QuotaRefreshWorker::new(
             db.clone(),
             pool.clone(),
@@ -257,6 +267,7 @@ impl AppState {
             account_pool: pool,
             codex_pool,
             codex_provider,
+            codex_raw_provider,
             quota_worker,
             live_registry: Arc::new(ActiveRequestRegistry::new()),
             system_logs: crate::system_log::SystemLogBuffer::global(),
@@ -276,6 +287,7 @@ impl AppState {
         let codex_pool = Arc::new(CodexAccountPool::new(db.clone()));
         let _ = codex_pool.load_from_db();
         let codex_provider: Arc<dyn Provider> = Arc::new(MockProvider::new());
+        let codex_raw_provider = Arc::new(CodexProvider::new(codex_pool.clone()));
         let quota_worker = Arc::new(QuotaRefreshWorker::new(
             db.clone(),
             account_pool.clone(),
@@ -290,6 +302,7 @@ impl AppState {
             account_pool,
             codex_pool,
             codex_provider,
+            codex_raw_provider,
             quota_worker,
             live_registry: Arc::new(ActiveRequestRegistry::new()),
             system_logs: crate::system_log::SystemLogBuffer::global(),

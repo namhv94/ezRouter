@@ -16,9 +16,15 @@ export const IntegrationTab: React.FC = () => {
   const [apiKey, setApiKey] = useState('ag-proxy-key');
   const [selectedModel, setSelectedModel] = useState<string>('ag/gemini-3.8-flash-high');
   const [activeTab, setActiveTab] = useState<'hermes' | 'codex' | 'python' | 'curl' | 'node'>('hermes');
+  const [codexOs, setCodexOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const baseUrl = 'https://router.namhv.vip/v1';
+  const defaultBaseUrl = 'https://router.namhv.vip/v1';
+  const baseUrl =
+    typeof window !== 'undefined' && window.location.origin.startsWith('http')
+      ? `${window.location.origin}/v1`
+      : defaultBaseUrl;
+  const rootUrl = baseUrl.replace(/\/v1$/, '');
 
   const copyToClipboard = async (text: string, id: string) => {
     try {
@@ -64,22 +70,38 @@ export OPENAI_API_KEY="${activeKey}"
 hermes chat --model ${selectedModel}
 `;
 
-  const codexConfigSnippet = `# ~/.codex/config.toml
-# Cấu hình endpoint cho OpenAI Codex CLI
-model = "${selectedModel}"
-base_url = "${baseUrl}"
-api_key = "${activeKey}"
+  const codexModel =
+    selectedModel.startsWith('cx/') || selectedModel.startsWith('gpt-')
+      ? selectedModel
+      : 'cx/gpt-5.6-sol';
 
-[options]
-temperature = 0.2
-stream = true
+  const codexOneStepBash = `curl -fsSL ${rootUrl}/setup-codex.sh | bash -s -- ${baseUrl} ${activeKey} ${codexModel}`;
+  const codexOneStepPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/setup-codex.ps1))) -RouterUrl '${baseUrl}' -ApiKey '${activeKey}' -Model '${codexModel}'"`;
+  const codexOneStepBat = `curl -fsSL ${rootUrl}/setup-codex.bat -o setup-codex.bat && setup-codex.bat ${baseUrl} ${activeKey} ${codexModel}`;
+
+  const codexUninstallBash = `curl -fsSL ${rootUrl}/uninstall-codex.sh | bash`;
+  const codexUninstallPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/uninstall-codex.ps1)))"`;
+  const codexUninstallBat = `curl -fsSL ${rootUrl}/uninstall-codex.bat -o uninstall-codex.bat && uninstall-codex.bat`;
+
+  const codexConfigSnippet = `# ~/.codex/config.toml
+# Cấu hình ezRouter cho OpenAI Codex IDE Extension & Codex CLI
+model = "${codexModel}"
+model_provider = "ezrouter"
+
+[model_providers.ezrouter]
+name = "ezRouter"
+base_url = "${baseUrl}"
+wire_api = "responses"
+supports_websockets = false
+experimental_bearer_token = "${activeKey}"
+requires_openai_auth = false
+request_max_retries = 4
+stream_max_retries = 10
+stream_idle_timeout_ms = 300000
 `;
 
-  const codexCliSnippet = `# Thiết lập môi trường và thực thi trực tiếp với Codex CLI
-export OPENAI_BASE_URL="${baseUrl}"
-export OPENAI_API_KEY="${activeKey}"
-
-codex -m ${selectedModel} "Viết hàm xử lý exponential backoff retry bằng Rust"
+  const codexCliSnippet = `# Kiểm tra gọi thử model từ Terminal
+codex -m ${codexModel} "Xin chào! Giới thiệu bản thân ngắn gọn"
 `;
 
   const pythonSdkSnippet = `import os
@@ -519,9 +541,187 @@ callRouter();
               {t('integration.codexDesc')}
             </p>
 
+            {/* 1-Step Setup Box */}
+            <div
+              style={{
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                background: 'rgba(16, 185, 129, 0.05)',
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--success, #10b981)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <IconZap size={16} /> {t('integration.codexOneStepTitle')}
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('bash')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexMacLinux')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('powershell')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexWinPs')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('bat')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexWinBat')}
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                {t('integration.codexOneStepDesc')}
+              </p>
+
+              <div className="code-card" style={{ marginBottom: 0 }}>
+                <div className="code-card-header">
+                  <span className="code-file-tag">
+                    {codexOs === 'bash'
+                      ? 'Terminal (macOS / Linux)'
+                      : codexOs === 'powershell'
+                      ? 'PowerShell (Windows)'
+                      : 'Command Prompt (Windows)'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        codexOs === 'bash'
+                          ? codexOneStepBash
+                          : codexOs === 'powershell'
+                          ? codexOneStepPowerShell
+                          : codexOneStepBat,
+                        'codex-onestep'
+                      )
+                    }
+                  >
+                    {copiedId === 'codex-onestep' ? (
+                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <IconCopy size={14} />
+                    )}
+                    <span>{copiedId === 'codex-onestep' ? t('actions.copied') : t('actions.copy')}</span>
+                  </button>
+                </div>
+                <pre className="code-card-pre">
+                  <code>
+                    {codexOs === 'bash'
+                      ? codexOneStepBash
+                      : codexOs === 'powershell'
+                      ? codexOneStepPowerShell
+                      : codexOneStepBat}
+                  </code>
+                </pre>
+              </div>
+            </div>
+
+            {/* Uninstall / Revert Box */}
+            <div
+              style={{
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                background: 'rgba(239, 68, 68, 0.05)',
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <IconAlertCircle size={16} /> {t('integration.codexUninstallTitle')}
+                </span>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('bash')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexMacLinux')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('powershell')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexWinPs')}
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn btn-sm ${codexOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setCodexOs('bat')}
+                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
+                  >
+                    {t('integration.codexWinBat')}
+                  </button>
+                </div>
+              </div>
+
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
+                {t('integration.codexUninstallDesc')}
+              </p>
+
+              <div className="code-card" style={{ marginBottom: 0 }}>
+                <div className="code-card-header">
+                  <span className="code-file-tag">
+                    {codexOs === 'bash'
+                      ? 'Terminal (macOS / Linux)'
+                      : codexOs === 'powershell'
+                      ? 'PowerShell (Windows)'
+                      : 'Command Prompt (Windows)'}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() =>
+                      copyToClipboard(
+                        codexOs === 'bash'
+                          ? codexUninstallBash
+                          : codexOs === 'powershell'
+                          ? codexUninstallPowerShell
+                          : codexUninstallBat,
+                        'codex-uninstall'
+                      )
+                    }
+                  >
+                    {copiedId === 'codex-uninstall' ? (
+                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
+                    ) : (
+                      <IconCopy size={14} />
+                    )}
+                    <span>{copiedId === 'codex-uninstall' ? t('actions.copied') : t('actions.copy')}</span>
+                  </button>
+                </div>
+                <pre className="code-card-pre">
+                  <code>
+                    {codexOs === 'bash'
+                      ? codexUninstallBash
+                      : codexOs === 'powershell'
+                      ? codexUninstallPowerShell
+                      : codexUninstallBat}
+                  </code>
+                </pre>
+              </div>
+            </div>
+
             <div className="code-card">
               <div className="code-card-header">
-                <span className="code-file-tag">~/.codex/config.toml</span>
+                <span className="code-file-tag">~/.codex/config.toml (Thủ công / Manual)</span>
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"

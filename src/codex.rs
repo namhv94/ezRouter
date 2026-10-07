@@ -812,11 +812,18 @@ impl CodexQuotaFetcher for MockCodexQuotaFetcher {
     }
 }
 
+pub const CODEX_DEFAULT_QUEUE_TIMEOUT_SECS: f64 = 60.0;
+fn default_queue_timeout_seconds() -> f64 {
+    CODEX_DEFAULT_QUEUE_TIMEOUT_SECS
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CodexGuardrails {
     pub max_concurrency: usize,
     pub min_gap_seconds: f64,
     pub max_rpm: usize,
+    #[serde(default = "default_queue_timeout_seconds")]
+    pub queue_timeout_seconds: f64,
 }
 
 impl Default for CodexGuardrails {
@@ -825,6 +832,7 @@ impl Default for CodexGuardrails {
             max_concurrency: 1,
             min_gap_seconds: CODEX_MIN_GAP_SECS,
             max_rpm: CODEX_MAX_RPM,
+            queue_timeout_seconds: CODEX_DEFAULT_QUEUE_TIMEOUT_SECS,
         }
     }
 }
@@ -1141,10 +1149,32 @@ impl std::fmt::Debug for CodexPool {
     }
 }
 
+fn default_codex_paths() -> (PathBuf, PathBuf) {
+    let data_dir = std::env::var("AG_DATA_DIR")
+        .or_else(|_| std::env::var("EZROUTER_DATA_DIR"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            #[cfg(test)]
+            {
+                std::env::temp_dir().join(format!("ezrouter-test-{}", std::process::id()))
+            }
+            #[cfg(not(test))]
+            {
+                std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .map(|h| PathBuf::from(h).join(".ezrouter"))
+                    .unwrap_or_else(|_| std::env::temp_dir())
+            }
+        });
+    (
+        data_dir.join("codex-accounts"),
+        data_dir.join("codex-auth.json"),
+    )
+}
+
 impl CodexPool {
     pub fn new(db: Arc<Database>) -> Self {
-        let accounts_dir = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-accounts");
-        let default_auth_path = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-auth.json");
+        let (accounts_dir, default_auth_path) = default_codex_paths();
         Self::with_components(
             db,
             Arc::new(DefaultCodexTokenRefresher::new()),
@@ -1156,8 +1186,7 @@ impl CodexPool {
     }
 
     pub fn with_refresher(db: Arc<Database>, refresher: Arc<dyn CodexTokenRefresher>) -> Self {
-        let accounts_dir = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-accounts");
-        let default_auth_path = PathBuf::from("/home/namhv/.ag-proxy-rust-staging/codex-auth.json");
+        let (accounts_dir, default_auth_path) = default_codex_paths();
         Self::with_components(
             db,
             refresher,
@@ -1350,7 +1379,24 @@ impl CodexPool {
         });
 
         let chosen = candidates[0].clone();
-        chosen.in_flight.fetch_add(1, Ordering::SeqCst);
+        let mut cur = chosen.in_flight.load(Ordering::SeqCst);
+        let acquired = loop {
+            if cur >= self.guardrails.max_concurrency {
+                break false;
+            }
+            match chosen.in_flight.compare_exchange_weak(
+                cur,
+                cur + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break true,
+                Err(actual) => cur = actual,
+            }
+        };
+        if !acquired {
+            return None;
+        }
         let now = current_time_secs();
         *chosen.last_started_at.write().unwrap() = now;
 
@@ -1358,38 +1404,171 @@ impl CodexPool {
     }
 
     pub async fn acquire_lease_with_pacing(self: &Arc<Self>) -> Option<CodexLease> {
+        // Fast path: try immediate acquisition
         if let Some(lease) = self.acquire_lease() {
             return Some(lease);
         }
 
+        let timeout_secs = self.guardrails.queue_timeout_seconds.max(5.0);
+        let start = std::time::Instant::now();
+        let poll_interval = tokio::time::Duration::from_millis(150);
+
+        loop {
+            if start.elapsed().as_secs_f64() >= timeout_secs {
+                tracing::warn!(
+                    elapsed_s = start.elapsed().as_secs_f64(),
+                    timeout_s = timeout_secs,
+                    "Codex lease queue timeout waiting for in-flight request to finish"
+                );
+                return None;
+            }
+
+            let now = current_time_secs();
+            let (has_candidate, shortest_gap) = {
+                let map = self.accounts.read().unwrap();
+                let mut can_wait = false;
+                let mut min_gap: Option<f64> = None;
+
+                for acc in map.values() {
+                    if !acc.is_active.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    if acc.refresh_token_value.read().unwrap().is_empty() {
+                        continue;
+                    }
+                    if *acc.cooldown_until.read().unwrap() > now {
+                        continue;
+                    }
+                    let quota = acc.quota_cache.read().unwrap();
+                    if let Some(primary) = quota.get("primary_window").and_then(|w| w.as_object()) {
+                        if let Some(used) = primary.get("used_percent").and_then(|u| u.as_f64()) {
+                            if used >= CODEX_QUOTA_STOP_PERCENT {
+                                continue;
+                            }
+                        }
+                    }
+
+                    if acc.in_flight.load(Ordering::SeqCst) > 0 {
+                        can_wait = true;
+                    }
+                    let last_used = *acc.last_used_at.read().unwrap();
+                    let gap_rem = self.guardrails.min_gap_seconds - (now - last_used);
+                    if gap_rem > 0.0 {
+                        can_wait = true;
+                        min_gap = Some(min_gap.map(|m: f64| m.min(gap_rem)).unwrap_or(gap_rem));
+                    }
+                }
+                (can_wait, min_gap)
+            };
+
+            if !has_candidate {
+                return None;
+            }
+
+            let sleep_dur = if let Some(gap) = shortest_gap {
+                poll_interval.min(tokio::time::Duration::from_secs_f64(gap.max(0.05)))
+            } else {
+                poll_interval
+            };
+
+            tokio::time::sleep(sleep_dur).await;
+
+            if let Some(lease) = self.acquire_lease() {
+                return Some(lease);
+            }
+        }
+    }
+
+    pub fn diagnose_unavailable(&self) -> (axum::http::StatusCode, String) {
+        let _ = self.load_from_db();
         let now = current_time_secs();
-        let shortest_wait = {
-            let map = self.accounts.read().unwrap();
-            let mut min_w: Option<f64> = None;
-            for acc in map.values() {
-                if !acc.is_active.load(Ordering::SeqCst)
-                    || *acc.cooldown_until.read().unwrap() > now
-                {
-                    continue;
-                }
-                if acc.in_flight.load(Ordering::SeqCst) >= self.guardrails.max_concurrency {
-                    continue;
-                }
-                let last_used = *acc.last_used_at.read().unwrap();
-                let gap_rem = self.guardrails.min_gap_seconds - (now - last_used);
-                if gap_rem > 0.0 && gap_rem <= self.guardrails.min_gap_seconds.max(2.0) {
-                    min_w = Some(min_w.map(|w: f64| w.min(gap_rem)).unwrap_or(gap_rem));
+        let map = self.accounts.read().unwrap();
+        if map.is_empty() {
+            return (
+                axum::http::StatusCode::BAD_GATEWAY,
+                "Chưa cấu hình tài khoản OpenAI Codex nào trong hệ thống".to_string(),
+            );
+        }
+        let mut any_active = false;
+        let mut any_quota_available = false;
+        let mut min_cooldown_left: Option<f64> = None;
+        let mut any_in_flight = false;
+        let mut any_rpm_limited = false;
+
+        for acc in map.values() {
+            if !acc.is_active.load(Ordering::SeqCst) {
+                continue;
+            }
+            any_active = true;
+            let cd = *acc.cooldown_until.read().unwrap();
+            if cd > now {
+                let left = cd - now;
+                min_cooldown_left =
+                    Some(min_cooldown_left.map(|m: f64| m.min(left)).unwrap_or(left));
+                continue;
+            }
+            let quota = acc.quota_cache.read().unwrap();
+            if let Some(primary) = quota.get("primary_window").and_then(|w| w.as_object()) {
+                if let Some(used) = primary.get("used_percent").and_then(|u| u.as_f64()) {
+                    if used >= CODEX_QUOTA_STOP_PERCENT {
+                        continue;
+                    }
                 }
             }
-            min_w
-        };
-
-        if let Some(wait_secs) = shortest_wait {
-            tokio::time::sleep(tokio::time::Duration::from_secs_f64(wait_secs)).await;
-            return self.acquire_lease();
+            any_quota_available = true;
+            if acc.in_flight.load(Ordering::SeqCst) > 0 {
+                any_in_flight = true;
+            }
+            let rpm = {
+                let reqs = acc.recent_requests.read().unwrap();
+                reqs.iter().filter(|&&t| t > now - 60.0).count()
+            };
+            if rpm >= self.guardrails.max_rpm {
+                any_rpm_limited = true;
+            }
         }
 
-        None
+        if !any_active {
+            return (
+                axum::http::StatusCode::BAD_GATEWAY,
+                "Tất cả tài khoản OpenAI Codex đang bị tắt (inactive)".to_string(),
+            );
+        }
+        if any_in_flight {
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "Tất cả tài khoản OpenAI Codex đang bận xử lý request khác (hàng đợi quá thời gian chờ)".to_string(),
+            );
+        }
+        if let Some(cd_left) = min_cooldown_left {
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                format!(
+                    "Tài khoản OpenAI Codex đang trong thời gian cooldown (còn {:.0}s)",
+                    cd_left
+                ),
+            );
+        }
+        if any_rpm_limited {
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                format!(
+                    "Tài khoản OpenAI Codex đã đạt giới hạn RPM (tối đa {} req/phút)",
+                    self.guardrails.max_rpm
+                ),
+            );
+        }
+        if !any_quota_available {
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "Tất cả tài khoản OpenAI Codex đã chạm giới hạn quota (>= 98%)".to_string(),
+            );
+        }
+
+        (
+            axum::http::StatusCode::BAD_GATEWAY,
+            "Không có tài khoản OpenAI Codex nào sẵn sàng".to_string(),
+        )
     }
 
     pub fn peek_account(&self) -> Option<Arc<CodexAccount>> {
@@ -2922,6 +3101,165 @@ impl CodexProvider {
     pub fn pool(&self) -> &Arc<CodexAccountPool> {
         &self.pool
     }
+
+    pub async fn execute_raw_responses(
+        &self,
+        payload: &serde_json::Value,
+        is_stream: bool,
+    ) -> Result<RawResponsesResult, AppError> {
+        let requested_model = payload
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("cx/gpt-5.6-sol");
+        let upstream_model = normalize_upstream_codex_model(requested_model).to_string();
+
+        let mut body = payload.clone();
+        body["model"] = serde_json::json!(upstream_model);
+        body["store"] = serde_json::json!(false);
+        if is_stream {
+            body["stream"] = serde_json::json!(true);
+        }
+
+        let url = format!("{}/codex/responses", self.base_url);
+
+        let active_count = self
+            .pool
+            .accounts
+            .read()
+            .unwrap()
+            .values()
+            .filter(|a| a.is_active.load(Ordering::SeqCst))
+            .count();
+        let max_attempts = self.max_attempts.min(active_count.max(1));
+        let mut last_error = String::new();
+
+        for attempt in 0..max_attempts {
+            let mut lease = match self.pool.acquire_lease_with_pacing().await {
+                Some(l) => l,
+                None => {
+                    let (status, msg) = self.pool.diagnose_unavailable();
+                    if status == axum::http::StatusCode::TOO_MANY_REQUESTS {
+                        return Err(AppError::RateLimit(msg));
+                    } else {
+                        return Err(AppError::BadGateway(msg));
+                    }
+                }
+            };
+            let acc = lease.account.clone();
+            let _gen_guard = acc.generation_lock.lock().await;
+
+            let _token = match self.pool.ensure_token(&acc).await {
+                Ok(t) => t,
+                Err(e) => {
+                    lease.commit_error(&e, false);
+                    last_error = e;
+                    continue;
+                }
+            };
+
+            let accept_hdr = if is_stream {
+                "text/event-stream"
+            } else {
+                "application/json"
+            };
+            let headers = acc.headers(accept_hdr, true);
+
+            let resp_res = self
+                .client
+                .post(&url)
+                .headers(headers)
+                .json(&body)
+                .send()
+                .await;
+
+            let resp = match resp_res {
+                Ok(r) => r,
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    let is_timeout = e.is_timeout() || e.is_connect();
+                    lease
+                        .commit_error_with_cooldown(&err_msg, if is_timeout { 30.0 } else { 15.0 });
+                    last_error = err_msg;
+                    continue;
+                }
+            };
+
+            let status = resp.status();
+            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
+                lease.release();
+                let _ = self.pool.refresh_token(&acc, true).await;
+                continue;
+            }
+
+            if !status.is_success() {
+                let resp_headers = resp.headers().clone();
+                let err_text = resp.text().await.unwrap_or_default();
+                if status == reqwest::StatusCode::BAD_REQUEST
+                    || status == reqwest::StatusCode::UNPROCESSABLE_ENTITY
+                {
+                    lease.release();
+                    return Err(AppError::BadRequest(format!(
+                        "Codex upstream rejected request payload: {err_text}"
+                    )));
+                }
+
+                if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    let retry_after =
+                        parse_retry_after(&resp_headers).unwrap_or(COOLDOWN_AFTER_ERROR_SECS);
+                    lease.commit_error_with_cooldown(&err_text, retry_after);
+                    last_error = err_text;
+                    continue;
+                }
+
+                if status == reqwest::StatusCode::FORBIDDEN
+                    || err_text.to_lowercase().contains("account suspended")
+                    || err_text.to_lowercase().contains("banned")
+                    || err_text.to_lowercase().contains("account disabled")
+                {
+                    lease.commit_error_with_cooldown(&err_text, 3600.0);
+                    last_error = err_text;
+                    continue;
+                }
+
+                if status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                    || status == reqwest::StatusCode::INTERNAL_SERVER_ERROR
+                    || status == reqwest::StatusCode::BAD_GATEWAY
+                    || status == reqwest::StatusCode::GATEWAY_TIMEOUT
+                {
+                    let retry_after = parse_retry_after(&resp_headers).unwrap_or(30.0);
+                    lease.commit_error_with_cooldown(&err_text, retry_after);
+                    last_error = err_text;
+                    continue;
+                }
+
+                lease.commit_error(&err_text, false);
+                return Err(AppError::BadGateway(format!(
+                    "Codex upstream {status}: {err_text}"
+                )));
+            }
+
+            let account_email = acc.email.read().unwrap().clone();
+            return Ok(RawResponsesResult {
+                response: resp,
+                lease,
+                account_email,
+                upstream_model,
+            });
+        }
+
+        Err(AppError::BadGateway(if last_error.is_empty() {
+            "All Codex accounts failed".to_string()
+        } else {
+            last_error
+        }))
+    }
+}
+
+pub struct RawResponsesResult {
+    pub response: reqwest::Response,
+    pub lease: CodexLease,
+    pub account_email: String,
+    pub upstream_model: String,
 }
 
 pub fn normalize_upstream_codex_model(model: &str) -> &str {
@@ -2976,10 +3314,12 @@ impl Provider for CodexProvider {
             let mut lease = match self.pool.acquire_lease_with_pacing().await {
                 Some(l) => l,
                 None => {
-                    return Err(AppError::BadGateway(
-                        "Không có tài khoản ChatGPT nào sẵn sàng (đang cooldown hoặc quá quota)"
-                            .to_string(),
-                    ));
+                    let (status, msg) = self.pool.diagnose_unavailable();
+                    if status == axum::http::StatusCode::TOO_MANY_REQUESTS {
+                        return Err(AppError::RateLimit(msg));
+                    } else {
+                        return Err(AppError::BadGateway(msg));
+                    }
                 }
             };
             let t1 = Instant::now();
@@ -3201,10 +3541,12 @@ impl Provider for CodexProvider {
             let mut lease = match self.pool.acquire_lease_with_pacing().await {
                 Some(l) => l,
                 None => {
-                    return Err(AppError::BadGateway(
-                        "Không có tài khoản ChatGPT nào sẵn sàng (đang cooldown hoặc quá quota)"
-                            .to_string(),
-                    ));
+                    let (status, msg) = self.pool.diagnose_unavailable();
+                    if status == axum::http::StatusCode::TOO_MANY_REQUESTS {
+                        return Err(AppError::RateLimit(msg));
+                    } else {
+                        return Err(AppError::BadGateway(msg));
+                    }
                 }
             };
             let t1 = Instant::now();
@@ -4315,6 +4657,94 @@ mod tests {
         let mut lease2 = pool.acquire_lease().expect("lease 2 should succeed");
         lease2.commit_success();
         assert_eq!(acc.total_requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_codex_queue_wait_succeeds_when_in_flight_finishes() {
+        let db = Arc::new(Database::open_in_memory(None).unwrap());
+        let pool = Arc::new(CodexPool::new(db));
+        let tokens = serde_json::json!({
+            "access_token": "queue-tok",
+            "refresh_token": "queue-rt",
+            "account_id": "acc-queue"
+        });
+        pool.add_account_with_tokens(tokens, Some("acc-queue"))
+            .unwrap();
+
+        // 1. Acquire lease 1
+        let lease1 = pool.acquire_lease().expect("lease 1 succeeds");
+        assert_eq!(lease1.account.in_flight.load(Ordering::SeqCst), 1);
+
+        // 2. Spawn a task to release lease 1 after 100ms
+        let pool_clone = pool.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            drop(lease1);
+        });
+
+        // 3. Concurrently acquire with pacing - it should wait in queue and succeed!
+        let lease2 = pool_clone
+            .acquire_lease_with_pacing()
+            .await
+            .expect("lease 2 should succeed after queue wait");
+        assert_eq!(lease2.account.id, "acc-queue");
+    }
+
+    #[tokio::test]
+    async fn test_codex_diagnose_unavailable_distinguishes_reasons() {
+        let db = Arc::new(Database::open_in_memory(None).unwrap());
+        let pool = Arc::new(CodexPool::new(db.clone()));
+
+        // 1. Empty pool
+        let (status, msg) = pool.diagnose_unavailable();
+        assert_eq!(status, axum::http::StatusCode::BAD_GATEWAY);
+        assert!(msg.contains("Chưa cấu hình tài khoản"));
+
+        // 2. Inactive account
+        let tokens = serde_json::json!({
+            "access_token": "diag-tok",
+            "refresh_token": "diag-rt",
+            "account_id": "acc-diag"
+        });
+        pool.add_account_with_tokens(tokens, Some("acc-diag"))
+            .unwrap();
+        db.toggle_codex_account("acc-diag").unwrap();
+        let (status, msg) = pool.diagnose_unavailable();
+        assert_eq!(status, axum::http::StatusCode::BAD_GATEWAY);
+        assert!(msg.contains("đang bị tắt"));
+
+        // 3. Quota stop (>= 98%)
+        db.toggle_codex_account("acc-diag").unwrap();
+        let acc = pool
+            .accounts
+            .read()
+            .unwrap()
+            .get("acc-diag")
+            .unwrap()
+            .clone();
+        *acc.quota_cache.write().unwrap() = serde_json::json!({
+            "primary_window": { "used_percent": 99.0 }
+        });
+        let (status, msg) = pool.diagnose_unavailable();
+        assert_eq!(status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        assert!(msg.contains("chạm giới hạn quota"));
+
+        // 4. In cooldown
+        *acc.quota_cache.write().unwrap() = serde_json::json!({
+            "primary_window": { "used_percent": 50.0 }
+        });
+        let now = current_time_secs();
+        *acc.cooldown_until.write().unwrap() = now + 45.0;
+        let (status, msg) = pool.diagnose_unavailable();
+        assert_eq!(status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        assert!(msg.contains("cooldown"));
+
+        // 5. In-flight
+        *acc.cooldown_until.write().unwrap() = 0.0;
+        acc.in_flight.store(1, Ordering::SeqCst);
+        let (status, msg) = pool.diagnose_unavailable();
+        assert_eq!(status, axum::http::StatusCode::TOO_MANY_REQUESTS);
+        assert!(msg.contains("đang bận"));
     }
 
     #[tokio::test]

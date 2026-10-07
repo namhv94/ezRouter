@@ -16,9 +16,12 @@ pub mod system_log;
 pub mod token_saver;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, patch, post},
     Router,
 };
+
+pub const MAX_REQUEST_BODY_BYTES: usize = 100 * 1024 * 1024; // 100 MB request body limit
 
 pub use account::{
     parse_google_quota_summary, AccountActionResponse, AccountPool, AccountQuotaResponse,
@@ -75,6 +78,22 @@ pub fn app_router(state: AppState) -> Router {
         .route("/", get(routes::ui::serve_root))
         .route("/assets/*path", get(routes::ui::serve_assets))
         .route("/favicon.ico", get(routes::ui::serve_favicon))
+        .route("/scripts/*path", get(routes::ui::serve_scripts))
+        .route("/setup-codex.sh", get(routes::ui::serve_setup_codex_sh))
+        .route("/setup-codex.bat", get(routes::ui::serve_setup_codex_bat))
+        .route("/setup-codex.ps1", get(routes::ui::serve_setup_codex_ps1))
+        .route(
+            "/uninstall-codex.sh",
+            get(routes::ui::serve_uninstall_codex_sh),
+        )
+        .route(
+            "/uninstall-codex.bat",
+            get(routes::ui::serve_uninstall_codex_bat),
+        )
+        .route(
+            "/uninstall-codex.ps1",
+            get(routes::ui::serve_uninstall_codex_ps1),
+        )
         .route("/health", get(routes::health::health))
         .route("/auth/login", get(routes::auth::auth_login))
         .route("/auth/callback", get(routes::auth::auth_callback))
@@ -82,6 +101,10 @@ pub fn app_router(state: AppState) -> Router {
         .route("/v1/models", get(routes::models::list_models))
         .route("/v1/models/*model_id", get(routes::models::retrieve_model))
         .route("/v1/chat/completions", post(routes::chat::chat_completions))
+        .route(
+            "/v1/responses",
+            post(routes::responses::post_responses).get(routes::responses::get_responses),
+        )
         .route("/v1/embeddings", post(routes::embeddings::embeddings))
         .route(
             "/v1/images/generations",
@@ -253,5 +276,6 @@ pub fn app_router(state: AppState) -> Router {
             "/admin/quota-refresh/run",
             post(routes::admin::run_quota_refresh),
         )
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .with_state(state)
 }
