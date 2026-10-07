@@ -103,19 +103,19 @@ fn test_normalize_anthropic_model_aliases() {
 
     assert_eq!(
         normalize_anthropic_model("claude-3-5-sonnet-20241022"),
-        "ag/claude-sonnet-4-6"
+        "ag/claude-sonnet-5-5-high"
     );
     assert_eq!(
         normalize_anthropic_model("claude-3-7-sonnet"),
-        "ag/claude-sonnet-4-6"
+        "ag/claude-sonnet-5-5-high"
     );
     assert_eq!(
         normalize_anthropic_model("claude-sonnet-4-20250514"),
-        "ag/claude-sonnet-4-6"
+        "ag/claude-sonnet-5-5-high"
     );
     assert_eq!(
         normalize_anthropic_model("claude-3-opus-20240229"),
-        "ag/claude-opus-4-6-thinking"
+        "ag/claude-opus-5-5-high"
     );
     assert_eq!(
         normalize_anthropic_model("claude-3-5-haiku-20241022"),

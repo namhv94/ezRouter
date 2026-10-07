@@ -29,11 +29,11 @@ pub fn normalize_anthropic_model(model: &str) -> String {
     }
     let lower = trimmed.to_lowercase();
     if lower.contains("opus") {
-        "ag/claude-opus-4-6-thinking".to_string()
+        "ag/claude-opus-5-5-high".to_string()
     } else if lower.contains("haiku") {
         "ag/gemini-3.8-flash-high".to_string()
     } else if lower.contains("sonnet") || lower.contains("claude") {
-        "ag/claude-sonnet-4-6".to_string()
+        "ag/claude-sonnet-5-5-high".to_string()
     } else if lower.contains("gpt-6") || lower.contains("codex") {
         "cx/gpt-6.1-sol".to_string()
     } else {
