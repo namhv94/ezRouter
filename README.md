@@ -6,8 +6,10 @@
 
 # ⚡ ezRouter
 
-**High-Performance, Memory-Safe LLM Proxy & Intelligent Router written in Rust**
+**High-Performance, Memory-Safe LLM Proxy & Intelligent Router written in Rust**  
+*The core open-source routing gateway of [EzLabs](https://ezlabs.tech) — powering autonomous agents and real-time AI workloads.*
 
+[![EzLabs Ecosystem](https://img.shields.io/badge/Product%20of-EzLabs-06b6d4?style=for-the-badge&logo=anthropic&logoColor=white)](https://ezlabs.tech)
 [![Rust Version](https://img.shields.io/badge/Rust-1.75%2B-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Axum Tokio](https://img.shields.io/badge/Engine-Axum%200.7%20%7C%20Tokio-3b82f6?style=for-the-badge&logo=fastapi&logoColor=white)](https://github.com/tokio-rs/axum)
 [![API](https://img.shields.io/badge/API-OpenAI--Compatible-10b981?style=for-the-badge&logo=openai&logoColor=white)](#-openai-compatible-api)
@@ -23,7 +25,7 @@
   <a href="#-supported-providers--models"><b>Models</b></a> •
   <a href="#-token-saver-engine"><b>Token Saver</b></a> •
   <a href="#-embedded-web-management-console"><b>Dashboard</b></a> •
-  <a href="#-configuration"><b>Configuration</b></a> •
+  <a href="#-part-of-the-ezlabs-ecosystem"><b>EzLabs Ecosystem</b></a> •
   <a href="#-performance--benchmarks"><b>Benchmarks</b></a> •
   <a href="#-support-the-project"><b>Support</b></a>
 </p>
@@ -34,9 +36,9 @@
 
 ## 📌 Overview
 
-**ezRouter** is an ultra-fast, memory-safe LLM proxy & router designed for modern AI applications. Written from the ground up in 100% pure Rust, ezRouter acts as a unified OpenAI-compatible gateway that aggregates and optimizes upstream AI providers with **sub-millisecond local routing latency**, **multi-account quota rotation**, and **smart real-time prompt compression**.
+**ezRouter** is an ultra-fast, memory-safe LLM proxy & router developed by **[EzLabs](https://ezlabs.tech)** for modern AI engineering. Written from the ground up in 100% pure Rust, ezRouter serves as the core high-throughput gateway of the **EzLabs** ecosystem, unifying OpenAI and Anthropic Claude workflows with **sub-millisecond local routing latency**, **multi-account quota rotation**, and **smart real-time prompt compression**.
 
-Whether you are orchestrating high-concurrency coding agents (Hermes, Claude Code, Cursor, OpenCode), running RAG pipelines, or balancing requests across multi-account Google Gemini and OpenAI tiers, ezRouter eliminates rate-limit bottlenecks and cuts token costs with zero operational overhead.
+Whether you are orchestrating high-concurrency coding agents (Hermes, Claude Code, Cursor, OpenCode), running RAG pipelines, or balancing requests across multi-account Anthropic Claude, Google Gemini, and OpenAI tiers, ezRouter eliminates rate-limit bottlenecks and cuts token costs with zero operational overhead.
 
 ---
 
@@ -314,6 +316,22 @@ Configuration is managed via environment variables or a local `.env` file:
 
 ---
 
+## 🌐 Part of the EzLabs Ecosystem
+
+**ezRouter** is an open-source project created and actively maintained by **[EzLabs](https://ezlabs.tech)** (EzLabs Technologies Inc.).
+
+EzLabs builds frontier infrastructure for autonomous AI agents and real-time LLM systems:
+
+| Platform Layer | Focus | Technology | Status |
+|---|---|---|---|
+| **[ezRouter](https://github.com/namhv94/ezRouter)** | High-throughput Rust LLM gateway, zero-copy streaming proxy, and multi-account quota pooling. | Rust, Tokio, Axum, SQLite | **Open Source (v0.4)** |
+| **Agent Orchestration Engine** | Native **Model Context Protocol (MCP)** execution runtime with deterministic tool-calling barriers and long-horizon memory graphs. | Rust & TypeScript MCP Runtimes | Active Pilot |
+| **Synthetic Evals & Guardrails** | Automated adversarial boundary testing, hallucination fuzzing, and compliance alignment for enterprise agents. | Anthropic Claude 3.5 Sonnet & Haiku | Active Pilot |
+
+For enterprise support, private cloud clusters, or to join our pilot cohorts, visit **[ezlabs.tech](https://ezlabs.tech)** or contact <contact@ezlabs.tech>.
+
+---
+
 ## 📊 Performance & Benchmarks
 
 Compared to traditional Python-based proxies (such as LiteLLM, One-API, or FastAPI gateways):
@@ -386,5 +404,5 @@ This project is open-source software licensed under the **[MIT License](LICENSE)
 Distributed freely for personal, open-source, and commercial AI workloads.
 
 <div align="center">
-  <sub>Built with ❤️ and Rust by <a href="https://github.com/namhv94">NamHV</a> and open-source contributors.</sub>
+  <sub>Built with ❤️ and Rust by <a href="https://github.com/namhv94">NamHV</a> and the <a href="https://ezlabs.tech">EzLabs</a> engineering team.</sub>
 </div>
