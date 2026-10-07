@@ -15,7 +15,7 @@ use futures_util::stream::Stream;
 use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use serde::{Deserialize, Serialize};
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 use crate::db::{CodexAccountRecord, Database};
 use crate::error::AppError;
@@ -46,6 +46,7 @@ pub const CODEX_QUOTA_CACHE_TTL_SECS: f64 = 60.0;
 pub const CODEX_QUOTA_STOP_PERCENT: f64 = 98.0;
 pub const CODEX_TOKEN_REFRESH_LEAD_SECS: f64 = 300.0;
 pub const CODEX_TOKEN_REFRESH_LEAD_S: f64 = CODEX_TOKEN_REFRESH_LEAD_SECS;
+pub const CODEX_PROACTIVE_REFRESH_LEAD_SECS: f64 = 1800.0;
 pub const CODEX_OAUTH_TICKET_TTL_SECS: f64 = 600.0;
 pub const CODEX_OAUTH_TICKET_TTL_S: f64 = CODEX_OAUTH_TICKET_TTL_SECS;
 pub const COOLDOWN_AFTER_ERROR_SECS: f64 = 60.0;
@@ -1731,6 +1732,42 @@ impl CodexPool {
                 Err(masked)
             }
         }
+    }
+
+    pub async fn proactive_refresh_accounts(&self) -> Result<usize, String> {
+        let active_accs: Vec<(String, Arc<CodexAccount>)> = {
+            let map = self.accounts.read().unwrap();
+            map.iter()
+                .filter(|(_, a)| a.is_active.load(Ordering::SeqCst))
+                .map(|(id, a)| (id.clone(), a.clone()))
+                .collect()
+        };
+
+        let now = current_time_secs();
+        let mut refreshed = 0;
+        for (id, acc) in active_accs {
+            acc.load_auth();
+            let exp = *acc.expires_at.read().unwrap();
+            let has_token = !acc.access_token.read().unwrap().is_empty();
+            let is_in_flight = acc.in_flight.load(Ordering::SeqCst) > 0;
+            if !is_in_flight && (!has_token || exp <= now + CODEX_PROACTIVE_REFRESH_LEAD_SECS) {
+                match self.refresh_token(&acc, true).await {
+                    Ok(true) => {
+                        refreshed += 1;
+                        info!(
+                            "Proactively refreshed Codex account '{}' (lead: {:.0}s remaining)",
+                            id,
+                            (exp - now).max(0.0)
+                        );
+                    }
+                    Ok(false) => {}
+                    Err(e) => {
+                        warn!("Proactive refresh for Codex account '{}' failed: {}", id, e);
+                    }
+                }
+            }
+        }
+        Ok(refreshed)
     }
 
     pub async fn fetch_account_quota(
@@ -5584,6 +5621,43 @@ mod tests {
             .unwrap();
         assert_eq!(consume_res["outcome"], "reset");
         assert!(mock_quota.consume_called.load(Ordering::SeqCst));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn test_codex_pool_proactive_refresh_accounts() {
+        let db = Arc::new(Database::open_in_memory(Some("test-key")).unwrap());
+        let mock_refresher = Arc::new(MockCodexTokenRefresher::new());
+        let mock_quota = Arc::new(MockCodexQuotaFetcher::new());
+        let dir =
+            std::env::temp_dir().join(format!("codex-proactive-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let default_auth = dir.join("auth.json");
+
+        let pool = Arc::new(CodexPool::with_components(
+            db.clone(),
+            mock_refresher,
+            mock_quota.clone(),
+            dir.clone(),
+            default_auth,
+            CODEX_BASE_URL.to_string(),
+        ));
+
+        let _rec = pool
+            .add_account_with_tokens(
+                serde_json::json!({
+                    "access_token": "mock-access-token",
+                    "refresh_token": "mock-refresh-token",
+                    "account_id": "test-account-expiring",
+                    "expires_in": 60,
+                }),
+                Some("acc-expiring"),
+            )
+            .unwrap();
+
+        let count = pool.proactive_refresh_accounts().await.unwrap();
+        assert_eq!(count, 1);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

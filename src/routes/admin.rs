@@ -192,14 +192,83 @@ pub async fn get_active_requests_stream(
     _auth: AdminUser,
     State(state): State<AppState>,
 ) -> Sse<impl futures_util::stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let stream = futures_util::stream::unfold(state, |state| async move {
-        let active = state.live_registry.get_active();
-        let json = serde_json::to_string(&active).unwrap_or_else(|_| "{}".to_string());
-        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-        Some((Ok(Event::default().data(json)), state))
-    });
+    let rx = state.live_registry.subscribe();
+    let initial = state.live_registry.get_active();
+    let initial_json = serde_json::to_string(&initial).unwrap_or_else(|_| "{}".to_string());
+
+    enum StreamState {
+        Initial(
+            String,
+            tokio::sync::broadcast::Receiver<crate::live_monitor::ActiveRequestsResponse>,
+            AppState,
+        ),
+        Streaming(
+            tokio::sync::broadcast::Receiver<crate::live_monitor::ActiveRequestsResponse>,
+            AppState,
+        ),
+    }
+
+    let stream = futures_util::stream::unfold(
+        StreamState::Initial(initial_json, rx, state),
+        |st| async move {
+            match st {
+                StreamState::Initial(json, rx, state) => Some((
+                    Ok(Event::default().data(json)),
+                    StreamState::Streaming(rx, state),
+                )),
+                StreamState::Streaming(mut rx, state) => match rx.recv().await {
+                    Ok(active) => {
+                        let json =
+                            serde_json::to_string(&active).unwrap_or_else(|_| "{}".to_string());
+                        Some((
+                            Ok(Event::default().data(json)),
+                            StreamState::Streaming(rx, state),
+                        ))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        let active = state.live_registry.get_active();
+                        let json =
+                            serde_json::to_string(&active).unwrap_or_else(|_| "{}".to_string());
+                        Some((
+                            Ok(Event::default().data(json)),
+                            StreamState::Streaming(rx, state),
+                        ))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => None,
+                },
+            }
+        },
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CleanupLogsRequest {
+    pub retention_days: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CleanupLogsResponse {
+    pub ok: bool,
+    pub deleted: usize,
+    pub retention_days: u32,
+}
+
+pub async fn cleanup_request_logs(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+    payload: Option<Json<CleanupLogsRequest>>,
+) -> Result<Json<CleanupLogsResponse>, AppError> {
+    let days = payload
+        .and_then(|Json(p)| p.retention_days)
+        .unwrap_or(state.config.request_log_retention_days);
+    let deleted = state.db.cleanup_old_request_logs(days)?;
+    Ok(Json(CleanupLogsResponse {
+        ok: true,
+        deleted,
+        retention_days: days,
+    }))
 }
 
 #[derive(Debug, Deserialize)]

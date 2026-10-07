@@ -146,6 +146,10 @@ pub fn app_router(state: AppState) -> Router {
             get(routes::admin::get_token_analytics),
         )
         .route(
+            "/admin/maintenance/cleanup-logs",
+            post(routes::admin::cleanup_request_logs),
+        )
+        .route(
             "/admin/providers",
             get(routes::admin::list_providers)
                 .post(routes::admin::create_provider)

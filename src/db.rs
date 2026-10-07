@@ -949,6 +949,26 @@ impl Database {
         })
     }
 
+    pub fn cleanup_old_request_logs(&self, retention_days: u32) -> Result<usize, rusqlite::Error> {
+        if retention_days == 0 {
+            return Ok(0);
+        }
+        let conn = self.lock_conn()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let cutoff = now - (retention_days as f64 * 86400.0);
+        let deleted = conn.execute(
+            "DELETE FROM request_log WHERE timestamp < ?1",
+            params![cutoff],
+        )?;
+        if deleted > 0 {
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
+        }
+        Ok(deleted)
+    }
+
     pub fn get_request_summary(&self) -> Result<Vec<ModelRequestSummary>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
@@ -2507,6 +2527,55 @@ mod tests {
         // Finds the original 'ok' + new 'success' + new 'completed'
         assert_eq!(success_reqs.total, 3);
         assert_eq!(success_reqs.items.len(), 3);
+    }
+
+    #[test]
+    fn test_db_cleanup_old_request_logs() {
+        let db = Database::open_in_memory(None).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Record an old request from 10 days ago
+        db.record_request(
+            Some("acc-old"),
+            "model-old",
+            now - (10.0 * 86400.0),
+            "success",
+            10,
+            20,
+            100.0,
+            None,
+        )
+        .unwrap();
+
+        // 2. Record a fresh request from 1 hour ago
+        db.record_request(
+            Some("acc-new"),
+            "model-new",
+            now - 3600.0,
+            "success",
+            10,
+            20,
+            100.0,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(db.get_requests(10, 0, None, None).unwrap().total, 2);
+
+        // 3. Cleanup older than 7 days -> 1 deleted
+        let deleted = db.cleanup_old_request_logs(7).unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining = db.get_requests(10, 0, None, None).unwrap();
+        assert_eq!(remaining.total, 1);
+        assert_eq!(remaining.items[0].model, "model-new");
+
+        // 4. Cleanup with 0 does nothing (disabled)
+        let deleted_zero = db.cleanup_old_request_logs(0).unwrap();
+        assert_eq!(deleted_zero, 0);
     }
 
     #[test]

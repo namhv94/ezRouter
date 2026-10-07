@@ -44,8 +44,33 @@ async fn main() {
     };
 
     let data_dir_display = config.data_dir.display().to_string();
+    let compat_port = config.compat_port;
+    let compat_host = config.host.clone();
     let state = AppState::new(config);
     let app = app_router(state);
+
+    if let Some(compat_p) = compat_port {
+        let compat_addr_str = format!("{}:{}", compat_host, compat_p);
+        if let Ok(compat_addr) = compat_addr_str.parse::<SocketAddr>() {
+            match tokio::net::TcpListener::bind(compat_addr).await {
+                Ok(compat_listener) => {
+                    info!(
+                        "Listening on secondary cutover/compat port http://{}",
+                        compat_addr
+                    );
+                    let compat_app = app.clone();
+                    tokio::spawn(async move {
+                        let _ = axum::serve(compat_listener, compat_app).await;
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to bind secondary cutover/compat port {compat_addr}: {e}"
+                    );
+                }
+            }
+        }
+    }
 
     info!(
         "Listening on http://{} (staging data_dir: {})",

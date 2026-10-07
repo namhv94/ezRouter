@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -117,6 +117,7 @@ pub struct QuotaRefreshWorker {
     last_error: RwLock<Option<String>>,
     last_summary: RwLock<Option<QuotaRefreshSummary>>,
     pub openrouter_credits: RwLock<Option<OpenRouterCreditsSummary>>,
+    log_retention_days: AtomicU32,
     notify: Arc<tokio::sync::Notify>,
 }
 
@@ -195,6 +196,12 @@ impl QuotaRefreshWorker {
             None
         };
 
+        let log_retention_days = std::env::var("AG_LOG_RETENTION_DAYS")
+            .or_else(|_| std::env::var("EZROUTER_LOG_RETENTION_DAYS"))
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(crate::config::DEFAULT_LOG_RETENTION_DAYS);
+
         Self {
             db,
             account_pool,
@@ -209,6 +216,7 @@ impl QuotaRefreshWorker {
             last_error: RwLock::new(last_error),
             last_summary: RwLock::new(last_summary),
             openrouter_credits: RwLock::new(openrouter_credits),
+            log_retention_days: AtomicU32::new(log_retention_days),
             notify: Arc::new(tokio::sync::Notify::new()),
         }
     }
@@ -458,6 +466,30 @@ impl QuotaRefreshWorker {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // 4. Proactive token refresh for Codex accounts
+        if let Ok(count) = self.codex_pool.proactive_refresh_accounts().await {
+            if count > 0 {
+                info!("Proactive Codex token refresh completed: {count} accounts updated");
+            }
+        }
+
+        // 5. Request log retention cleanup
+        let retention_days = self.log_retention_days.load(Ordering::SeqCst);
+        if retention_days > 0 {
+            match self.db.cleanup_old_request_logs(retention_days) {
+                Ok(count) if count > 0 => {
+                    info!(
+                        "Pruned {} old request_log records older than {} days",
+                        count, retention_days
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    warn!("Failed to cleanup old request_log: {e}");
                 }
             }
         }
