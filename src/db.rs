@@ -887,8 +887,12 @@ impl Database {
             count_params.push(Box::new(m.to_string()));
         }
         if let Some(s) = status.filter(|s| !s.is_empty()) {
-            filters.push("status = ?");
-            count_params.push(Box::new(s.to_string()));
+            if s == "success" || s == "ok" {
+                filters.push("(status = 'success' OR status = 'ok' OR status = 'completed')");
+            } else {
+                filters.push("status = ?");
+                count_params.push(Box::new(s.to_string()));
+            }
         }
 
         let where_clause = if filters.is_empty() {
@@ -950,7 +954,7 @@ impl Database {
         let mut stmt = conn.prepare(
             "SELECT model,
                     COUNT(*) AS requests,
-                    COALESCE(SUM(CASE WHEN status IN ('ok', 'success') THEN 1 ELSE 0 END), 0) AS ok,
+                    COALESCE(SUM(CASE WHEN status IN ('ok', 'success', 'completed') THEN 1 ELSE 0 END), 0) AS ok,
                     COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS errors,
                     COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0) AS quota_exhausted,
                     COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
@@ -2474,6 +2478,35 @@ mod tests {
 
         assert_eq!(summary[1].model, "model-b");
         assert_eq!(summary[1].requests, 1);
+
+        // Verify status = "success" filter matches 'ok', 'success', and 'completed'
+        db.record_request(
+            Some("acc-1"),
+            "model-a",
+            1003.0,
+            "success",
+            1,
+            1,
+            10.0,
+            None,
+        )
+        .unwrap();
+        db.record_request(
+            Some("acc-1"),
+            "model-a",
+            1004.0,
+            "completed",
+            2,
+            2,
+            20.0,
+            None,
+        )
+        .unwrap();
+
+        let success_reqs = db.get_requests(10, 0, None, Some("success")).unwrap();
+        // Finds the original 'ok' + new 'success' + new 'completed'
+        assert_eq!(success_reqs.total, 3);
+        assert_eq!(success_reqs.items.len(), 3);
     }
 
     #[test]

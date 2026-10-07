@@ -20,7 +20,7 @@ use ezrouter::{
     app_router, AccountPool, AntigravityProvider, AppState, ChatMessage, CodexLatencyTrace,
     CodexPool, CodexProvider, CodexTokenRefresher, Config, Database, DefaultCodexTokenRefresher,
     MockCodexQuotaFetcher, MockCodexTokenRefresher, MockGoogleQuotaFetcher, MockTokenRefresher,
-    CODEX_ORIGINATOR, CODEX_USER_AGENT,
+    CODEX_ORIGINATOR, CODEX_USER_AGENT, MAX_REQUEST_BODY_BYTES,
 };
 
 fn test_state() -> AppState {
@@ -311,6 +311,39 @@ async fn test_chat_completions_valid_shape() {
     assert!(prompt_tokens > 0);
     assert!(completion_tokens > 0);
     assert_eq!(total_tokens, prompt_tokens + completion_tokens);
+}
+
+#[tokio::test]
+async fn test_chat_completions_large_body_accepted_over_2mb() {
+    assert_eq!(MAX_REQUEST_BODY_BYTES, 100 * 1024 * 1024);
+    let app = app_router(test_state());
+    // Create a 3 MB message content to exceed the default 2 MB Axum body limit
+    let large_text = "x".repeat(3 * 1024 * 1024);
+    let payload = serde_json::json!({
+        "model": "ag/gemini-3.8-flash-high",
+        "messages": [
+            {"role": "user", "content": large_text}
+        ],
+        "stream": false
+    });
+
+    let body = serde_json::to_vec(&payload).unwrap();
+    assert!(body.len() > 2 * 1024 * 1024); // verify payload exceeds 2MB
+
+    let req = Request::builder()
+        .uri("/v1/chat/completions")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body_bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let resp: Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(resp["model"], "ag/gemini-3.8-flash-high");
 }
 
 #[tokio::test]
@@ -8116,6 +8149,7 @@ async fn test_google_quota_correctness_and_admin_accounts() {
         codex_pool: state.codex_pool,
         provider: state.provider,
         codex_provider: state.codex_provider,
+        codex_raw_provider: state.codex_raw_provider,
         live_registry: state.live_registry,
         quota_worker: state.quota_worker,
         system_logs: state.system_logs,

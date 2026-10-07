@@ -104,6 +104,7 @@ async fn test_admin_accounts_list_uses_cache_without_unbounded_fan_out() {
         codex_pool: state.codex_pool,
         provider: state.provider,
         codex_provider: state.codex_provider,
+        codex_raw_provider: state.codex_raw_provider,
         live_registry: state.live_registry,
         quota_worker: state.quota_worker,
         system_logs: state.system_logs,
