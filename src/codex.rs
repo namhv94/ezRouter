@@ -3222,9 +3222,22 @@ impl CodexProvider {
             };
 
             let status = resp.status();
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
@@ -3421,9 +3434,22 @@ impl Provider for CodexProvider {
             let t5 = Instant::now();
             let upstream_headers_ms = (t5 - t4).as_secs_f64() * 1000.0;
 
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
@@ -3643,9 +3669,22 @@ impl Provider for CodexProvider {
             let t5 = Instant::now();
             let upstream_connect_ms = (t5 - t4).as_secs_f64() * 1000.0;
 
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
