@@ -3180,7 +3180,11 @@ async fn test_phase4a_schema_parity_table_info() {
     );
     assert_eq!(col_map.get("last_error").map(|s| s.as_str()), Some("TEXT"));
     assert_eq!(col_map.get("created_at").map(|s| s.as_str()), Some("TEXT"));
-    assert_eq!(col_map.len(), 12);
+    assert_eq!(
+        col_map.get("auto_disabled_quota").map(|s| s.as_str()),
+        Some("INTEGER")
+    );
+    assert_eq!(col_map.len(), 13);
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }

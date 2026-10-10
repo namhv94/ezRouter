@@ -252,6 +252,8 @@ pub struct AccountRecord {
     pub error_count: i64,
     pub last_error: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub auto_disabled_quota: bool,
 }
 
 impl std::fmt::Debug for AccountRecord {
@@ -400,7 +402,8 @@ impl Database {
                      total_requests INTEGER DEFAULT 0,
                      error_count INTEGER DEFAULT 0,
                      last_error TEXT,
-                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                     auto_disabled_quota INTEGER DEFAULT 0
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
                  CREATE INDEX IF NOT EXISTS idx_accounts_is_active ON accounts(is_active);
@@ -506,7 +509,8 @@ impl Database {
                      total_requests INTEGER DEFAULT 0,
                      error_count INTEGER DEFAULT 0,
                      last_error TEXT,
-                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                     auto_disabled_quota INTEGER DEFAULT 0
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
                  CREATE INDEX IF NOT EXISTS idx_accounts_is_active ON accounts(is_active);
@@ -548,6 +552,11 @@ impl Database {
             // behavior during the one-time schema migration; newly created keys default client.
             let _ = conn.execute("UPDATE api_keys SET role = 'admin'", []);
         }
+
+        let _ = conn.execute(
+            "ALTER TABLE accounts ADD COLUMN auto_disabled_quota INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
 
         if let Some(raw_key) = default_key {
             let trimmed = raw_key.trim();
@@ -1680,8 +1689,9 @@ impl Database {
         tx.execute(
             "INSERT INTO accounts (
                 id, email, refresh_token, access_token, expires_at, is_active,
-                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                auto_disabled_quota
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 aid,
                 email,
@@ -1695,6 +1705,7 @@ impl Database {
                 0,
                 Option::<String>::None,
                 now_str,
+                0,
             ],
         )?;
         tx.commit()?;
@@ -1712,6 +1723,7 @@ impl Database {
             error_count: 0,
             last_error: None,
             created_at: now_str,
+            auto_disabled_quota: false,
         })
     }
 
@@ -1721,8 +1733,9 @@ impl Database {
         tx.execute(
             "INSERT OR REPLACE INTO accounts (
                 id, email, refresh_token, access_token, expires_at, is_active,
-                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                auto_disabled_quota
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 acc.id,
                 acc.email,
@@ -1736,6 +1749,7 @@ impl Database {
                 acc.error_count,
                 acc.last_error,
                 acc.created_at,
+                if acc.auto_disabled_quota { 1 } else { 0 },
             ],
         )?;
         tx.commit()?;
@@ -1746,13 +1760,15 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(Some(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1766,6 +1782,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             }))
         } else {
             Ok(None)
@@ -1779,13 +1796,15 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              WHERE email = ?1",
         )?;
         let mut rows = stmt.query(params![email])?;
         if let Some(row) = rows.next()? {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(Some(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1799,6 +1818,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             }))
         } else {
             Ok(None)
@@ -1809,12 +1829,14 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              ORDER BY email ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1828,6 +1850,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             })
         })?;
         let mut result = Vec::new();
@@ -1841,6 +1864,45 @@ impl Database {
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
         let rows = tx.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(rows > 0)
+    }
+
+    pub fn set_account_active(&self, id: &str, is_active: bool) -> Result<bool, rusqlite::Error> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let active_int = if is_active { 1 } else { 0 };
+        let rows = tx.execute(
+            "UPDATE accounts SET is_active = ?1, auto_disabled_quota = 0 WHERE id = ?2",
+            params![active_int, id],
+        )?;
+        tx.commit()?;
+        Ok(rows > 0)
+    }
+
+    pub fn set_account_auto_disabled_quota(
+        &self,
+        id: &str,
+        auto_disabled: bool,
+        is_active: bool,
+        cooldown_until: f64,
+        reason: Option<&str>,
+    ) -> Result<bool, rusqlite::Error> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let auto_int = if auto_disabled { 1 } else { 0 };
+        let active_int = if is_active { 1 } else { 0 };
+        let rows = if let Some(r) = reason {
+            tx.execute(
+                "UPDATE accounts SET auto_disabled_quota = ?1, is_active = ?2, cooldown_until = ?3, last_error = ?4 WHERE id = ?5",
+                params![auto_int, active_int, cooldown_until, r, id],
+            )?
+        } else {
+            tx.execute(
+                "UPDATE accounts SET auto_disabled_quota = ?1, is_active = ?2, cooldown_until = ?3 WHERE id = ?4",
+                params![auto_int, active_int, cooldown_until, id],
+            )?
+        };
         tx.commit()?;
         Ok(rows > 0)
     }

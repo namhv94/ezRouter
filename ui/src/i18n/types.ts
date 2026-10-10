@@ -497,6 +497,11 @@ export interface TranslationSchema {
     thActions: string;
     statusActive: string;
     statusInactive: string;
+    statusQuotaSuspended: string;
+    btnTurnOff: string;
+    btnTurnOn: string;
+    msgTurnOffSuccess: string;
+    msgTurnOnSuccess: string;
     cooldownWait: string;
     statusReady: string;
     viewQuota: string;
