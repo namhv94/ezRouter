@@ -168,6 +168,17 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         owned_by: "openai-codex",
         aliases: &["codex-auto-review"],
     },
+    StaticModelDef {
+        canonical_id: "cx/image-gen",
+        owned_by: "openai-codex",
+        aliases: &[
+            "image-gen",
+            "cx/gpt-image",
+            "cx/gpt-image-2",
+            "gpt-image-2",
+            "codex-image",
+        ],
+    },
 ];
 
 const DEFAULT_CREATED_TIMESTAMP: i64 = 1700000000;
@@ -333,7 +344,7 @@ mod tests {
         let list_resp = registry.list_models();
 
         assert_eq!(list_resp.object, "list");
-        assert_eq!(list_resp.data.len(), 24);
+        assert_eq!(list_resp.data.len(), 25);
 
         let mut seen_ids = HashSet::new();
         for entry in &list_resp.data {
