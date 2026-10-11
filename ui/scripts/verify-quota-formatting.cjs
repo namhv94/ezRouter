@@ -39,6 +39,14 @@ const sourceChecks = [
     name: 'ProvidersTab renders reset time relative display',
     test: () => content.includes('formatResetTime(acc.quota.gemini_5h.reset_time)'),
   },
+  {
+    name: 'ProvidersTab defines formatCooldown helper',
+    test: () => content.includes('const formatCooldown ='),
+  },
+  {
+    name: 'ProvidersTab uses formatCooldown in account tables',
+    test: () => content.includes('formatCooldown(acc.cooldown_remaining)'),
+  },
 ];
 
 // 2. Pure logic unit tests replicating formatResetTime
@@ -86,6 +94,32 @@ const logicChecks = [
   {
     name: 'formatResetTime formats days (>=24h)',
     test: () => formatResetTime('2026-09-27T15:16:05Z', fixedNow) === '4d 13h',
+  },
+  {
+    name: 'formatCooldown helper handles <= 60s as seconds and > 60s as minutes without days',
+    test: () => {
+      const formatCooldown = (sec) => {
+        if (!sec || sec <= 0) return null;
+        const s = Math.ceil(sec);
+        if (s <= 60) return `${s}s`;
+        const m = Math.ceil(s / 60);
+        return `${m}m`;
+      };
+      return (
+        formatCooldown(undefined) === null &&
+        formatCooldown(0) === null &&
+        formatCooldown(-5) === null &&
+        formatCooldown(15) === '15s' &&
+        formatCooldown(60) === '60s' &&
+        formatCooldown(61) === '2m' &&
+        formatCooldown(120) === '2m' &&
+        formatCooldown(300) === '5m' &&
+        formatCooldown(3600) === '60m' &&
+        formatCooldown(86400) === '1440m' && // Never shows days (1d) or counts seconds
+        !formatCooldown(86400).includes('d') &&
+        !formatCooldown(86400).includes('ngày')
+      );
+    },
   },
 ];
 

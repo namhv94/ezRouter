@@ -1204,6 +1204,14 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     }
   };
 
+  const formatCooldown = (sec?: number | null) => {
+    if (sec == null || sec <= 0) return null;
+    const s = Math.ceil(sec);
+    if (s <= 60) return `${s}s`;
+    const m = Math.ceil(s / 60);
+    return `${m}m`;
+  };
+
   const getCodexQuotaNumbers = (acc: CodexAccountRecord) => {
     if (!acc.quota || Object.keys(acc.quota).length === 0) {
       return {
@@ -1977,8 +1985,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               </td>
                               <td>
                                 {isCooling ? (
-                                  <span className="badge badge-warning font-mono">
-                                    {Math.ceil(acc.cooldown_remaining)}s
+                                  <span
+                                    className="badge badge-warning font-mono"
+                                    title={acc.cooldown_remaining > 60 ? `${Math.ceil(acc.cooldown_remaining)}s` : undefined}
+                                  >
+                                    {formatCooldown(acc.cooldown_remaining)}
                                   </span>
                                 ) : (
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>
@@ -2277,8 +2288,11 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               </td>
                               <td>
                                 {isCooling ? (
-                                  <span className="badge badge-warning font-mono">
-                                    {Math.ceil(acc.cooldown_remaining || 0)}s
+                                  <span
+                                    className="badge badge-warning font-mono"
+                                    title={(acc.cooldown_remaining ?? 0) > 60 ? `${Math.ceil(acc.cooldown_remaining || 0)}s` : undefined}
+                                  >
+                                    {formatCooldown(acc.cooldown_remaining)}
                                   </span>
                                 ) : (
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>

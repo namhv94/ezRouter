@@ -143,6 +143,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     return `${days}d ${hours}h`;
   };
 
+  const formatCooldown = (sec?: number | null) => {
+    if (sec == null || sec <= 0) return null;
+    const s = Math.ceil(sec);
+    if (s <= 60) return `${s}s`;
+    const m = Math.ceil(s / 60);
+    return `${m}m`;
+  };
+
   const getRemainingTone = (remainingPercent?: number | null) => {
     if (remainingPercent == null) return 'neutral';
     if (remainingPercent >= 50) return 'good';
@@ -653,8 +661,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                           <span className={`status-dot ${acc.cooldown_remaining > 0 ? 'error' : ''}`} />
                           <span className="account-email" title={acc.email}>{acc.email}</span>
                           {acc.cooldown_remaining > 0 && (
-                            <span className="badge badge-warning" style={{ marginLeft: 'auto', fontSize: 10 }}>
-                              CD {Math.round(acc.cooldown_remaining)}s
+                            <span
+                              className="badge badge-warning"
+                              style={{ marginLeft: 'auto', fontSize: 10 }}
+                              title={acc.cooldown_remaining > 60 ? `${Math.ceil(acc.cooldown_remaining)}s` : undefined}
+                            >
+                              CD {formatCooldown(acc.cooldown_remaining)}
                             </span>
                           )}
                         </div>
@@ -767,8 +779,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                             </span>
                           )}
                           {(acc.cooldown_remaining ?? 0) > 0 && (
-                            <span className="badge badge-warning" style={{ marginLeft: tickets > 0 ? 4 : 'auto', fontSize: 10 }}>
-                              CD {Math.round(acc.cooldown_remaining || 0)}s
+                            <span
+                              className="badge badge-warning"
+                              style={{ marginLeft: tickets > 0 ? 4 : 'auto', fontSize: 10 }}
+                              title={(acc.cooldown_remaining ?? 0) > 60 ? `${Math.ceil(acc.cooldown_remaining || 0)}s` : undefined}
+                            >
+                              CD {formatCooldown(acc.cooldown_remaining)}
                             </span>
                           )}
                         </div>
