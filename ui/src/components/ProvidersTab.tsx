@@ -1417,7 +1417,15 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               strokeDasharray={circumference}
               strokeDashoffset={percent === null ? circumference : offset}
               strokeLinecap="round"
-              className="health-ring-meter"
+              className={`health-ring-meter ${
+                percent === null
+                  ? 'meter-empty'
+                  : validPct >= 50
+                  ? 'meter-good'
+                  : validPct >= 20
+                  ? 'meter-warn'
+                  : 'meter-bad'
+              }`}
               style={{
                 '--ring-circumference': `${circumference}px`,
                 '--target-offset': `${percent === null ? circumference : offset}px`,
@@ -1800,7 +1808,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{/* Gemini 5h: */}{t('providers.quotaGemini5h')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (gemini5hAvg ?? 0) < 20
+                        ? 'micro-bar-bad'
+                        : (gemini5hAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${gemini5hAvg ?? 0}%`,
                       background:
@@ -1820,7 +1834,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span className="micro-bar-label">{/* Gemini Tuần: */}{t('providers.quotaGeminiWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
-                      className="micro-bar-fill"
+                      className={`micro-bar-fill ${
+                        geminiWeeklyAvg < 20
+                          ? 'micro-bar-bad'
+                          : geminiWeeklyAvg < 50
+                          ? 'micro-bar-warn'
+                          : 'micro-bar-good'
+                      }`}
                       style={{
                         width: `${geminiWeeklyAvg}%`,
                         background:
@@ -1840,7 +1860,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaClaude5h')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (claude5hAvg ?? 0) < 20
+                        ? 'micro-bar-bad'
+                        : (claude5hAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${claude5hAvg ?? 0}%`,
                       background:
@@ -1860,7 +1886,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span className="micro-bar-label">{t('providers.quotaClaudeWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
-                      className="micro-bar-fill"
+                      className={`micro-bar-fill ${
+                        claudeWeeklyAvg < 20
+                          ? 'micro-bar-bad'
+                          : claudeWeeklyAvg < 50
+                          ? 'micro-bar-warn'
+                          : 'micro-bar-good'
+                      }`}
                       style={{
                         width: `${claudeWeeklyAvg}%`,
                         background:
@@ -1967,7 +1999,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           const isCooling = acc.cooldown_remaining > 0;
                           return (
                             <tr key={acc.id}>
-                              <td>
+                              <td data-label={t('providers.thAccount')}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                   <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                     {acc.email}
@@ -1978,12 +2010,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   id: {acc.id.slice(0, 8)}...
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
                                   {acc.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thCooldown')}>
                                 {isCooling ? (
                                   <span
                                     className="badge badge-warning font-mono"
@@ -1995,7 +2027,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thQuotaRemaining')}>
                                 {acc.quota && (acc.quota.gemini_5h || acc.quota.claude_5h || acc.quota.gemini_weekly || acc.quota.claude_weekly) ? (
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                     {acc.quota.gemini_5h && (
@@ -2056,7 +2088,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm"
@@ -2146,7 +2178,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaCodexPrimary')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (codexPrimaryAvg ?? 0) <= 2
+                        ? 'micro-bar-bad'
+                        : (codexPrimaryAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${codexPrimaryAvg ?? 0}%`,
                       background:
@@ -2165,7 +2203,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaCodexWeekly')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (codexWeeklyAvg ?? 0) <= 2
+                        ? 'micro-bar-bad'
+                        : (codexWeeklyAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${codexWeeklyAvg ?? 0}%`,
                       background:
@@ -2273,7 +2317,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           const q = getCodexQuotaNumbers(acc);
                           return (
                             <tr key={acc.id}>
-                              <td>
+                              <td data-label={t('providers.thAccount')}>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                   {acc.email || t('providers.accountUndefined')}
                                 </div>
@@ -2281,12 +2325,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   id: {acc.id.slice(0, 8)}...
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${isActiveAcc ? 'badge-success' : 'badge-neutral'}`}>
                                   {isActiveAcc ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thCooldown')}>
                                 {isCooling ? (
                                   <span
                                     className="badge badge-warning font-mono"
@@ -2298,7 +2342,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thLimit')}>
                                 {q.primaryRemaining !== null ? (
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 3 }}>
                                     <div>
@@ -2356,7 +2400,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm"
@@ -2442,6 +2486,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           <div className="visual-metrics-row">
             {/* Balance Card */}
             <div
+              className="openrouter-balance-card"
               style={{
                 flex: 1,
                 minWidth: 220,
@@ -2470,7 +2515,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span>{openrouterCreditsLoading ? 'Đang tải...' : 'Làm mới'}</span>
                 </button>
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: (openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? '#f59e0b' : '#10b981' }}>
+              <div
+                className={`openrouter-balance-val ${(openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? 'balance-warn' : 'balance-good'}`}
+                style={{ fontSize: 24, fontWeight: 700, color: (openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? '#f59e0b' : '#10b981' }}
+              >
                 {openrouterCredits && typeof openrouterCredits.total_credits === 'number'
                   ? `$${Math.max(0, openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)).toFixed(2)}`
                   : openrouterCreditsLoading
@@ -2490,7 +2538,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
               {openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.01 && (
                 <div style={{ marginTop: 4 }}>
-                  <span className="badge badge-warning" style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                  <span className="badge badge-warning openrouter-low-balance-badge" style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
                     ⚡ Số dư: $0.00 (Chỉ dùng được model :free, cần nạp thêm để dùng model trả phí)
                   </span>
                 </div>
@@ -2644,7 +2692,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                         fontSize: 12.5,
                       }}
                     >
-                      <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+                      <span className="badge badge-neutral openrouter-model-badge" style={{ fontSize: 10, padding: '1px 5px', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
                         OR
                       </span>
                       <span className="font-mono" style={{ fontWeight: 600 }}>
@@ -2788,34 +2836,34 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                             : [];
                           return (
                             <tr key={p.id}>
-                              <td>
+                              <td data-label={t('providers.thNamePrefix')}>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</div>
                                 <span className="badge badge-neutral font-mono" style={{ fontSize: 10, marginTop: 2 }}>
                                   {p.prefix}/*
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thType')}>
                                 <span className="badge badge-neutral">{p.type}</span>
                               </td>
-                              <td className="font-mono text-break" style={{ fontSize: 12, maxWidth: 180 }}>
+                              <td data-label={t('providers.thBaseUrl')} className="font-mono text-break" style={{ fontSize: 12, maxWidth: 180 }}>
                                 {p.base_url}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thApiKey')}>
                                 <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                   {p.api_key ? '••••••••' : t('providers.emptyValue')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thModels')}>
                                 <span className="badge badge-neutral" style={{ fontSize: 10 }}>
                                   {modelsArr.length > 0 ? t('providers.modelsCount', { count: modelsArr.length }) : t('providers.modelsDefault')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${p.is_active ? 'badge-success' : 'badge-neutral'}`}>
                                   {p.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm btn-icon-only"
@@ -3409,7 +3457,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   href="https://openrouter.ai/settings/keys"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--primary)', textDecoration: 'underline' }}
+                  style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }}
                 >
                   openrouter.ai/settings/keys
                 </a>
@@ -3484,7 +3532,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   </button>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Đã chọn: <strong style={{ color: 'var(--primary)' }}>{selectedOpenRouterModels.length}</strong> model
+                  Đã chọn: <strong style={{ color: 'var(--accent-primary)' }}>{selectedOpenRouterModels.length}</strong> model
                 </span>
               </div>
 
@@ -3563,7 +3611,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               }}
                             />
                             <div>
-                              <div className="font-mono" style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#818cf8' : 'var(--text-primary)' }}>
+                              <div className={`font-mono openrouter-picker-model ${isSelected ? 'is-selected' : ''}`} style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#818cf8' : 'var(--text-primary)' }}>
                                 openrouter/{m.id}
                               </div>
                               {m.name && m.name !== m.id && (
@@ -3685,7 +3733,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <div
                 style={{
                   background: 'var(--bg-card)',
-                  border: '1px solid var(--border-color)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   padding: 12,
                   display: 'flex',
@@ -3719,7 +3767,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           </span>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: 6, marginTop: 4 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4 }}>
                         <span style={{ color: 'var(--text-muted)' }}>{t('providers.thQuotaLimit')}:</span>
                         <span className="badge badge-info font-mono">
                           🎟️ {t('providers.modalResetCreditAvailable', { count: q.availableTickets })}
@@ -3750,8 +3798,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           gap: 8,
                           padding: 8,
                           borderRadius: 6,
-                          border: selectedCreditId === c.id ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                          background: selectedCreditId === c.id ? 'var(--primary-subtle, rgba(59, 130, 246, 0.08))' : 'var(--bg-card)',
+                          border: selectedCreditId === c.id ? '1px solid var(--accent-primary)' : '1px solid var(--border)',
+                          background: selectedCreditId === c.id ? 'var(--success-bg, rgba(16, 185, 129, 0.08))' : 'var(--bg-card)',
                           cursor: 'pointer',
                         }}
                       >
@@ -3770,7 +3818,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                             {c.description || 'Rate limit reset'}
                           </span>
                           {c.expires_at && (
-                            <span style={{ fontSize: 11, color: 'var(--text-warning, #f59e0b)' }}>
+                            <span className="reset-ticket-expiry" style={{ fontSize: 11, color: 'var(--text-warning, #f59e0b)' }}>
                               {t('providers.modalResetCreditExpires', { date: new Date(c.expires_at).toLocaleDateString() })}
                             </span>
                           )}

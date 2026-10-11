@@ -819,10 +819,9 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             </div>
           ) : (
             <pre
-              className="playground-output-box"
+              className="playground-output-box playground-raw-pre"
               style={{
                 fontSize: 12.5,
-                color: '#a5b4fc',
               }}
             >
               {rawResponse ? JSON.stringify(rawResponse, null, 2) : responseText}

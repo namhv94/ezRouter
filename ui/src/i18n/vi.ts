@@ -1122,4 +1122,12 @@ export const vi: TranslationSchema = {
     selectLanguage: 'Chọn ngôn ngữ',
     currentLanguage: 'Ngôn ngữ: {{lang}}',
   },
+  theme: {
+    selectTheme: 'Chọn giao diện',
+    legacy: 'Giao diện cổ điển',
+    legacyShort: 'Cổ điển',
+    operational: 'Giao diện vận hành tối giản',
+    operationalShort: 'Vận hành',
+    currentTheme: 'Giao diện: {{theme}}',
+  },
 };

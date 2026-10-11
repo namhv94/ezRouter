@@ -1122,4 +1122,12 @@ export const en: TranslationSchema = {
     selectLanguage: 'Select language',
     currentLanguage: 'Language: {{lang}}',
   },
+  theme: {
+    selectTheme: 'Select theme',
+    legacy: 'Legacy Theme',
+    legacyShort: 'Legacy',
+    operational: 'Operational Dashboard',
+    operationalShort: 'Ops',
+    currentTheme: 'Theme: {{theme}}',
+  },
 };

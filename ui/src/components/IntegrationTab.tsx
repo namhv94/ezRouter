@@ -327,12 +327,12 @@ callRouter();
       {/* Security Warning Callout */}
       <div className="security-alert-box">
         <div className="security-alert-header">
-          <IconShield size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <IconShield size={22} className="security-alert-icon" style={{ flexShrink: 0 }} />
           <div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fbbf24', margin: 0 }}>
+            <h3 className="security-alert-title" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
               {t('integration.securityTitle')}
             </h3>
-            <p style={{ fontSize: 13, color: '#fef3c7', marginTop: 4, lineHeight: 1.5 }}>
+            <p className="security-alert-desc" style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
               {t('integration.securityDesc')}
             </p>
           </div>

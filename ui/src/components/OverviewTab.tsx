@@ -177,7 +177,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         <div className={`system-health-banner ${isHealthy ? 'is-healthy' : 'is-warning'}`}>
           <div className="health-status">
             <span className={`status-dot ${isHealthy ? '' : 'error'}`} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#e5e7eb' }}>
+            <span className="health-service-title">
               ezRouter: <strong>{health.service}</strong> ({health.mode})
             </span>
             <span className={`badge ${isHealthy ? 'badge-success' : 'badge-warning'}`}>
@@ -340,7 +340,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
           <div className="token-summary-item">
             <span className="token-summary-item-label">{t('overview.chartPeak')}</span>
-            <span className="token-summary-item-val" style={{ color: '#f59e0b' }}>
+            <span className="token-summary-item-val token-summary-peak" style={{ color: '#f59e0b' }}>
               🔥 {analytics?.summary?.peak_day || '—'} ({formatCompactNumber(analytics?.summary?.peak_tokens)})
             </span>
           </div>
@@ -399,6 +399,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       stroke="rgba(255, 255, 255, 0.08)"
                       strokeDasharray={ratio > 0 && ratio < 1 ? '4 4' : undefined}
                       strokeWidth="1"
+                      className="token-chart-grid-line"
                     />
                     <text
                       x="58"
@@ -407,6 +408,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       fontSize="10"
                       textAnchor="end"
                       fontFamily="monospace"
+                      className="token-chart-axis-text"
                     >
                       {formatCompactNumber(labelVal)}
                     </text>
@@ -454,6 +456,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                         height="180"
                         fill={isHovered ? 'rgba(255, 255, 255, 0.06)' : 'transparent'}
                         rx="4"
+                        className={`token-chart-col-hover ${isHovered ? 'is-hovered' : ''}`}
                       />
 
                       {chartMode === 'stacked' ? (
@@ -467,6 +470,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                             fill={isHovered ? '#60a5fa' : '#3b82f6'}
                             rx={compH > 2 ? 0 : 3}
                             opacity={isHovered ? 1 : 0.9}
+                            className={`token-bar-prompt ${isHovered ? 'is-hovered' : ''}`}
                           />
                           {/* Completion bar (upper) */}
                           <rect
@@ -477,6 +481,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                             fill={isHovered ? '#34d399' : '#10b981'}
                             rx={3}
                             opacity={isHovered ? 1 : 0.95}
+                            className={`token-bar-comp ${isHovered ? 'is-hovered' : ''}`}
                           />
                         </>
                       ) : (
@@ -488,6 +493,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                           fill={isPeak ? '#f59e0b' : isHovered ? '#60a5fa' : '#3b82f6'}
                           rx={3}
                           opacity={isHovered ? 1 : 0.9}
+                          className={`token-bar-total ${isPeak ? 'is-peak' : ''} ${isHovered ? 'is-hovered' : ''}`}
                         />
                       )}
 
@@ -512,6 +518,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                         fontWeight={isHovered ? '600' : '400'}
                         textAnchor="middle"
                         fontFamily="monospace"
+                        className={`token-chart-date-text ${isHovered ? 'is-hovered' : ''}`}
                       >
                         {shortDate}
                       </text>
@@ -528,15 +535,15 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   <span className="badge badge-success" style={{ fontWeight: 600 }}>
                     📅 {hoveredDay.date}
                   </span>
-                  <span style={{ fontWeight: 600, color: '#fff', fontSize: 13 }}>
+                  <span className="token-hud-total">
                     {formatNumber(hoveredDay.total_tokens)} tokens ({formatCompactNumber(hoveredDay.total_tokens)})
                   </span>
                 </div>
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ color: '#93c5fd' }}>
+                  <span className="token-hud-prompt">
                     Prompt: <strong>{formatCompactNumber(hoveredDay.prompt_tokens)}</strong>
                   </span>
-                  <span style={{ color: '#6ee7b7' }}>
+                  <span className="token-hud-completion">
                     Completion: <strong>{formatCompactNumber(hoveredDay.completion_tokens)}</strong>
                   </span>
                   <span>
@@ -555,11 +562,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             ) : (
               <div className="token-chart-legend">
                 <div className="legend-item">
-                  <span className="legend-color-dot" style={{ backgroundColor: '#3b82f6' }} />
+                  <span className="legend-color-dot dot-prompt" style={{ backgroundColor: '#3b82f6' }} />
                   <span>{t('overview.chartPrompt')}</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-color-dot" style={{ backgroundColor: '#10b981' }} />
+                  <span className="legend-color-dot dot-comp" style={{ backgroundColor: '#10b981' }} />
                   <span>{t('overview.chartCompletion')}</span>
                 </div>
                 <div className="legend-item">
@@ -861,7 +868,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 return (
                   <div key={item.model} className="chart-bar-column">
                     <div
-                      className="chart-bar"
+                      className={`chart-bar ${item.errors > 0 ? 'is-error' : 'is-success'}`}
                       style={{
                         height: `${heightPct}%`,
                         backgroundColor: item.errors > 0 ? '#ef4444' : '#10b981',

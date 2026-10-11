@@ -2,6 +2,7 @@ import React from 'react';
 import { IconMenu, IconRefresh, IconLogOut, IconKey, EzRouterMark } from '../icons';
 import { useI18n } from '../i18n';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { ThemeSwitcher, ThemeMode } from './ThemeSwitcher';
 
 interface NavbarProps {
   title: string;
@@ -10,6 +11,8 @@ interface NavbarProps {
   refreshing: boolean;
   adminKey: string;
   onLogout: () => void;
+  theme?: ThemeMode;
+  onThemeChange?: (theme: ThemeMode) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -19,6 +22,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   refreshing,
   adminKey,
   onLogout,
+  theme,
+  onThemeChange,
 }) => {
   const { t } = useI18n();
   const maskedKey =
@@ -36,7 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         >
           <IconMenu size={20} />
         </button>
-        <div className="nav-title-group" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        <div className="nav-title-group" style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
           <span className="mobile-brand-mark" style={{ display: 'none' }}>
             <EzRouterMark size={22} />
           </span>
@@ -53,6 +58,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span style={{ fontSize: 12 }}>{maskedKey}</span>
         </div>
 
+        <ThemeSwitcher theme={theme} onThemeChange={onThemeChange} className="nav-theme-switcher" />
         <LanguageSwitcher />
 
         <button

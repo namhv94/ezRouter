@@ -1124,6 +1124,14 @@ export interface TranslationSchema {
     selectLanguage: string;
     currentLanguage: string;
   };
+  theme: {
+    selectTheme: string;
+    legacy: string;
+    legacyShort: string;
+    operational: string;
+    operationalShort: string;
+    currentTheme: string;
+  };
 }
 
 type Join<K, P> = K extends string | number
