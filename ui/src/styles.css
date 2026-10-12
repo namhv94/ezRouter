@@ -2968,12 +2968,12 @@ textarea:focus {
   display: flex;
 }
 
-.token-bar-prompt {
+.token-bar-track .token-bar-prompt {
   background: #6366f1;
   height: 100%;
 }
 
-.token-bar-comp {
+.token-bar-track .token-bar-comp {
   background: #10b981;
   height: 100%;
 }

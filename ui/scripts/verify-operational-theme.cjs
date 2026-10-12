@@ -149,6 +149,16 @@ const checks = [
     },
     detail: 'Operational theme must define high-contrast token overrides and semantic variable fallbacks',
   },
+  {
+    name: 'SVG chart bars keep data-driven height',
+    test: () => {
+      const htmlPrompt = /\.token-bar-track \.token-bar-prompt\s*\{[^}]*height:\s*100%/.test(stylesContent);
+      const htmlCompletion = /\.token-bar-track \.token-bar-comp\s*\{[^}]*height:\s*100%/.test(stylesContent);
+      const unscopedHeight = /^\.token-bar-(?:prompt|comp)\s*\{[^}]*height:\s*100%/m.test(stylesContent);
+      return htmlPrompt && htmlCompletion && !unscopedHeight;
+    },
+    detail: 'HTML progress height must not override SVG rect height attributes',
+  },
 ];
 
 console.log('--- AG-Proxy Operational Theme Invariant Verification ---');
