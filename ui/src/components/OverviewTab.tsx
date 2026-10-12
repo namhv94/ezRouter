@@ -191,6 +191,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
 
   const formatCompactNumber = (n: number | undefined) => {
     const value = n ?? 0;
+    const isVi = locale === 'vi';
     const units: Array<[number, string]> = [
       [1_000_000_000, t('overview.unitBillion')],
       [1_000_000, t('overview.unitMillion')],
@@ -199,8 +200,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     const unit = units.find(([threshold]) => Math.abs(value) >= threshold);
     if (!unit) return formatNumber(value);
     const compact = value / unit[0];
-    const decimals = compact >= 100 ? 0 : compact >= 10 ? 1 : 2;
-    return `${compact.toFixed(decimals).replace(/\.0+$|(?<=\.\d)0+$/g, '')}${unit[1]}`;
+    const decimals = compact >= 100 ? 0 : 1;
+    const formatted = compact.toFixed(decimals).replace(/\.0+$|(?<=\.\d)0+$/g, '');
+    const numPart = isVi ? formatted.replace('.', ',') : formatted;
+    return `${numPart}${unit[1]}`;
   };
 
   const errorRate = stats?.error_rate ?? 0;

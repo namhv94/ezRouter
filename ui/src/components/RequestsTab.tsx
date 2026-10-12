@@ -7,9 +7,6 @@ import {
   IconCheck,
   IconX,
   IconZap,
-  IconRefresh,
-  IconPause,
-  IconPlay,
   IconCopy,
   IconActivity,
 } from '../icons';
@@ -42,7 +39,6 @@ export const RequestsTab: React.FC = () => {
   const [data, setData] = useState<RequestsResponse | null>(null);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Active Requests (Live pipeline flow)
@@ -57,9 +53,8 @@ export const RequestsTab: React.FC = () => {
   const [limit, setLimit] = useState(50);
   const [offset, setOffset] = useState(0);
 
-  // Auto-refresh state
-  const [autoRefreshSec, setAutoRefreshSec] = useState<number>(5);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date>(new Date());
+  // Auto-refresh interval (5s background polling)
+  const autoRefreshSec = 5;
 
   // Modal inspection state
   const [inspectItem, setInspectItem] = useState<RequestLogItem | null>(null);
@@ -70,8 +65,6 @@ export const RequestsTab: React.FC = () => {
     async (showLoadingSpinner = false) => {
       if (showLoadingSpinner) {
         setLoading(true);
-      } else {
-        setRefreshing(true);
       }
       setError(null);
       try {
@@ -94,12 +87,10 @@ export const RequestsTab: React.FC = () => {
         if (statsResp.status === 'fulfilled') {
           setStats(statsResp.value);
         }
-        setLastRefreshedAt(new Date());
       } catch (err: any) {
         setError(err?.message || t('requests.fetchError'));
       } finally {
         setLoading(false);
-        setRefreshing(false);
       }
     },
     [limit, offset, modelFilter, statusFilter, t]
@@ -269,55 +260,6 @@ export const RequestsTab: React.FC = () => {
 
   return (
     <div>
-      {/* Top Live Control Bar */}
-      <div className="traffic-topbar">
-        <div className="traffic-live-indicator">
-          <span className={`live-pulse-dot ${autoRefreshSec === 0 ? 'paused' : ''}`} />
-          <span style={{ color: autoRefreshSec > 0 ? '#10b981' : 'var(--text-muted)' }}>
-            {autoRefreshSec > 0 ? t('requests.liveActive', { sec: autoRefreshSec }) : t('requests.livePaused')}
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
-            {t('requests.lastUpdated', { time: lastRefreshedAt.toLocaleTimeString(locale === 'vi' ? 'vi-VN' : 'en-US') })}
-          </span>
-        </div>
-
-        <div className="traffic-controls-group">
-          <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t('requests.frequencyLabel')}</label>
-          <select
-            value={autoRefreshSec}
-            onChange={(e) => setAutoRefreshSec(Number(e.target.value))}
-            style={{ width: 'auto', padding: '6px 10px', fontSize: 13, minHeight: 44 }}
-          >
-            <option value={0}>{t('requests.autoOff')}</option>
-            <option value={3}>{t('requests.secCount', { count: 3 })}</option>
-            <option value={5}>{t('requests.sec5Default')}</option>
-            <option value={10}>{t('requests.secCount', { count: 10 })}</option>
-            <option value={15}>{t('requests.secCount', { count: 15 })}</option>
-          </select>
-
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => setAutoRefreshSec(autoRefreshSec > 0 ? 0 : 5)}
-            title={autoRefreshSec > 0 ? t('requests.pausePolling') : t('requests.resumePolling')}
-          >
-            {autoRefreshSec > 0 ? <IconPause size={15} /> : <IconPlay size={15} />}
-            <span>{autoRefreshSec > 0 ? t('requests.pause') : t('requests.resume')}</span>
-          </button>
-
-          <button
-            type="button"
-            className="btn btn-primary btn-sm"
-            onClick={() => loadRequests(false)}
-            disabled={refreshing}
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-          >
-            <IconRefresh size={15} className={refreshing ? 'spinning' : ''} />
-            <span>{t('actions.refresh')}</span>
-          </button>
-        </div>
-      </div>
-
       {/* 9router-style Always-Visible Request Pipeline Flow */}
       <div className="pf" id="pipelineFlow">
         <div className="pf-title">
@@ -326,9 +268,9 @@ export const RequestsTab: React.FC = () => {
             <b>{t('requests.pipelineTitle')}</b>
           </div>
           <div className="pf-title-meta">
-            <span className={`pf-live-badge ${autoRefreshSec === 0 ? 'paused' : ''}`}>
-              <span className={`pf-live-dot ${autoRefreshSec === 0 ? 'paused' : ''}`} />
-              {autoRefreshSec > 0 ? t('requests.liveBadge') : t('requests.pausedBadge')}
+            <span className="pf-live-badge">
+              <span className="pf-live-dot" />
+              {t('requests.liveBadge')}
             </span>
             <span className="pf-count">
               <span>{activeRequests.length}</span>
