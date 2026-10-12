@@ -71,97 +71,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     loadTokenAnalytics(analyticsPeriod);
   }, [analyticsPeriod, loadTokenAnalytics, refreshing]);
 
-  if (loading && !stats) {
-    return (
-      <div className="state-container">
-        <div className="spinner" />
-        <p>{t('overview.loading')}</p>
-      </div>
-    );
-  }
-
-  if (error && !stats) {
-    return (
-      <div className="alert alert-error">
-        <IconAlertCircle size={18} />
-        <span>{error}</span>
-      </div>
-    );
-  }
-
-  const formatNumber = (n: number | undefined) =>
-    (n ?? 0).toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US');
-
-  const formatCompactNumber = (n: number | undefined) => {
-    const value = n ?? 0;
-    const units: Array<[number, string]> = [
-      [1_000_000_000, t('overview.unitBillion')],
-      [1_000_000, t('overview.unitMillion')],
-      [1_000, t('overview.unitThousand')],
-    ];
-    const unit = units.find(([threshold]) => Math.abs(value) >= threshold);
-    if (!unit) return formatNumber(value);
-    const compact = value / unit[0];
-    const decimals = compact >= 100 ? 0 : compact >= 10 ? 1 : 2;
-    return `${compact.toFixed(decimals).replace(/\.0+$|(?<=\.\d)0+$/g, '')}${unit[1]}`;
-  };
-
-  const errorRate = stats?.error_rate ?? 0;
-  const activeRateNum = stats?.active_rate ?? 0;
-  const activeRateStr = stats?.active_rate != null ? stats.active_rate.toFixed(1) : '100.0';
-  const isHealthy = !error && health?.status === 'ok';
-  const isPoolHealthy = (stats?.total_accounts ?? 0) > 0 && activeRateNum >= 80;
-  const latencyTone =
-    (stats?.avg_duration_ms ?? 0) <= 3000
-      ? 'good'
-      : (stats?.avg_duration_ms ?? 0) <= 8000
-      ? 'warn'
-      : 'bad';
-
-  // Format ISO time or timestamp to relative countdown string
-  const formatResetTime = (input?: string | number) => {
-    if (input == null || input === '') return null;
-    try {
-      let d: Date;
-      if (typeof input === 'number') {
-        d = new Date(input < 1e11 ? input * 1000 : input);
-      } else if (!isNaN(Number(input))) {
-        const num = Number(input);
-        d = new Date(num < 1e11 ? num * 1000 : num);
-      } else {
-        d = new Date(input);
-      }
-      if (isNaN(d.getTime())) return null;
-      const diffSec = Math.max(0, Math.floor((d.getTime() - Date.now()) / 1000));
-      if (diffSec <= 0) return t('overview.resetSoon');
-      if (diffSec < 60) return `${diffSec}s`;
-      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
-      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.floor((diffSec % 3600) / 60)}m`;
-      const days = Math.floor(diffSec / 86400);
-      const hours = Math.floor((diffSec % 86400) / 3600);
-      return `${days}d ${hours}h`;
-    } catch {
-      return null;
-    }
-  };
-
-  const formatCooldown = (sec?: number | null) => {
-    if (sec == null || sec <= 0) return null;
-    const s = Math.ceil(sec);
-    if (s <= 60) return `${s}s`;
-    const m = Math.ceil(s / 60);
-    return `${m}m`;
-  };
-
-  const getRemainingTone = (remainingPercent?: number | null) => {
-    if (remainingPercent == null) return 'neutral';
-    if (remainingPercent >= 50) return 'good';
-    if (remainingPercent >= 20) return 'warn';
-    return 'bad';
-  };
-
-  const googleAccounts = accounts.filter((a) => a.is_active);
-  const activeCodexAccounts = codexAccounts.filter((a) => a.is_active ?? a.active ?? true);
+  const googleAccounts = useMemo(() => accounts.filter((a) => a.is_active), [accounts]);
+  const activeCodexAccounts = useMemo(
+    () => codexAccounts.filter((a) => a.is_active ?? a.active ?? true),
+    [codexAccounts]
+  );
   const totalQuotaAccounts = googleAccounts.length + activeCodexAccounts.length;
 
   // Aggregate Quota Pool Capacities
@@ -254,6 +168,95 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     return summaries.reduce((sum, s) => sum + s.requests, 0);
   }, [summaries]);
 
+  if (loading && !stats) {
+    return (
+      <div className="state-container">
+        <div className="spinner" />
+        <p>{t('overview.loading')}</p>
+      </div>
+    );
+  }
+
+  if (error && !stats) {
+    return (
+      <div className="alert alert-error">
+        <IconAlertCircle size={18} />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  const formatNumber = (n: number | undefined) =>
+    (n ?? 0).toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US');
+
+  const formatCompactNumber = (n: number | undefined) => {
+    const value = n ?? 0;
+    const units: Array<[number, string]> = [
+      [1_000_000_000, t('overview.unitBillion')],
+      [1_000_000, t('overview.unitMillion')],
+      [1_000, t('overview.unitThousand')],
+    ];
+    const unit = units.find(([threshold]) => Math.abs(value) >= threshold);
+    if (!unit) return formatNumber(value);
+    const compact = value / unit[0];
+    const decimals = compact >= 100 ? 0 : compact >= 10 ? 1 : 2;
+    return `${compact.toFixed(decimals).replace(/\.0+$|(?<=\.\d)0+$/g, '')}${unit[1]}`;
+  };
+
+  const errorRate = stats?.error_rate ?? 0;
+  const activeRateNum = stats?.active_rate ?? 0;
+  const activeRateStr = stats?.active_rate != null ? stats.active_rate.toFixed(1) : '100.0';
+  const isHealthy = !error && health?.status === 'ok';
+  const isPoolHealthy = (stats?.total_accounts ?? 0) > 0 && activeRateNum >= 80;
+  const latencyTone =
+    (stats?.avg_duration_ms ?? 0) <= 3000
+      ? 'good'
+      : (stats?.avg_duration_ms ?? 0) <= 8000
+      ? 'warn'
+      : 'bad';
+
+  // Format ISO time or timestamp to relative countdown string
+  const formatResetTime = (input?: string | number) => {
+    if (input == null || input === '') return null;
+    try {
+      let d: Date;
+      if (typeof input === 'number') {
+        d = new Date(input < 1e11 ? input * 1000 : input);
+      } else if (!isNaN(Number(input))) {
+        const num = Number(input);
+        d = new Date(num < 1e11 ? num * 1000 : num);
+      } else {
+        d = new Date(input);
+      }
+      if (isNaN(d.getTime())) return null;
+      const diffSec = Math.max(0, Math.floor((d.getTime() - Date.now()) / 1000));
+      if (diffSec <= 0) return t('overview.resetSoon');
+      if (diffSec < 60) return `${diffSec}s`;
+      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.floor((diffSec % 3600) / 60)}m`;
+      const days = Math.floor(diffSec / 86400);
+      const hours = Math.floor((diffSec % 86400) / 3600);
+      return `${days}d ${hours}h`;
+    } catch {
+      return null;
+    }
+  };
+
+  const formatCooldown = (sec?: number | null) => {
+    if (sec == null || sec <= 0) return null;
+    const s = Math.ceil(sec);
+    if (s <= 60) return `${s}s`;
+    const m = Math.ceil(s / 60);
+    return `${m}m`;
+  };
+
+  const getRemainingTone = (remainingPercent?: number | null) => {
+    if (remainingPercent == null) return 'neutral';
+    if (remainingPercent >= 50) return 'good';
+    if (remainingPercent >= 20) return 'warn';
+    return 'bad';
+  };
+
   return (
     <div className="overview-container">
       {/* 1. Command Center Section (Health & Operational Telemetry) */}
@@ -281,10 +284,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         )}
 
         {/* Bento Command Center: Asymmetric Grid */}
-        <div className="bento-command-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: 16, marginBottom: 16 }}>
+        <div className="bento-command-grid">
           {/* Bento Main Hero: Lưu Lượng & Tokens */}
-          <div className="card bento-hero-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card bento-hero-card">
+            <div className="bento-card-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="bento-icon-badge" style={{ padding: 6, borderRadius: 6, background: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' }}>
                   <IconZap size={18} />
@@ -296,9 +299,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
+            <div className="bento-submetric-grid">
               {/* Total Tokens Metric */}
-              <div className="bento-submetric-box" style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+              <div className="bento-submetric-box">
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{t('overview.totalTokens')}</div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }} title={formatNumber(stats?.total_tokens)}>
                   {formatCompactNumber(stats?.total_tokens)}
@@ -309,7 +312,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
 
               {/* Total Requests Metric */}
-              <div className="bento-submetric-box" style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+              <div className="bento-submetric-box">
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{t('overview.totalRequests')}</div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }} title={formatNumber(stats?.total_requests)}>
                   {formatCompactNumber(stats?.total_requests)}
@@ -320,7 +323,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
 
               {/* Avg Latency Metric */}
-              <div className="bento-submetric-box" style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 12, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+              <div className="bento-submetric-box">
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{t('overview.avgLatency')}</div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)', color: latencyTone === 'good' ? '#10b981' : '#f59e0b' }}>
                   {stats?.avg_duration_ms
@@ -337,8 +340,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
 
           {/* Bento Vitals: Sức Khỏe & Quota Pools */}
-          <div className="card bento-vitals-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="card bento-vitals-card">
+            <div className="bento-card-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="bento-icon-badge" style={{ padding: 6, borderRadius: 6, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981' }}>
                   <IconServer size={18} />
@@ -348,8 +351,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               {onSelectTab && (
                 <button
                   type="button"
-                  className="btn btn-secondary btn-sm font-mono"
-                  style={{ fontSize: 11, padding: '3px 8px' }}
+                  className="btn btn-secondary btn-sm font-mono bento-nav-btn"
                   onClick={() => onSelectTab('providers')}
                   title="Đi đến Quản lý Nhà cung cấp"
                 >
@@ -358,9 +360,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="bento-vitals-subgrid">
               {/* Pool State */}
-              <div style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 10, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+              <div className="bento-vital-box">
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pool Sẵn Sàng</div>
                 <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isPoolHealthy ? '#10b981' : '#f59e0b', margin: '3px 0' }}>
                   {stats?.active_accounts || 0}/{stats?.total_accounts || 0}
@@ -371,7 +373,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
 
               {/* Error Rate */}
-              <div style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 10, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+              <div className="bento-vital-box">
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Tỷ Lệ Lỗi</div>
                 <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: errorRate <= 1.0 ? '#10b981' : '#ef4444', margin: '3px 0' }}>
                   {errorRate.toFixed(1)}%
@@ -752,7 +754,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 {t('overview.quotaSubtitle')}
               </p>
             </div>
-            <div className="overview-quota-actions" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div className="overview-quota-actions">
               <div className="overview-tab-pills">
                 <button
                   type="button"

@@ -2037,7 +2037,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowGoogleDetails(!showGoogleDetails)}
                 aria-expanded={showGoogleDetails}
                 aria-controls="google-details-drawer"
@@ -2358,7 +2357,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowCodexDetails(!showCodexDetails)}
                 aria-expanded={showCodexDetails}
                 aria-controls="codex-details-drawer"
@@ -2717,7 +2715,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             <button
               className="details-toggle-btn"
-              style={{ width: 'auto' }}
               onClick={() => setShowOpenRouterDetails(!showOpenRouterDetails)}
               aria-expanded={showOpenRouterDetails}
             >
@@ -2886,7 +2883,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowUpstreamDetails(!showUpstreamDetails)}
                 aria-expanded={showUpstreamDetails}
                 aria-controls="upstream-details-drawer"
