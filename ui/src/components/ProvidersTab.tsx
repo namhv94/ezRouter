@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { api } from '../api';
 import { useI18n } from '../i18n';
+import { OperationalProvidersView, OperationalProviderTab } from './OperationalProvidersView';
 import {
   IconPlus,
   IconCheck,
@@ -44,6 +45,50 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   onRefresh,
 }) => {
   const { locale, t } = useI18n();
+
+  // Operational Theme & Segmented Nav State
+  const [operationalTab, setOperationalTab] = useState<OperationalProviderTab>('google');
+  const [isOperational, setIsOperational] = useState<boolean>(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.dataset.theme === 'operational';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const updateTheme = () => {
+      setIsOperational(document.documentElement.dataset.theme === 'operational');
+    };
+    updateTheme();
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && (m.attributeName === 'data-theme' || m.attributeName === 'class')) {
+          updateTheme();
+        }
+      }
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class'],
+    });
+
+    window.addEventListener('storage', updateTheme);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('storage', updateTheme);
+    };
+  }, []);
+
+  const handleSelectProviderTab = (tab: OperationalProviderTab) => {
+    setOperationalTab(tab);
+    if (!isOperational) {
+      document.getElementById(`provider-${tab}`)?.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   // Accordion drawer states
   const [showGoogleDetails, setShowGoogleDetails] = useState<boolean>(false);
   const [showCodexDetails, setShowCodexDetails] = useState<boolean>(false);
@@ -1513,131 +1558,168 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
   return (
     <div className="providers-view-container">
-      {/* 1. COMPACT HEADER */}
-      <div className="providers-compact-header">
-        <div className="providers-header-info">
-          <h2 className="providers-header-title">
-            <span>{t('providers.headerTitle')}</span>
-          </h2>
-          <span className="providers-header-sub">
-            {t('providers.headerSub')}
-          </span>
-        </div>
-        <div className="section-actions">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              onRefresh();
-              loadCodexData();
-            }}
-            disabled={actionLoading || parentLoading || codexLoading}
-            title={t('providers.refreshTitle')}
-          >
-            <IconRefresh size={15} />
-            <span>{t('providers.refreshBtn')}</span>
-          </button>
-        </div>
-      </div>
+      {/* 0. OPERATIONAL-ONLY CONSOLE VIEW (TOOLBAR + SEGMENTED NAV + FOCUS SUMMARY) */}
+      {isOperational && (
+        <OperationalProvidersView
+          activeTab={operationalTab}
+          onSelectTab={setOperationalTab}
+          onFullRefresh={() => {
+            onRefresh();
+            loadCodexData();
+          }}
+          fullRefreshLoading={actionLoading || parentLoading || codexLoading}
+          quotaRefresh={quotaRefresh}
+          quotaRefreshLoading={quotaRefreshLoading}
+          onChangeRefreshInterval={handleChangeRefreshInterval}
+          onToggleAutoRefresh={handleToggleAutoRefresh}
+          onManualRunRefresh={handleManualRunRefresh}
+          formatTimestamp={formatTimestamp}
+          formatCountdown={formatCountdown}
+          googleActiveCount={googleActiveCount}
+          googleTotalCount={accounts.length}
+          googleQuotaAvg={googleQuotaAvg}
+          googleStatus={googleStopState.status}
+          codexActiveCount={codexActiveCount}
+          codexTotalCount={codexTotalCount}
+          codexPrimaryAvg={codexPrimaryAvg}
+          codexStatus={codexStopState.status}
+          openrouterModelCount={openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0}
+          openrouterBalance={typeof openrouterCredits?.total_credits === 'number' ? `$${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}` : null}
+          openrouterActive={!!openrouterProv?.is_active}
+          upstreamActiveCount={otherProviders.filter((p) => p.is_active).length}
+          upstreamTotalCount={otherProviders.length}
+        />
+      )}
 
-      {/* 2. UNIFIED HORIZONTAL STATUS STRIP (3-SECOND SCAN) */}
-      <div className="status-legend-bar">
-        <div className="route-pulse-wrapper">
-          <span
-            className={`route-pulse-dot ${
-              totalActivePools === 0 ? (totalCooling > 0 ? 'cooldown' : 'error') : ''
-            }`}
-          />
-          <span>
-            {totalActivePools > 0
-              ? t('providers.routingReady')
-              : totalCooling > 0
-              ? t('providers.waitingCooldown')
-              : t('providers.noActiveAccounts')}
-          </span>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>
-            {t('providers.readyCount', {
-              active: googleActiveCount + codexActiveCount,
-              total: accounts.length + codexTotalCount,
-            })}
-          </span>
-        </div>
-
-        <div className="status-strip-chips">
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-google')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToGoogle')}
-          >
-            <IconGoogle size={14} />
-            <span>
-              Google: <strong>{googleActiveCount}/{accounts.length}</strong>
-              {googleQuotaAvg !== null && ` • ${googleQuotaAvg}%`}
+      {/* 1. LEGACY COMPACT HEADER */}
+      {!isOperational && (
+        <div className="providers-compact-header">
+          <div className="providers-header-info">
+            <h2 className="providers-header-title">
+              <span>{t('providers.headerTitle')}</span>
+            </h2>
+            <span className="providers-header-sub">
+              {t('providers.headerSub')}
             </span>
-            <span className={`status-dot-mini ${googleStopState.status}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-codex')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToCodex')}
-          >
-            <IconOpenAI size={14} />
-            <span>
-              Codex: <strong>{codexActiveCount}/{codexTotalCount}</strong>
-              {codexPrimaryAvg !== null && ` • ${codexPrimaryAvg}%`}
-            </span>
-            <span className={`status-dot-mini ${codexStopState.status}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-openrouter')?.scrollIntoView({ behavior: 'smooth' })}
-            title="Cuộn tới OpenRouter"
-          >
-            <IconOpenRouter size={14} />
-            <span>
-              OpenRouter: <strong>{openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0} models</strong>
-              {typeof openrouterCredits?.total_credits === 'number' && ` • $${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}`}
-            </span>
-            <span className={`status-dot-mini ${openrouterProv?.is_active ? 'active' : 'neutral'}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-upstream')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToUpstream')}
-          >
-            <IconServer size={14} />
-            <span>
-              Upstream: <strong>{otherProviders.filter((p) => p.is_active).length}/{otherProviders.length}</strong>
-            </span>
-            <span className="status-dot-mini active" />
-          </button>
+          </div>
+          <div className="section-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                onRefresh();
+                loadCodexData();
+              }}
+              disabled={actionLoading || parentLoading || codexLoading}
+              title={t('providers.refreshTitle')}
+            >
+              <IconRefresh size={15} />
+              <span>{t('providers.refreshBtn')}</span>
+            </button>
+          </div>
         </div>
+      )}
 
-        <div className="status-legend-items">
-          <span className="status-legend-item">
-            <span className="status-dot-mini active" />
-            <span>{t('providers.legendActive')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini cooldown" />
-            <span>{t('providers.legendCooldown')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini stopped" />
-            <span>{t('providers.legendStopped')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini neutral" />
-            <span>{t('providers.legendDisabled')}</span>
-          </span>
+      {/* 2. LEGACY UNIFIED HORIZONTAL STATUS STRIP (3-SECOND SCAN) */}
+      {!isOperational && (
+        <div className="status-legend-bar">
+          <div className="route-pulse-wrapper">
+            <span
+              className={`route-pulse-dot ${
+                totalActivePools === 0 ? (totalCooling > 0 ? 'cooldown' : 'error') : ''
+              }`}
+            />
+            <span>
+              {totalActivePools > 0
+                ? t('providers.routingReady')
+                : totalCooling > 0
+                ? t('providers.waitingCooldown')
+                : t('providers.noActiveAccounts')}
+            </span>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>
+              {t('providers.readyCount', {
+                active: googleActiveCount + codexActiveCount,
+                total: accounts.length + codexTotalCount,
+              })}
+            </span>
+          </div>
+
+          <div className="status-strip-chips">
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('google')}
+              title={t('providers.scrollToGoogle')}
+            >
+              <IconGoogle size={14} />
+              <span>
+                Google: <strong>{googleActiveCount}/{accounts.length}</strong>
+                {googleQuotaAvg !== null && ` • ${googleQuotaAvg}%`}
+              </span>
+              <span className={`status-dot-mini ${googleStopState.status}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('codex')}
+              title={t('providers.scrollToCodex')}
+            >
+              <IconOpenAI size={14} />
+              <span>
+                Codex: <strong>{codexActiveCount}/{codexTotalCount}</strong>
+                {codexPrimaryAvg !== null && ` • ${codexPrimaryAvg}%`}
+              </span>
+              <span className={`status-dot-mini ${codexStopState.status}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('openrouter')}
+              title="Cuộn tới OpenRouter"
+            >
+              <IconOpenRouter size={14} />
+              <span>
+                OpenRouter: <strong>{openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0} models</strong>
+                {typeof openrouterCredits?.total_credits === 'number' && ` • $${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}`}
+              </span>
+              <span className={`status-dot-mini ${openrouterProv?.is_active ? 'active' : 'neutral'}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('upstream')}
+              title={t('providers.scrollToUpstream')}
+            >
+              <IconServer size={14} />
+              <span>
+                Upstream: <strong>{otherProviders.filter((p) => p.is_active).length}/{otherProviders.length}</strong>
+              </span>
+              <span className="status-dot-mini active" />
+            </button>
+          </div>
+
+          <div className="status-legend-items">
+            <span className="status-legend-item">
+              <span className="status-dot-mini active" />
+              <span>{t('providers.legendActive')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini cooldown" />
+              <span>{t('providers.legendCooldown')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini stopped" />
+              <span>{t('providers.legendStopped')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini neutral" />
+              <span>{t('providers.legendDisabled')}</span>
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Alerts */}
       {actionMessage && (
@@ -1667,84 +1749,86 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         </div>
       )}
 
-      {/* Auto Quota Refresh Panel - Gọn Gàng Hơn */}
-      <div className="auto-quota-compact-strip">
-        <div className="auto-quota-strip-left">
-          <div className="auto-quota-icon-badge">
-            <IconRefresh size={15} className={quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+      {/* Auto Quota Refresh Panel - Legacy Mode only */}
+      {!isOperational && (
+        <div className="auto-quota-compact-strip">
+          <div className="auto-quota-strip-left">
+            <div className="auto-quota-icon-badge">
+              <IconRefresh size={15} className={quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+            </div>
+            <div className="auto-quota-strip-title-wrap">
+              <span className="auto-quota-strip-title">{t('providers.autoRefreshTitle')}</span>
+              <span className="auto-quota-strip-meta">
+                {quotaRefresh?.is_refreshing ? (
+                  <span className="highlight-refreshing">{t('providers.autoRefreshRefreshing')}</span>
+                ) : quotaRefresh?.enabled ? (
+                  <>
+                    <span>{t('providers.autoRefreshLast', { time: formatTimestamp(quotaRefresh?.last_refresh ?? null) })}</span>
+                    <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>•</span>
+                    <span>{t('providers.autoRefreshNext', { time: formatCountdown(quotaRefresh?.next_refresh ?? null) })}</span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>{t('providers.autoRefreshDisabled')}</span>
+                )}
+              </span>
+            </div>
           </div>
-          <div className="auto-quota-strip-title-wrap">
-            <span className="auto-quota-strip-title">{t('providers.autoRefreshTitle')}</span>
-            <span className="auto-quota-strip-meta">
-              {quotaRefresh?.is_refreshing ? (
-                <span className="highlight-refreshing">{t('providers.autoRefreshRefreshing')}</span>
-              ) : quotaRefresh?.enabled ? (
-                <>
-                  <span>{t('providers.autoRefreshLast', { time: formatTimestamp(quotaRefresh?.last_refresh ?? null) })}</span>
-                  <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>•</span>
-                  <span>{t('providers.autoRefreshNext', { time: formatCountdown(quotaRefresh?.next_refresh ?? null) })}</span>
-                </>
-              ) : (
-                <span style={{ color: 'var(--text-muted)' }}>{t('providers.autoRefreshDisabled')}</span>
-              )}
-            </span>
+
+          <div className="auto-quota-strip-right">
+            <div className="auto-quota-interval-group" role="radiogroup" aria-label={t('providers.toggleAutoRefreshAria')}>
+              {[
+                { label: '1m', val: 60, title: t('providers.interval1m') },
+                { label: '5m', val: 300, title: t('providers.interval5m') },
+                { label: '15m', val: 900, title: t('providers.interval15m') },
+                { label: '30m', val: 1800, title: t('providers.interval30m') },
+              ].map(({ label, val, title }) => (
+                <button
+                  key={val}
+                  type="button"
+                  title={title}
+                  className={`interval-pill-btn ${quotaRefresh?.interval_secs === val ? 'active' : ''}`}
+                  onClick={() => handleChangeRefreshInterval(val)}
+                  disabled={quotaRefreshLoading}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className={`auto-quota-toggle-btn ${quotaRefresh?.enabled ? 'enabled' : 'disabled'}`}
+              onClick={handleToggleAutoRefresh}
+              disabled={quotaRefreshLoading}
+              aria-pressed={quotaRefresh?.enabled}
+              title={quotaRefresh?.enabled ? t('providers.turnOffAutoRefresh') : t('providers.turnOnAutoRefresh')}
+            >
+              <span className="toggle-switch-track">
+                <span className="toggle-switch-thumb" />
+              </span>
+              <span className="toggle-switch-text">{quotaRefresh?.enabled ? t('providers.toggleOn') : t('providers.toggleOff')}</span>
+            </button>
+
+            <button
+              type="button"
+              className="action-icon-btn primary manual-refresh-btn"
+              onClick={handleManualRunRefresh}
+              disabled={quotaRefreshLoading || quotaRefresh?.is_refreshing}
+              title={t('providers.manualRefreshTitle')}
+            >
+              <IconRefresh size={13} className={quotaRefreshLoading || quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+              <span>{t('providers.manualRefreshBtn')}</span>
+            </button>
           </div>
+
+          {quotaRefresh?.last_error && (
+            <div className="auto-quota-error-notice" style={{ width: '100%', marginTop: 4 }}>
+              <IconAlertCircle size={14} />
+              <span>{t('providers.lastRefreshNotice', { error: quotaRefresh.last_error })}</span>
+            </div>
+          )}
         </div>
-
-        <div className="auto-quota-strip-right">
-          <div className="auto-quota-interval-group" role="radiogroup" aria-label={t('providers.toggleAutoRefreshAria')}>
-            {[
-              { label: '1m', val: 60, title: t('providers.interval1m') },
-              { label: '5m', val: 300, title: t('providers.interval5m') },
-              { label: '15m', val: 900, title: t('providers.interval15m') },
-              { label: '30m', val: 1800, title: t('providers.interval30m') },
-            ].map(({ label, val, title }) => (
-              <button
-                key={val}
-                type="button"
-                title={title}
-                className={`interval-pill-btn ${quotaRefresh?.interval_secs === val ? 'active' : ''}`}
-                onClick={() => handleChangeRefreshInterval(val)}
-                disabled={quotaRefreshLoading}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className={`auto-quota-toggle-btn ${quotaRefresh?.enabled ? 'enabled' : 'disabled'}`}
-            onClick={handleToggleAutoRefresh}
-            disabled={quotaRefreshLoading}
-            aria-pressed={quotaRefresh?.enabled}
-            title={quotaRefresh?.enabled ? t('providers.turnOffAutoRefresh') : t('providers.turnOnAutoRefresh')}
-          >
-            <span className="toggle-switch-track">
-              <span className="toggle-switch-thumb" />
-            </span>
-            <span className="toggle-switch-text">{quotaRefresh?.enabled ? t('providers.toggleOn') : t('providers.toggleOff')}</span>
-          </button>
-
-          <button
-            type="button"
-            className="action-icon-btn primary manual-refresh-btn"
-            onClick={handleManualRunRefresh}
-            disabled={quotaRefreshLoading || quotaRefresh?.is_refreshing}
-            title={t('providers.manualRefreshTitle')}
-          >
-            <IconRefresh size={13} className={quotaRefreshLoading || quotaRefresh?.is_refreshing ? 'spinner' : ''} />
-            <span>{t('providers.manualRefreshBtn')}</span>
-          </button>
-        </div>
-
-        {quotaRefresh?.last_error && (
-          <div className="auto-quota-error-notice" style={{ width: '100%', marginTop: 4 }}>
-            <IconAlertCircle size={14} />
-            <span>{t('providers.lastRefreshNotice', { error: quotaRefresh.last_error })}</span>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Loading Skeleton */}
       {parentLoading && accounts.length === 0 && (
@@ -1760,7 +1844,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       {/* TẤT CẢ PROVIDERS ĐƯỢC HIỂN THỊ ĐỒNG THỜI (KHÔNG CẦN CHIA TAB) */}
       <div className="provider-segment-container">
         {/* CARD 1: GOOGLE ANTIGRAVITY */}
-        <div id="provider-google" className="visual-card">
+        <div
+          id="provider-google"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'google' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-google' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">
@@ -2130,7 +2219,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           </div>
 
         {/* CARD 2: OPENAI CODEX */}
-        <div id="provider-codex" className="visual-card">
+        <div
+          id="provider-codex"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'codex' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-codex' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">
@@ -2441,7 +2535,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           </div>
 
         {/* CARD 3: OPENROUTER FIRST-CLASS PROVIDER */}
-        <div id="provider-openrouter" className="visual-card">
+        <div
+          id="provider-openrouter"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'openrouter' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-openrouter' : undefined}
+        >
           {/* Header */}
           <div className="visual-card-header">
             <div className="visual-brand-group">
@@ -2722,7 +2821,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         </div>
 
         {/* CARD 4: UPSTREAM CUSTOM PROVIDERS */}
-        <div id="provider-upstream" className="visual-card">
+        <div
+          id="provider-upstream"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'upstream' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-upstream' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">

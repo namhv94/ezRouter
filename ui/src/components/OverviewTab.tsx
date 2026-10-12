@@ -172,163 +172,167 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
 
   return (
     <div className="overview-container">
-      {/* System Health Info Banner */}
-      {health && (
-        <div className={`system-health-banner ${isHealthy ? 'is-healthy' : 'is-warning'}`}>
-          <div className="health-status">
-            <span className={`status-dot ${isHealthy ? '' : 'error'}`} />
-            <span className="health-service-title">
-              ezRouter: <strong>{health.service}</strong> ({health.mode})
-            </span>
-            <span className={`badge ${isHealthy ? 'badge-success' : 'badge-warning'}`}>
-              {isHealthy ? t('overview.statusOnline') : t('overview.statusNeedsCheck')}
-            </span>
-          </div>
-          <div className="health-meta">
-            <span>{t('overview.healthPort')}: {health.port}</span>
-            <span>{t('overview.healthUpstream')}: <strong>Antigravity + Codex</strong></span>
-            <span>
-              {t('overview.healthPool')}: <strong>{stats?.active_accounts ?? 0}/{stats?.total_accounts ?? 0} {t('overview.healthAvailable')}</strong>
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Symmetrical 3x2 KPI Grid */}
-      <div className="kpi-grid">
-        {/* Row 1, Col 1: Tổng Yêu Cầu */}
-        <div className="card kpi-card kpi-card-blue">
-          <div className="kpi-label">
-            <span>{t('overview.totalRequests')}</span>
-            <IconActivity size={16} />
-          </div>
-          <div className="kpi-value" title={formatNumber(stats?.total_requests)}>{formatCompactNumber(stats?.total_requests)}</div>
-          <div className="kpi-sub">
-            {t('overview.currentRpm', { rpm: stats?.rpm || 0 })}
-          </div>
-        </div>
-
-        {/* Row 1, Col 2: Tổng Token */}
-        <div className="card kpi-card kpi-card-cyan">
-          <div className="kpi-label">
-            <span>{t('overview.totalTokens')}</span>
-            <span className="badge badge-neutral">{t('overview.tokenInOut')}</span>
-          </div>
-          <div className="kpi-value" title={formatNumber(stats?.total_tokens)}>{formatCompactNumber(stats?.total_tokens)}</div>
-          <div className="kpi-sub" title={t('overview.tokenBreakdown', { prompt: formatNumber(stats?.prompt_tokens), completion: formatNumber(stats?.completion_tokens) })}>
-            {t('overview.tokenInOutSummary', { prompt: formatCompactNumber(stats?.prompt_tokens), completion: formatCompactNumber(stats?.completion_tokens) })}
-          </div>
-        </div>
-
-        {/* Row 1, Col 3: Độ Trễ TB */}
-        <div className={`card kpi-card ${latencyTone === 'good' ? 'kpi-card-good' : 'kpi-card-warn'}`}>
-          <div className="kpi-label">
-            <span>{t('overview.avgLatency')}</span>
-            <span className="badge badge-neutral">Gồm stream</span>
-          </div>
-          <div className="kpi-value">
-            {stats?.avg_duration_ms
-              ? stats.avg_duration_ms < 1000
-                ? `${stats.avg_duration_ms.toFixed(0)} ms`
-                : `${(stats.avg_duration_ms / 1000).toFixed(1)}s`
-              : '0.0 ms'}
-          </div>
-          <div className="kpi-sub">
-            {stats?.avg_duration_ms && stats.avg_duration_ms < 1000
-              ? '⚡ Phản hồi ban đầu nhanh (<1s)'
-              : '⚡ Thời gian stream hoàn tất trung bình'}
-          </div>
-        </div>
-
-        {/* Row 2, Col 1: Tỷ Lệ Lỗi */}
-        <div className={`card kpi-card ${errorRate <= 1.0 ? 'kpi-card-good' : errorRate <= 3.0 ? 'kpi-card-warn' : 'kpi-card-bad'}`}>
-          <div className="kpi-label">
-            <span>Tỷ Lệ Lỗi Hệ Thống</span>
-            <span className={`badge ${errorRate <= 1.0 ? 'badge-success' : 'badge-error'}`}>
-              {errorRate.toFixed(1)}%
-            </span>
-          </div>
-          <div className="kpi-value" title={formatNumber(stats?.error_count)}>{formatCompactNumber(stats?.error_count)}</div>
-          <div className="kpi-sub" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>{stats?.error_count ?? 0} lỗi 5xx/mạng</span>
-            {stats?.quota_count !== undefined && (
-              <span style={{ color: 'var(--warning)', fontWeight: 500 }}>
-                ⚡ Hết Quota: {stats.quota_count}
+      {/* 1. Command Center Section (Health & Operational Telemetry) */}
+      <section className="overview-section overview-command-center" aria-label="Command Center">
+        {/* Primary Health & Status Header */}
+        {health && (
+          <div className={`system-health-banner ${isHealthy ? 'is-healthy' : 'is-warning'}`}>
+            <div className="health-status">
+              <span className={`status-dot ${isHealthy ? '' : 'error'}`} />
+              <span className="health-service-title">
+                ezRouter: <strong>{health.service}</strong> ({health.mode})
               </span>
-            )}
-          </div>
-        </div>
-
-        {/* Row 2, Col 2: Pool Khả Dụng */}
-        <div className={`card kpi-card ${isPoolHealthy ? 'kpi-card-good' : 'kpi-card-warn'}`}>
-          <div className="kpi-label">
-            <span>{t('overview.poolActive')}</span>
-            <span className={`badge ${isPoolHealthy ? 'badge-success' : 'badge-warning'}`}>{t('overview.poolBadge')}</span>
-          </div>
-          <div className="kpi-value">
-            {stats?.active_accounts || 0} / {stats?.total_accounts || 0}
-          </div>
-          <div className="kpi-sub">
-            {t('overview.cooldownLabel')}: <strong>{stats?.cooldown_accounts || 0}</strong> {t('overview.cooldownUnit')}
-          </div>
-        </div>
-
-        {/* Row 2, Col 3: Tỷ Lệ Sẵn Sàng */}
-        <div className={`card kpi-card ${activeRate >= 80 ? 'kpi-card-good' : 'kpi-card-warn'}`}>
-          <div className="kpi-label">
-            <span>{t('overview.readyRate')}</span>
-            <span>%</span>
-          </div>
-          <div className="kpi-value">
-            {stats?.active_rate != null ? stats.active_rate.toFixed(1) : '100.0'}%
-          </div>
-          <div className="kpi-sub">{t('overview.readyRateSub')}</div>
-        </div>
-      </div>
-
-      {/* Token Usage Milestones & Daily Chart Section */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="section-header">
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h2 className="section-title" style={{ margin: 0 }}>{t('overview.tokenAnalyticsTitle')}</h2>
-              <span className="badge badge-neutral" style={{ fontSize: 11 }}>Analytics</span>
+              <span className={`badge ${isHealthy ? 'badge-success' : 'badge-warning'}`}>
+                {isHealthy ? t('overview.statusOnline') : t('overview.statusNeedsCheck')}
+              </span>
             </div>
-            <p className="overview-section-subtitle">
-              {t('overview.tokenAnalyticsSubtitle')}
-            </p>
+            <div className="health-meta">
+              <span>{t('overview.healthPort')}: {health.port}</span>
+              <span>{t('overview.healthUpstream')}: <strong>Antigravity + Codex</strong></span>
+              <span>
+                {t('overview.healthPool')}: <strong>{stats?.active_accounts ?? 0}/{stats?.total_accounts ?? 0} {t('overview.healthAvailable')}</strong>
+              </span>
+            </div>
           </div>
-          <div className="overview-tab-pills">
-            <button
-              type="button"
-              className={`pill-btn ${analyticsPeriod === '7d' ? 'active' : ''}`}
-              onClick={() => setAnalyticsPeriod('7d')}
-            >
-              7D
-            </button>
-            <button
-              type="button"
-              className={`pill-btn ${analyticsPeriod === '14d' ? 'active' : ''}`}
-              onClick={() => setAnalyticsPeriod('14d')}
-            >
-              14D
-            </button>
-            <button
-              type="button"
-              className={`pill-btn ${analyticsPeriod === '30d' ? 'active' : ''}`}
-              onClick={() => setAnalyticsPeriod('30d')}
-            >
-              30D
-            </button>
-            <button
-              type="button"
-              className={`pill-btn ${analyticsPeriod === 'all' ? 'active' : ''}`}
-              onClick={() => setAnalyticsPeriod('all')}
-            >
-              {t('overview.periodAll')}
-            </button>
+        )}
+
+        {/* Operational KPI Grid */}
+        <div className="kpi-grid">
+          {/* Card 1: Total Requests (Throughput) */}
+          <div className="card kpi-card kpi-card-blue kpi-card-requests">
+            <div className="kpi-label">
+              <span>{t('overview.totalRequests')}</span>
+              <IconActivity size={16} />
+            </div>
+            <div className="kpi-value" title={formatNumber(stats?.total_requests)}>{formatCompactNumber(stats?.total_requests)}</div>
+            <div className="kpi-sub">
+              {t('overview.currentRpm', { rpm: stats?.rpm || 0 })}
+            </div>
+          </div>
+
+          {/* Card 2: Total Tokens (Volume) */}
+          <div className="card kpi-card kpi-card-cyan kpi-card-tokens">
+            <div className="kpi-label">
+              <span>{t('overview.totalTokens')}</span>
+              <span className="badge badge-neutral">{t('overview.tokenInOut')}</span>
+            </div>
+            <div className="kpi-value" title={formatNumber(stats?.total_tokens)}>{formatCompactNumber(stats?.total_tokens)}</div>
+            <div className="kpi-sub" title={t('overview.tokenBreakdown', { prompt: formatNumber(stats?.prompt_tokens), completion: formatNumber(stats?.completion_tokens) })}>
+              {t('overview.tokenInOutSummary', { prompt: formatCompactNumber(stats?.prompt_tokens), completion: formatCompactNumber(stats?.completion_tokens) })}
+            </div>
+          </div>
+
+          {/* Card 3: Avg Latency (Performance) */}
+          <div className={`card kpi-card ${latencyTone === 'good' ? 'kpi-card-good' : 'kpi-card-warn'} kpi-card-latency`}>
+            <div className="kpi-label">
+              <span>{t('overview.avgLatency')}</span>
+              <span className="badge badge-neutral">Gồm stream</span>
+            </div>
+            <div className="kpi-value">
+              {stats?.avg_duration_ms
+                ? stats.avg_duration_ms < 1000
+                  ? `${stats.avg_duration_ms.toFixed(0)} ms`
+                  : `${(stats.avg_duration_ms / 1000).toFixed(1)}s`
+                : '0.0 ms'}
+            </div>
+            <div className="kpi-sub">
+              {stats?.avg_duration_ms && stats.avg_duration_ms < 1000
+                ? '⚡ Phản hồi ban đầu nhanh (<1s)'
+                : '⚡ Thời gian stream hoàn tất trung bình'}
+            </div>
+          </div>
+
+          {/* Card 4: Error Rate (Reliability Vital) */}
+          <div className={`card kpi-card ${errorRate <= 1.0 ? 'kpi-card-good' : errorRate <= 3.0 ? 'kpi-card-warn' : 'kpi-card-bad'} kpi-vital-card kpi-card-errors`}>
+            <div className="kpi-label">
+              <span>Tỷ Lệ Lỗi Hệ Thống</span>
+              <span className={`badge ${errorRate <= 1.0 ? 'badge-success' : 'badge-error'}`}>
+                {errorRate.toFixed(1)}%
+              </span>
+            </div>
+            <div className="kpi-value" title={formatNumber(stats?.error_count)}>{formatCompactNumber(stats?.error_count)}</div>
+            <div className="kpi-sub" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{stats?.error_count ?? 0} lỗi 5xx/mạng</span>
+              {stats?.quota_count !== undefined && (
+                <span style={{ color: 'var(--warning)', fontWeight: 500 }}>
+                  ⚡ Hết Quota: {stats.quota_count}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Card 5: Pool Active (Capacity Vital) */}
+          <div className={`card kpi-card ${isPoolHealthy ? 'kpi-card-good' : 'kpi-card-warn'} kpi-vital-card kpi-card-pool`}>
+            <div className="kpi-label">
+              <span>{t('overview.poolActive')}</span>
+              <span className={`badge ${isPoolHealthy ? 'badge-success' : 'badge-warning'}`}>{t('overview.poolBadge')}</span>
+            </div>
+            <div className="kpi-value">
+              {stats?.active_accounts || 0} / {stats?.total_accounts || 0}
+            </div>
+            <div className="kpi-sub">
+              {t('overview.cooldownLabel')}: <strong>{stats?.cooldown_accounts || 0}</strong> {t('overview.cooldownUnit')}
+            </div>
+          </div>
+
+          {/* Card 6: Ready Rate (Availability) */}
+          <div className={`card kpi-card ${activeRate >= 80 ? 'kpi-card-good' : 'kpi-card-warn'} kpi-card-ready`}>
+            <div className="kpi-label">
+              <span>{t('overview.readyRate')}</span>
+              <span>%</span>
+            </div>
+            <div className="kpi-value">
+              {stats?.active_rate != null ? stats.active_rate.toFixed(1) : '100.0'}%
+            </div>
+            <div className="kpi-sub">{t('overview.readyRateSub')}</div>
           </div>
         </div>
+      </section>
+
+      {/* 2. Token Usage Milestones & Daily Chart Section */}
+      <section className="overview-section overview-analytics-section" aria-label={t('overview.tokenAnalyticsTitle')}>
+        <div className="card overview-analytics-card">
+          <div className="section-header">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <h2 className="section-title" style={{ margin: 0 }}>{t('overview.tokenAnalyticsTitle')}</h2>
+                <span className="badge badge-neutral" style={{ fontSize: 11 }}>Analytics</span>
+              </div>
+              <p className="overview-section-subtitle">
+                {t('overview.tokenAnalyticsSubtitle')}
+              </p>
+            </div>
+            <div className="overview-tab-pills">
+              <button
+                type="button"
+                className={`pill-btn ${analyticsPeriod === '7d' ? 'active' : ''}`}
+                onClick={() => setAnalyticsPeriod('7d')}
+              >
+                7D
+              </button>
+              <button
+                type="button"
+                className={`pill-btn ${analyticsPeriod === '14d' ? 'active' : ''}`}
+                onClick={() => setAnalyticsPeriod('14d')}
+              >
+                14D
+              </button>
+              <button
+                type="button"
+                className={`pill-btn ${analyticsPeriod === '30d' ? 'active' : ''}`}
+                onClick={() => setAnalyticsPeriod('30d')}
+              >
+                30D
+              </button>
+              <button
+                type="button"
+                className={`pill-btn ${analyticsPeriod === 'all' ? 'active' : ''}`}
+                onClick={() => setAnalyticsPeriod('all')}
+              >
+                {t('overview.periodAll')}
+              </button>
+            </div>
+          </div>
 
         {/* Mini Summary Stats Bar */}
         <div className="token-chart-summary-bar">
@@ -585,10 +589,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
         )}
       </div>
+      </section>
 
-      {/* Quota Overview Section */}
-      <div className="card overview-quota-card" style={{ marginBottom: 24 }}>
-        <div className="section-header">
+      {/* 3. Quota Overview Section */}
+      <section className="overview-section overview-quota-section" aria-label={t('overview.quotaTitle')}>
+        <div className="card overview-quota-card">
+          <div className="section-header">
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h2 className="section-title" style={{ margin: 0 }}>{t('overview.quotaTitle')}</h2>
@@ -844,10 +850,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
         )}
       </div>
+      </section>
 
-      {/* Model Request Summary Section */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="section-header">
+      {/* 4. Model Request Summary Section */}
+      <section className="overview-section overview-models-section" aria-label={t('overview.modelDistributionTitle')}>
+        <div className="card overview-models-card">
+          <div className="section-header">
           <div>
             <h2 className="section-title">{t('overview.modelDistributionTitle')}</h2>
             <p className="overview-section-subtitle">{t('overview.modelsProcessed', { count: summaries.length })}</p>
@@ -890,8 +898,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </div>
         )}
 
-        <div className="table-container">
-          <table>
+        <div className="table-container overview-models-table-container">
+          <table className="overview-models-table">
             <thead>
               <tr>
                 <th>{t('overview.tableModel')}</th>
@@ -914,26 +922,26 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               ) : (
                 summaries.map((s) => (
                   <tr key={s.model}>
-                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="font-mono text-break">
+                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="font-mono text-break" data-label={t('overview.tableModel')}>
                       {s.model}
                     </td>
-                    <td className="font-mono">{formatNumber(s.requests)}</td>
-                    <td>
+                    <td className="font-mono" data-label={t('overview.tableRequests')}>{formatNumber(s.requests)}</td>
+                    <td data-label={t('overview.tableSuccess')}>
                       <span className={`badge ${s.ok === s.requests && s.requests > 0 ? 'badge-success' : 'badge-warning'} font-mono`}>
                         {formatNumber(s.ok)}
                       </span>
                     </td>
-                    <td>
+                    <td data-label={t('overview.tableErrors')}>
                       <span
                         className={`badge ${s.errors > 0 ? 'badge-error' : 'badge-success'} font-mono`}
                       >
                         {formatNumber(s.errors)}
                       </span>
                     </td>
-                    <td className="font-mono">{formatNumber(s.prompt_tokens)}</td>
-                    <td className="font-mono">{formatNumber(s.completion_tokens)}</td>
-                    <td className="font-mono">{formatNumber(s.total_tokens)}</td>
-                    <td className="font-mono">{s.avg_duration_ms.toFixed(1)} ms</td>
+                    <td className="font-mono" data-label={t('overview.tablePromptTokens')}>{formatNumber(s.prompt_tokens)}</td>
+                    <td className="font-mono" data-label={t('overview.tableCompletionTokens')}>{formatNumber(s.completion_tokens)}</td>
+                    <td className="font-mono" data-label={t('overview.tableTotalTokens')}>{formatNumber(s.total_tokens)}</td>
+                    <td className="font-mono" data-label={t('overview.tableAvgLatency')}>{s.avg_duration_ms.toFixed(1)} ms</td>
                   </tr>
                 ))
               )}
@@ -941,6 +949,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           </table>
         </div>
       </div>
+      </section>
     </div>
   );
 };

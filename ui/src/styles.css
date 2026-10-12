@@ -922,6 +922,14 @@ body {
   }
 }
 
+.overview-section {
+  margin-bottom: 24px;
+}
+
+.overview-section:last-child {
+  margin-bottom: 0;
+}
+
 /* Symmetrical 3x2 KPI Grid */
 .kpi-grid {
   display: grid;
@@ -5507,7 +5515,42 @@ html[data-theme="operational"] body,
   color: var(--text-primary);
 }
 
-/* --- Overview: KPI Command Center Grid --- */
+/* --- Overview: Structural Layout Redesign & Command Center --- */
+[data-theme="operational"] .overview-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+[data-theme="operational"] .overview-section {
+  margin-bottom: 0;
+}
+
+/* Prioritize Quota Overview above Token Analytics in operational mode */
+[data-theme="operational"] .overview-command-center {
+  order: 1;
+}
+
+[data-theme="operational"] .overview-quota-section {
+  order: 2;
+}
+
+[data-theme="operational"] .overview-analytics-section {
+  order: 3;
+}
+
+[data-theme="operational"] .overview-models-section {
+  order: 4;
+}
+
+/* --- Overview: KPI Command Center Grid (Asymmetric Hierarchy) --- */
+[data-theme="operational"] .kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 0;
+}
+
 [data-theme="operational"] .kpi-card {
   border-radius: var(--radius-sm);
 }
@@ -5536,6 +5579,55 @@ html[data-theme="operational"] body,
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+}
+
+/* Primary Vitals Panel: Prominent double-span cards on top row */
+[data-theme="operational"] .kpi-card-pool {
+  order: 1;
+  grid-column: span 2;
+}
+
+[data-theme="operational"] .kpi-card-errors {
+  order: 2;
+  grid-column: span 2;
+}
+
+/* Compact Metrics Grid: Throughput & Performance row */
+[data-theme="operational"] .kpi-card-requests {
+  order: 3;
+  grid-column: span 1;
+}
+
+[data-theme="operational"] .kpi-card-tokens {
+  order: 4;
+  grid-column: span 1;
+}
+
+[data-theme="operational"] .kpi-card-latency {
+  order: 5;
+  grid-column: span 1;
+}
+
+[data-theme="operational"] .kpi-card-ready {
+  order: 6;
+  grid-column: span 1;
+}
+
+[data-theme="operational"] .kpi-vital-card {
+  padding: 16px 18px;
+  border-left: 3px solid var(--accent-primary);
+}
+
+[data-theme="operational"] .kpi-vital-card.kpi-card-pool {
+  border-left-color: var(--success);
+}
+
+[data-theme="operational"] .kpi-vital-card.kpi-card-errors {
+  border-left-color: var(--warning);
+}
+
+[data-theme="operational"] .kpi-vital-card .kpi-value {
+  font-size: 26px;
 }
 
 /* --- Overview: Quota Overview Section --- */
@@ -6260,11 +6352,214 @@ html[data-theme="operational"] body,
   }
 }
 
+/* Operational Overview Tablet KPI Hierarchy (561px - 900px) */
+@media (max-width: 900px) and (min-width: 561px) {
+  [data-theme="operational"] .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  [data-theme="operational"] .kpi-card-pool {
+    order: 1;
+    grid-column: span 2;
+  }
+
+  [data-theme="operational"] .kpi-card-errors {
+    order: 2;
+    grid-column: span 2;
+  }
+
+  [data-theme="operational"] .kpi-card-requests {
+    order: 3;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-tokens {
+    order: 4;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-latency {
+    order: 5;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-ready {
+    order: 6;
+    grid-column: span 1;
+  }
+}
+
+/* Operational Overview Mobile Responsiveness: Model Summary Cards & SVG Chart Containment (<=640px) */
+@media (max-width: 640px) {
+  [data-theme="operational"] .overview-models-table-container {
+    background: transparent;
+    border: none;
+    overflow-x: visible;
+  }
+
+  [data-theme="operational"] .overview-models-table {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
+
+  [data-theme="operational"] .overview-models-table thead {
+    display: none;
+  }
+
+  [data-theme="operational"] .overview-models-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+
+  [data-theme="operational"] .overview-models-table tr {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 14px;
+    background: #ffffff;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  }
+
+  [data-theme="operational"] .overview-models-table tr:hover td {
+    background: transparent;
+  }
+
+  [data-theme="operational"] .overview-models-table td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--border-subtle);
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 12.5px;
+  }
+
+  [data-theme="operational"] .overview-models-table td:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  [data-theme="operational"] .overview-models-table td[data-label]::before {
+    content: attr(data-label);
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-right: 12px;
+  }
+
+  [data-theme="operational"] .token-chart-svg-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-theme="operational"] .token-chart-svg-container svg {
+    min-width: 580px;
+  }
+
+  [data-theme="operational"] .token-chart-summary-bar {
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  [data-theme="operational"] .token-chart-legend {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}
+
+/* Operational Overview Mobile 2-Column KPI Tiles (<=560px and 390px) */
+@media (max-width: 560px) {
+  [data-theme="operational"] .kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 0;
+  }
+
+  [data-theme="operational"] .kpi-card-pool {
+    order: 1;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-errors {
+    order: 2;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-requests {
+    order: 3;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-tokens {
+    order: 4;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-latency {
+    order: 5;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card-ready {
+    order: 6;
+    grid-column: span 1;
+  }
+
+  [data-theme="operational"] .kpi-card {
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+  }
+
+  [data-theme="operational"] .kpi-card .kpi-label {
+    font-size: 10px;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  [data-theme="operational"] .kpi-card .kpi-value {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  [data-theme="operational"] .kpi-card .kpi-sub {
+    font-size: 10.5px;
+    margin-top: 4px;
+    line-height: 1.3;
+  }
+
+  [data-theme="operational"] .system-health-banner {
+    padding: 10px 12px;
+    margin-bottom: 12px;
+  }
+}
+
 /* Touch targets safety on mobile viewports */
 @media (max-width: 768px) {
   [data-theme="operational"] .action-icon-btn,
   [data-theme="operational"] .details-toggle-btn,
   [data-theme="operational"] .status-segment-chip {
+    min-height: 44px;
+  }
+
+  [data-theme="operational"] .overview-tab-pills .pill-btn {
+    min-height: 44px;
+    padding: 0 12px;
+  }
+
+  [data-theme="operational"] .overview-quota-actions .btn {
     min-height: 44px;
   }
 }

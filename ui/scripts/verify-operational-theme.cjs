@@ -159,6 +159,48 @@ const checks = [
     },
     detail: 'HTML progress height must not override SVG rect height attributes',
   },
+  {
+    name: 'Operational Overview section ordering prioritizes Quota over Analytics',
+    test: () => {
+      const quotaOrder = /\[data-theme="operational"\]\s+\.overview-quota-section\s*\{[^}]*order:\s*2/s.test(stylesContent);
+      const analyticsOrder = /\[data-theme="operational"\]\s+\.overview-analytics-section\s*\{[^}]*order:\s*3/s.test(stylesContent);
+      const containerGrid = /\[data-theme="operational"\]\s+\.overview-container\s*\{[^}]*display:\s*grid/s.test(stylesContent);
+      const jsxHasSections = overviewContent.includes('overview-quota-section') && overviewContent.includes('overview-analytics-section');
+      return quotaOrder && analyticsOrder && containerGrid && jsxHasSections;
+    },
+    detail: 'Operational mode must prioritize Quota Overview above Token Analytics via CSS grid order without altering legacy DOM flow',
+  },
+  {
+    name: 'Operational Command Center asymmetric vitals hierarchy & mobile 2-column tiles',
+    test: () => {
+      const desktopPoolSpan = /\[data-theme="operational"\]\s+\.kpi-card-pool\s*\{[^}]*grid-column:\s*span\s*2/s.test(stylesContent);
+      const desktopErrorsSpan = /\[data-theme="operational"\]\s+\.kpi-card-errors\s*\{[^}]*grid-column:\s*span\s*2/s.test(stylesContent);
+      const mobileGrid2Col = /@media\s*\([^)]*max-width:\s*560px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.kpi-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*1fr\)/s.test(stylesContent);
+      const jsxHasCardRoles = overviewContent.includes('kpi-card-pool') && overviewContent.includes('kpi-card-errors');
+      return desktopPoolSpan && desktopErrorsSpan && mobileGrid2Col && jsxHasCardRoles;
+    },
+    detail: 'Pool and Error vitals must span prominent double columns on desktop and form compact 2-column grid on mobile (<=560px/390px)',
+  },
+  {
+    name: 'Overview Model summary table responsive card fallback on mobile (<=640px)',
+    test: () => {
+      const hasTableBlock = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.overview-models-table\s*\{[^}]*display:\s*block/s.test(stylesContent);
+      const hasTheadNone = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.overview-models-table\s+thead\s*\{[^}]*display:\s*none/s.test(stylesContent);
+      const hasDataLabel = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.overview-models-table\s+td\[data-label\]::before/s.test(stylesContent);
+      const overviewHasDataLabel = overviewContent.includes('data-label={t(\'overview.tableModel\')}');
+      return hasTableBlock && hasTheadNone && hasDataLabel && overviewHasDataLabel;
+    },
+    detail: 'Model distribution table must render responsive stacked cards with data-labels on mobile viewports',
+  },
+  {
+    name: 'Mobile token chart readability and isolation',
+    test: () => {
+      const hasChartScroll = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.token-chart-svg-container\s*\{[^}]*overflow-x:\s*auto/s.test(stylesContent);
+      const hasSvgMinWidth = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.token-chart-svg-container\s+svg\s*\{[^}]*min-width:\s*580px/s.test(stylesContent);
+      return hasChartScroll && hasSvgMinWidth;
+    },
+    detail: 'Token analytics chart must have responsive overflow-x and minimum width on mobile to maintain bar and label readability',
+  },
 ];
 
 console.log('--- AG-Proxy Operational Theme Invariant Verification ---');
