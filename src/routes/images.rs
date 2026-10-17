@@ -38,6 +38,13 @@ pub async fn image_generations(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::BadRequest("model must be a non-empty string".to_string()))?
         .to_string();
+    let reference_image = object
+        .get("image")
+        .or_else(|| object.get("reference_image"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|s| s.to_string());
 
     let start_time = Instant::now();
     let timestamp = chrono::Utc::now().timestamp() as f64;
@@ -63,7 +70,16 @@ pub async fn image_generations(
     }
 
     if is_codex_image_model(&model) {
-        return generate_codex_image(&state, &auth, &model, &prompt, timestamp, start_time).await;
+        return generate_codex_image(
+            &state,
+            &auth,
+            &model,
+            &prompt,
+            reference_image.as_deref(),
+            timestamp,
+            start_time,
+        )
+        .await;
     }
 
     let (provider, routing_prefix) = resolve_provider(&state, &model)?;
@@ -216,6 +232,7 @@ pub async fn generate_codex_image(
     auth: &AuthenticatedUser,
     model: &str,
     prompt: &str,
+    reference_image: Option<&str>,
     timestamp: f64,
     start_time: Instant,
 ) -> Result<Response, AppError> {
@@ -262,14 +279,27 @@ pub async fn generate_codex_image(
     }
 
     let out_file = run_dir.join("output.png");
-    let codex_prompt = format!(
-        "Dùng tool image_gen tạo 1 ảnh: {prompt}. Lưu file ảnh kết quả vào {}",
-        out_file.to_string_lossy()
-    );
+    let codex_prompt = if reference_image.is_some() {
+        format!(
+            "Dựa vào bức ảnh chân dung tham chiếu (-i): Dùng tool image_gen tạo 1 ảnh đời thường (candid smartphone photography) giữ CHÍNH XÁC 100% gương mặt, ngũ quan, khuôn miệng, sống mũi, dáng mắt, kiểu tóc và thần thái của cô gái trong ảnh tham chiếu. Yêu cầu chi tiết: {prompt}. Lưu file ảnh kết quả vào {}",
+            out_file.to_string_lossy()
+        )
+    } else {
+        format!(
+            "Dùng tool image_gen tạo 1 ảnh: {prompt}. Lưu file ảnh kết quả vào {}",
+            out_file.to_string_lossy()
+        )
+    };
 
     let mut cmd = tokio::process::Command::new("codex");
+    cmd.arg("exec");
+    if let Some(ref_path) = reference_image {
+        let p = std::path::Path::new(ref_path);
+        if p.is_file() {
+            cmd.arg("-i").arg(p);
+        }
+    }
     cmd.args([
-        "exec",
         "--skip-git-repo-check",
         "--dangerously-bypass-approvals-and-sandbox",
         &codex_prompt,
