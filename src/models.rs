@@ -27,6 +27,52 @@ struct StaticModelDef {
 
 const STATIC_MODELS: &[StaticModelDef] = &[
     StaticModelDef {
+        canonical_id: "ag/gemini-4-argon",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon",
+            "ag/gemini-argon",
+            "gemini-argon",
+            "ag/argon",
+            "argon",
+            "ag/agon",
+            "agon",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-high",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-high",
+            "ag/argon-high",
+            "argon-high",
+            "ag/agon-high",
+            "agon-high",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-medium",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-medium",
+            "ag/argon-medium",
+            "argon-medium",
+            "ag/agon-medium",
+            "agon-medium",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-low",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-low",
+            "ag/argon-low",
+            "argon-low",
+            "ag/agon-low",
+            "agon-low",
+        ],
+    },
+    StaticModelDef {
         canonical_id: "ag/gemini-3.8-flash-high",
         owned_by: "antigravity",
         aliases: &[
@@ -344,7 +390,7 @@ mod tests {
         let list_resp = registry.list_models();
 
         assert_eq!(list_resp.object, "list");
-        assert_eq!(list_resp.data.len(), 25);
+        assert_eq!(list_resp.data.len(), 29);
 
         let mut seen_ids = HashSet::new();
         for entry in &list_resp.data {
@@ -370,6 +416,10 @@ mod tests {
 
         // Specifically check the models required by test_models.py
         let ids: Vec<&str> = list_resp.data.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids.contains(&"ag/gemini-4-argon"));
+        assert!(ids.contains(&"ag/gemini-4-argon-high"));
+        assert!(ids.contains(&"ag/gemini-4-argon-medium"));
+        assert!(ids.contains(&"ag/gemini-4-argon-low"));
         assert!(ids.contains(&"ag/gemini-3.8-flash-high"));
         assert!(ids.contains(&"ag/gemini-pro-agent"));
         assert!(ids.contains(&"ag/gemini-3.1-pro-low"));
@@ -382,6 +432,18 @@ mod tests {
         assert!(ids.contains(&"cx/codex-auto-review"));
         assert!(ids.contains(&"ag/claude-opus-5-5-high"));
         assert!(ids.contains(&"ag/claude-sonnet-5-5-high"));
+        assert!(!ids.contains(&"gemini-4-argon"));
+        assert!(!ids.contains(&"gemini-4-argon-high"));
+        assert!(!ids.contains(&"gemini-4-argon-medium"));
+        assert!(!ids.contains(&"gemini-4-argon-low"));
+        assert!(!ids.contains(&"ag/argon"));
+        assert!(!ids.contains(&"argon"));
+        assert!(!ids.contains(&"ag/agon"));
+        assert!(!ids.contains(&"agon"));
+        assert!(!ids.contains(&"ag/argon-high"));
+        assert!(!ids.contains(&"argon-high"));
+        assert!(!ids.contains(&"ag/agon-high"));
+        assert!(!ids.contains(&"agon-high"));
         assert!(!ids.contains(&"gemini-3.8-flash-high"));
         assert!(!ids.contains(&"gemini-pro-agent"));
         assert!(!ids.contains(&"ag/gemini-3.1-pro"));
@@ -487,6 +549,46 @@ mod tests {
         assert!(registry.get_model("gemini-3.1-pro-low").is_some());
         assert!(registry.get_model("ag/gemini-pro-low").is_some());
         assert!(registry.get_model("gemini-pro-low").is_some());
+
+        // Gemini 4 Argon lookups
+        let m_argon = registry.get_model("ag/gemini-4-argon");
+        assert!(m_argon.is_some());
+        assert_eq!(m_argon.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon").is_some());
+        assert!(registry.get_model("ag/gemini-argon").is_some());
+        assert!(registry.get_model("gemini-argon").is_some());
+        assert!(registry.get_model("ag/argon").is_some());
+        assert!(registry.get_model("argon").is_some());
+        assert!(registry.get_model("ag/agon").is_some());
+        assert!(registry.get_model("agon").is_some());
+
+        // Gemini 4 Argon Thinking levels (High, Medium, Low)
+        let m_argon_high = registry.get_model("ag/gemini-4-argon-high");
+        assert!(m_argon_high.is_some());
+        assert_eq!(m_argon_high.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-high").is_some());
+        assert!(registry.get_model("ag/argon-high").is_some());
+        assert!(registry.get_model("argon-high").is_some());
+        assert!(registry.get_model("ag/agon-high").is_some());
+        assert!(registry.get_model("agon-high").is_some());
+
+        let m_argon_med = registry.get_model("ag/gemini-4-argon-medium");
+        assert!(m_argon_med.is_some());
+        assert_eq!(m_argon_med.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-medium").is_some());
+        assert!(registry.get_model("ag/argon-medium").is_some());
+        assert!(registry.get_model("argon-medium").is_some());
+        assert!(registry.get_model("ag/agon-medium").is_some());
+        assert!(registry.get_model("agon-medium").is_some());
+
+        let m_argon_low = registry.get_model("ag/gemini-4-argon-low");
+        assert!(m_argon_low.is_some());
+        assert_eq!(m_argon_low.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-low").is_some());
+        assert!(registry.get_model("ag/argon-low").is_some());
+        assert!(registry.get_model("argon-low").is_some());
+        assert!(registry.get_model("ag/agon-low").is_some());
+        assert!(registry.get_model("agon-low").is_some());
 
         // Unknown / unsupported models return None
         assert!(registry.get_model("non-existent-model").is_none());

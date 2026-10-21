@@ -762,6 +762,11 @@ export interface TranslationSchema {
     authKeyPlaceholder: string;
     authKeyHelp: string;
     responseModeLabel: string;
+    thinkingLevelLabel: string;
+    thinkingOptDefault: string;
+    thinkingOptHigh: string;
+    thinkingOptMedium: string;
+    thinkingOptLow: string;
     streamSse: string;
     nonStreamJson: string;
     quickPresetsLabel: string;
@@ -833,6 +838,10 @@ export interface TranslationSchema {
     customizerTitle: string;
     yourApiKeyLabel: string;
     modelSelectionLabel: string;
+    modelOptGemini4Argon: string;
+    modelOptGemini4ArgonHigh: string;
+    modelOptGemini4ArgonMedium: string;
+    modelOptGemini4ArgonLow: string;
     modelOptGeminiFlash: string;
     modelOptGeminiProAgent: string;
     modelOptGeminiProLow: string;
