@@ -3279,12 +3279,24 @@ impl CodexProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("cx/gpt-5.6-sol");
         let upstream_model = normalize_upstream_codex_model(requested_model).to_string();
+        let explicit_effort = payload.get("reasoning_effort").and_then(|v| v.as_str());
+        let resolved_effort = resolve_codex_reasoning_effort(requested_model, explicit_effort);
 
         let mut body = payload.clone();
         body["model"] = serde_json::json!(upstream_model);
         body["store"] = serde_json::json!(false);
         if is_stream {
             body["stream"] = serde_json::json!(true);
+        }
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("reasoning_effort");
+        }
+        if let Some(effort) = resolved_effort {
+            if let Some(r_obj) = body.get_mut("reasoning").and_then(|r| r.as_object_mut()) {
+                r_obj.insert("effort".to_string(), serde_json::json!(effort));
+            } else {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
         }
 
         let url = format!("{}/codex/responses", self.base_url);
@@ -3442,15 +3454,60 @@ pub struct RawResponsesResult {
     pub upstream_model: String,
 }
 
+pub fn split_codex_effort_suffix(model: &str) -> (&str, Option<&'static str>) {
+    let stripped = model.trim().strip_prefix("cx/").unwrap_or(model.trim());
+    const SUFFIXES: &[(&str, &str)] = &[
+        ("-medium", "medium"),
+        ("-xhigh", "xhigh"),
+        ("-ultra", "ultra"),
+        ("-high", "high"),
+        ("-low", "low"),
+        ("-max", "max"),
+    ];
+
+    for &(suffix, canonical_effort) in SUFFIXES {
+        if stripped.len() > suffix.len() {
+            let offset = stripped.len() - suffix.len();
+            if stripped.is_char_boundary(offset) && stripped[offset..].eq_ignore_ascii_case(suffix)
+            {
+                return (&stripped[..offset], Some(canonical_effort));
+            }
+        }
+    }
+
+    (stripped, None)
+}
+
 pub fn normalize_upstream_codex_model(model: &str) -> &str {
-    let stripped = model.strip_prefix("cx/").unwrap_or(model);
-    match stripped {
+    let (base, _) = split_codex_effort_suffix(model);
+    match base {
         "astra" => "gpt-6-astra",
         "gpt-6.1" => "gpt-6.1-sol",
         "gpt-6" => "gpt-6-sol",
         "gpt-5.6" => "gpt-5.6-sol",
         other => other,
     }
+}
+
+pub fn resolve_codex_reasoning_effort(
+    model: &str,
+    explicit_effort: Option<&str>,
+) -> Option<String> {
+    if let Some(raw) = explicit_effort {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty()
+            && !trimmed.eq_ignore_ascii_case("default")
+            && !trimmed.eq_ignore_ascii_case("none")
+        {
+            return Some(trimmed.to_ascii_lowercase());
+        }
+    }
+
+    if let (_, Some(suffix_effort)) = split_codex_effort_suffix(model) {
+        return Some(suffix_effort.to_string());
+    }
+
+    None
 }
 
 #[axum::async_trait]
@@ -3463,15 +3520,20 @@ impl Provider for CodexProvider {
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
         let upstream_model = normalize_upstream_codex_model(&request.model);
+        let reasoning_effort =
+            resolve_codex_reasoning_effort(&request.model, request.reasoning_effort.as_deref());
 
         let is_native = self.is_native_non_stream_enabled();
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": upstream_model,
             "input": converted_input,
             "stream": !is_native,
             "store": false,
             "tools": converted_tools,
         });
+        if let Some(effort) = reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
 
         let url = format!("{}/codex/responses", self.base_url);
 
@@ -3704,14 +3766,19 @@ impl Provider for CodexProvider {
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
         let upstream_model = normalize_upstream_codex_model(&request.model);
+        let reasoning_effort =
+            resolve_codex_reasoning_effort(&request.model, request.reasoning_effort.as_deref());
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": upstream_model,
             "input": converted_input,
             "stream": true,
             "store": false,
             "tools": converted_tools,
         });
+        if let Some(effort) = reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
 
         let url = format!("{}/codex/responses", self.base_url);
 
@@ -6226,6 +6293,53 @@ mod tests {
     }
 
     #[test]
+    fn test_split_codex_effort_suffix() {
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-high"),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("gpt-6.1-sol-high"),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-medium"),
+            ("gpt-6.1-sol", Some("medium"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-low"),
+            ("gpt-6.1-sol", Some("low"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-xhigh"),
+            ("gpt-6.1-sol", Some("xhigh"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-ultra"),
+            ("gpt-6.1-sol", Some("ultra"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-max"),
+            ("gpt-6.1-sol", Some("max"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("  cx/gpt-6.1-sol-HIGH  "),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("gpt-5.6-sol-XHIGH"),
+            ("gpt-5.6-sol", Some("xhigh"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol"),
+            ("gpt-6.1-sol", None)
+        );
+        assert_eq!(split_codex_effort_suffix("gpt-6.1"), ("gpt-6.1", None));
+        assert_eq!(split_codex_effort_suffix("-high"), ("-high", None));
+        assert_eq!(split_codex_effort_suffix("high"), ("high", None));
+    }
+
+    #[test]
     fn test_normalize_upstream_codex_model() {
         assert_eq!(
             normalize_upstream_codex_model("cx/gpt-6.1-sol"),
@@ -6272,6 +6386,129 @@ mod tests {
         assert_eq!(
             normalize_upstream_codex_model("cx/codex-auto-review"),
             "codex-auto-review"
+        );
+
+        // With thinking suffixes -low, -medium, -high, -xhigh, -max, -ultra
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-sol-high"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6.1-sol-low"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-medium"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6.1-xhigh"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-sol-max"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6-sol-high"),
+            "gpt-6-sol"
+        );
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-6-high"), "gpt-6-sol");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/astra-low"),
+            "gpt-6-astra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6-astra-medium"),
+            "gpt-6-astra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-ultra"),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-sol-ultra"),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-terra-ultra"),
+            "gpt-5.6-terra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-luna-high"),
+            "gpt-5.6-luna"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-reserve-max"),
+            "gpt-reserve"
+        );
+    }
+
+    #[test]
+    fn test_resolve_codex_reasoning_effort() {
+        // Explicit effort takes precedence and is lowercased
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("high")),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("HIGH")),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("  medium  ")),
+            Some("medium".to_string())
+        );
+
+        // Explicit "default", "none", or empty string ignored -> falls back to model suffix
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("default")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("none")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("   ")),
+            Some("low".to_string())
+        );
+
+        // Fallback to model suffix when explicit effort is None
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-high", None),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-xhigh", None),
+            Some("xhigh".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-5.6-sol-ultra", None),
+            Some("ultra".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-reserve-max", None),
+            Some("max".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("gpt-6.1-medium", None),
+            Some("medium".to_string())
+        );
+
+        // No explicit effort and no suffix -> None
+        assert_eq!(resolve_codex_reasoning_effort("cx/gpt-6.1-sol", None), None);
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("none")),
+            None
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("default")),
+            None
         );
     }
 }
