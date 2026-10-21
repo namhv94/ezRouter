@@ -51,6 +51,38 @@ const checks = [
     test: () => integrationContent.includes('value="ag/gemini-3.1-pro-low"'),
     detail: 'IntegrationTab select dropdown must include ag/gemini-3.1-pro-low',
   },
+  {
+    name: 'Playground DEFAULT_CX_MODELS includes Codex thinking models (cx/gpt-6.1-sol-high, cx/gpt-5.6-sol-high, cx/gpt-5.6-sol-ultra)',
+    test: () =>
+      playgroundContent.includes("'cx/gpt-6.1-sol-high'") &&
+      playgroundContent.includes("'cx/gpt-5.6-sol-high'") &&
+      playgroundContent.includes("'cx/gpt-5.6-sol-ultra'"),
+    detail: 'DEFAULT_CX_MODELS must include cx/gpt-6.1-sol-high, cx/gpt-5.6-sol-high, and cx/gpt-5.6-sol-ultra',
+  },
+  {
+    name: 'Playground thinking level options include xhigh, max, and ultra',
+    test: () =>
+      playgroundContent.includes('value="xhigh"') &&
+      playgroundContent.includes('value="max"') &&
+      playgroundContent.includes('value="ultra"'),
+    detail: 'Playground thinking level select must include xhigh, max, and ultra options',
+  },
+  {
+    name: 'IntegrationTab model selection includes Codex thinking models (cx/gpt-6.1-sol-high, cx/gpt-5.6-sol-high, cx/gpt-5.6-sol-ultra)',
+    test: () =>
+      integrationContent.includes('value="cx/gpt-6.1-sol-high"') &&
+      integrationContent.includes('value="cx/gpt-5.6-sol-high"') &&
+      integrationContent.includes('value="cx/gpt-5.6-sol-ultra"'),
+    detail: 'IntegrationTab select dropdown must include cx/gpt-6.1-sol-high, cx/gpt-5.6-sol-high, and cx/gpt-5.6-sol-ultra',
+  },
+  {
+    name: 'IntegrationTab thinking level options include xhigh, max, and ultra',
+    test: () =>
+      integrationContent.includes('value="xhigh"') &&
+      integrationContent.includes('value="max"') &&
+      integrationContent.includes('value="ultra"'),
+    detail: 'IntegrationTab thinking level select must include xhigh, max, and ultra options',
+  },
 ];
 
 console.log('--- AG-Proxy UI Model Dropdown Verification ---');
