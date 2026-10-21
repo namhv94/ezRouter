@@ -2531,9 +2531,10 @@ pub fn openai_to_codex_input(
                                     "detail": "auto"
                                 }));
                             }
-                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_image") {
-                            user_parts.push(p.clone());
-                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_text") {
+                        } else if matches!(
+                            p.get("type").and_then(|v| v.as_str()),
+                            Some("input_image" | "input_text")
+                        ) {
                             user_parts.push(p.clone());
                         }
                     }
