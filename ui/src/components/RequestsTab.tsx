@@ -34,6 +34,22 @@ const estimateRequestCost = (model: string, promptTokens: number, completionToke
   return ((promptTokens || 0) * 0.50 + (completionTokens || 0) * 1.50) / 1_000_000;
 };
 
+export const isCodexImageModel = (model: string = '', provider: string = ''): boolean => {
+  const m = (model || '').toLowerCase().trim();
+  const p = (provider || '').toLowerCase().trim();
+  if (p === 'codex image' || p === 'cx/image-gen' || p === 'image-gen') return true;
+  return (
+    m === 'cx/image-gen' ||
+    m === 'image-gen' ||
+    m === 'cx/gpt-image' ||
+    m === 'cx/gpt-image-2' ||
+    m === 'gpt-image-2' ||
+    m === 'codex-image' ||
+    m.startsWith('cx/image') ||
+    m.startsWith('cx/gpt-image')
+  );
+};
+
 export const RequestsTab: React.FC = () => {
   const { locale, t } = useI18n();
   const [data, setData] = useState<RequestsResponse | null>(null);
@@ -248,14 +264,17 @@ export const RequestsTab: React.FC = () => {
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
+  const cxImageActive = activeRequests.find(
+    (r) => isCodexImageModel(r.model, r.provider)
+  );
   const agActive = activeRequests.find(
-    (r) => r.provider === 'Google Antigravity' || r.model.startsWith('ag/')
+    (r) => r !== cxImageActive && (r.provider === 'Google Antigravity' || r.model.startsWith('ag/'))
   );
   const cxActive = activeRequests.find(
-    (r) => r.provider === 'Codex' || r.model.startsWith('cx/')
+    (r) => r !== cxImageActive && (r.provider === 'Codex' || r.model.startsWith('cx/'))
   );
   const extActive = activeRequests.find(
-    (r) => r !== agActive && r !== cxActive && r.provider !== 'Router'
+    (r) => r !== agActive && r !== cxActive && r !== cxImageActive && r.provider !== 'Router'
   );
 
   return (
@@ -407,6 +426,11 @@ export const RequestsTab: React.FC = () => {
                   <stop offset="60%" stopColor="#0ea5e9" />
                   <stop offset="100%" stopColor="#7dd3fc" />
                 </linearGradient>
+                <linearGradient id="pfGradCxImg" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#818cf8" />
+                  <stop offset="60%" stopColor="#f43f5e" />
+                  <stop offset="100%" stopColor="#fda4af" />
+                </linearGradient>
                 <linearGradient id="pfGradExt" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="#818cf8" />
                   <stop offset="60%" stopColor="#10b981" />
@@ -426,6 +450,13 @@ export const RequestsTab: React.FC = () => {
                     <feMergeNode in="SourceGraphic" />
                   </feMerge>
                 </filter>
+                <filter id="pfGlowCxImg" x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="2.5" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
                 <filter id="pfGlowExt" x="-20%" y="-20%" width="140%" height="140%">
                   <feGaussianBlur stdDeviation="2.5" result="blur" />
                   <feMerge>
@@ -435,19 +466,24 @@ export const RequestsTab: React.FC = () => {
                 </filter>
               </defs>
 
-              {/* Idle dim continuous fan-out paths */}
+              {/* Idle dim continuous fan-out paths (4 branches: AG, CX, CX Image, Ext) */}
               <path
-                d="M 0,50 C 45,50 55,16.7 100,16.7"
+                d="M 0,50 C 45,50 55,12.5 100,12.5"
                 className="pf-path-base"
                 vectorEffect="non-scaling-stroke"
               />
               <path
-                d="M 0,50 C 35,50 65,50 100,50"
+                d="M 0,50 C 45,50 55,37.5 100,37.5"
                 className="pf-path-base"
                 vectorEffect="non-scaling-stroke"
               />
               <path
-                d="M 0,50 C 45,50 55,83.3 100,83.3"
+                d="M 0,50 C 45,50 55,62.5 100,62.5"
+                className="pf-path-base"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                d="M 0,50 C 45,50 55,87.5 100,87.5"
                 className="pf-path-base"
                 vectorEffect="non-scaling-stroke"
               />
@@ -464,7 +500,7 @@ export const RequestsTab: React.FC = () => {
               {agActive && (
                 <>
                   <path
-                    d="M 0,50 C 45,50 55,16.7 100,16.7"
+                    d="M 0,50 C 45,50 55,12.5 100,12.5"
                     className="pf-path-active pf-path-ag"
                     stroke="url(#pfGradAg)"
                     filter="url(#pfGlowAg)"
@@ -474,10 +510,10 @@ export const RequestsTab: React.FC = () => {
                     <animateMotion
                       dur="1.4s"
                       repeatCount="indefinite"
-                      path="M 0,50 C 45,50 55,16.7 100,16.7"
+                      path="M 0,50 C 45,50 55,12.5 100,12.5"
                     />
                   </circle>
-                  <circle cx="100" cy="16.7" r="3.5" className="pf-terminal-node active-ag" />
+                  <circle cx="100" cy="12.5" r="3.5" className="pf-terminal-node active-ag" />
                 </>
               )}
 
@@ -485,7 +521,7 @@ export const RequestsTab: React.FC = () => {
               {cxActive && (
                 <>
                   <path
-                    d="M 0,50 C 35,50 65,50 100,50"
+                    d="M 0,50 C 45,50 55,37.5 100,37.5"
                     className="pf-path-active pf-path-cx"
                     stroke="url(#pfGradCx)"
                     filter="url(#pfGlowCx)"
@@ -495,10 +531,31 @@ export const RequestsTab: React.FC = () => {
                     <animateMotion
                       dur="1.4s"
                       repeatCount="indefinite"
-                      path="M 0,50 C 35,50 65,50 100,50"
+                      path="M 0,50 C 45,50 55,37.5 100,37.5"
                     />
                   </circle>
-                  <circle cx="100" cy="50" r="3.5" className="pf-terminal-node active-cx" />
+                  <circle cx="100" cy="37.5" r="3.5" className="pf-terminal-node active-cx" />
+                </>
+              )}
+
+              {/* Active Path & Flowing Dot: Codex Image Gen */}
+              {cxImageActive && (
+                <>
+                  <path
+                    d="M 0,50 C 45,50 55,62.5 100,62.5"
+                    className="pf-path-active pf-path-cx-img"
+                    stroke="url(#pfGradCxImg)"
+                    filter="url(#pfGlowCxImg)"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <circle className="pf-flowing-dot pf-dot-cx-img" r="3.5" fill="#ffe4e6">
+                    <animateMotion
+                      dur="1.4s"
+                      repeatCount="indefinite"
+                      path="M 0,50 C 45,50 55,62.5 100,62.5"
+                    />
+                  </circle>
+                  <circle cx="100" cy="62.5" r="3.5" className="pf-terminal-node active-cx-img" />
                 </>
               )}
 
@@ -506,7 +563,7 @@ export const RequestsTab: React.FC = () => {
               {extActive && (
                 <>
                   <path
-                    d="M 0,50 C 45,50 55,83.3 100,83.3"
+                    d="M 0,50 C 45,50 55,87.5 100,87.5"
                     className="pf-path-active pf-path-ext"
                     stroke="url(#pfGradExt)"
                     filter="url(#pfGlowExt)"
@@ -516,10 +573,10 @@ export const RequestsTab: React.FC = () => {
                     <animateMotion
                       dur="1.4s"
                       repeatCount="indefinite"
-                      path="M 0,50 C 45,50 55,83.3 100,83.3"
+                      path="M 0,50 C 45,50 55,87.5 100,87.5"
                     />
                   </circle>
-                  <circle cx="100" cy="83.3" r="3.5" className="pf-terminal-node active-ext" />
+                  <circle cx="100" cy="87.5" r="3.5" className="pf-terminal-node active-ext" />
                 </>
               )}
             </svg>
@@ -728,6 +785,95 @@ export const RequestsTab: React.FC = () => {
                       : t('requests.statusActive')
                     : t('requests.statusReady')}
                   </span>
+              </div>
+            </div>
+
+            {/* Codex Image Gen Node */}
+            <div className="pf-branch-row">
+              <div className={`pf-conn pf-conn-sub ${cxImageActive ? 'active' : ''}`}>
+                <svg
+                  className="pf-svg-curve pf-svg-mobile-sub"
+                  viewBox="0 0 28 50"
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  {/* Left continuous trunk spanning through gap */}
+                  <path
+                    d="M 14,0 L 14,60"
+                    className="pf-path-base pf-path-trunk"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {/* Organic curve into card */}
+                  <path
+                    d="M 14,0 L 14,12 C 14,22 18,25 28,25"
+                    className="pf-path-base"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {cxImageActive && (
+                    <>
+                      <path
+                        d="M 14,0 L 14,12 C 14,22 18,25 28,25"
+                        className="pf-path-active"
+                        stroke="#f43f5e"
+                        vectorEffect="non-scaling-stroke"
+                      />
+                      <circle className="pf-flowing-dot" r="3" fill="#ffe4e6">
+                        <animateMotion
+                          dur="1.2s"
+                          repeatCount="indefinite"
+                          path="M 14,0 L 14,12 C 14,22 18,25 28,25"
+                        />
+                      </circle>
+                    </>
+                  )}
+                </svg>
+              </div>
+              <div
+                className={`pf-node pf-provider ${
+                  cxImageActive
+                    ? `active ${
+                        cxImageActive.status === 'success'
+                          ? 'state-success'
+                          : cxImageActive.status === 'error'
+                          ? 'state-error'
+                          : cxImageActive.status === 'cancelled'
+                          ? 'state-cancelled'
+                          : ''
+                      }`
+                    : 'idle'
+                }`}
+                onClick={() => cxImageActive && setSelectedActiveReq(cxImageActive)}
+                title={cxImageActive ? t('requests.inspectRequestTitle') : 'Codex Image Gen'}
+              >
+                <div className="pf-icon pf-icon-cx-img">IMG</div>
+                <div className="pf-provider-info">
+                  <div className="pf-label">
+                    Codex Image Gen
+                    <span className="pf-badge-image">IMAGE</span>
+                  </div>
+                  <div className="pf-detail">
+                    {cxImageActive
+                      ? `${cxImageActive.model} · ${cxImageActive.account || 'default'} · ${
+                          cxImageActive.status === 'generating'
+                            ? `Stream ${formatDuration(cxImageActive.elapsed_ms)}`
+                            : formatDuration(cxImageActive.elapsed_ms)
+                        }`
+                      : t('requests.readyWaiting')}
+                  </div>
+                </div>
+                <span className="pf-provider-state">
+                  {cxImageActive
+                    ? cxImageActive.status === 'success'
+                      ? t('requests.statusSuccess')
+                      : cxImageActive.status === 'error'
+                      ? t('requests.statusError')
+                      : cxImageActive.status === 'cancelled'
+                      ? t('requests.statusCancelled')
+                      : cxImageActive.status === 'generating'
+                      ? '⚡ Đang sinh...'
+                      : t('requests.statusActive')
+                    : t('requests.statusReady')}
+                </span>
               </div>
             </div>
 

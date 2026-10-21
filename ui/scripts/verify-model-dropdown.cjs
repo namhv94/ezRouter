@@ -17,6 +17,11 @@ const integrationContent = fs.readFileSync(integrationPath, 'utf8');
 
 const checks = [
   {
+    name: 'Playground DEFAULT_AG_MODELS includes ag/gemini-4-argon and ag/gemini-4-argon-high',
+    test: () => playgroundContent.includes("'ag/gemini-4-argon'") && playgroundContent.includes("'ag/gemini-4-argon-high'"),
+    detail: 'DEFAULT_AG_MODELS must include canonical ag/gemini-4-argon and ag/gemini-4-argon-high',
+  },
+  {
     name: 'Playground DEFAULT_AG_MODELS includes ag/gemini-pro-agent',
     test: () => playgroundContent.includes("'ag/gemini-pro-agent'"),
     detail: 'DEFAULT_AG_MODELS must include canonical ag/gemini-pro-agent',
@@ -30,6 +35,11 @@ const checks = [
     name: 'Playground DEFAULT_AG_MODELS does not expose raw unsupported gemini-3.1-pro without ag/ prefix',
     test: () => !/['"]gemini-3\.1-pro['"]/.test(playgroundContent),
     detail: 'Unprefixed gemini-3.1-pro must not be exposed in static default options',
+  },
+  {
+    name: 'IntegrationTab model selection includes ag/gemini-4-argon',
+    test: () => integrationContent.includes('value="ag/gemini-4-argon"'),
+    detail: 'IntegrationTab select dropdown must include ag/gemini-4-argon',
   },
   {
     name: 'IntegrationTab model selection includes ag/gemini-pro-agent',

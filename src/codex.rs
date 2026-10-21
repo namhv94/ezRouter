@@ -2454,6 +2454,80 @@ pub fn sanitize_codex_call_id(raw_id: &str, fallback_prefix: &str) -> String {
     }
 }
 
+fn extract_codex_text_part(p: &serde_json::Value) -> Option<&str> {
+    p.get("text")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            p.get("input_text")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            p.get("content")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| p.get("text").and_then(|v| v.as_str()))
+        .or_else(|| p.get("input_text").and_then(|v| v.as_str()))
+        .or_else(|| p.get("content").and_then(|v| v.as_str()))
+}
+
+fn extract_codex_image_part(p: &serde_json::Value) -> Option<(&str, &str)> {
+    let p_type = p.get("type").and_then(|v| v.as_str());
+    let is_img = matches!(p_type, Some("image_url" | "input_image" | "image"))
+        || p.get("image_url").is_some();
+    if !is_img {
+        return None;
+    }
+
+    let (url_from_image_url, detail_from_image_url) = match p.get("image_url") {
+        Some(serde_json::Value::String(s)) => {
+            let trimmed = s.trim();
+            (
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                },
+                None,
+            )
+        }
+        Some(serde_json::Value::Object(obj)) => {
+            let u = obj
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let d = obj
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            (u, d)
+        }
+        _ => (None, None),
+    };
+
+    let url = url_from_image_url.or_else(|| {
+        p.get("url")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })?;
+
+    let detail = detail_from_image_url
+        .or_else(|| {
+            p.get("detail")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("auto");
+
+    Some((url, detail))
+}
+
 pub fn openai_to_codex_input(
     messages: &[ChatMessage],
     tools: Option<&serde_json::Value>,
@@ -2517,22 +2591,25 @@ pub fn openai_to_codex_input(
                 let mut user_parts = Vec::new();
                 if let Some(MessageContent::Parts(parts)) = &msg.content {
                     for p in parts {
-                        if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                        if let Some(t) = p.as_str() {
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
-                        } else if let Some(t) = p.as_str() {
-                            user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
-                        } else if let Some(image_obj) = p.get("image_url") {
-                            let image_url =
-                                image_obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                            if !image_url.is_empty() {
+                        } else {
+                            let p_type = p.get("type").and_then(|v| v.as_str());
+                            if matches!(p_type, Some("text" | "input_text")) {
+                                let t = extract_codex_text_part(p).unwrap_or("");
+                                user_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
+                            } else if let Some((img_url, img_detail)) = extract_codex_image_part(p)
+                            {
                                 user_parts.push(serde_json::json!({
                                     "type": "input_image",
-                                    "image_url": image_url,
-                                    "detail": "auto"
+                                    "image_url": img_url,
+                                    "detail": img_detail
                                 }));
+                            } else if let Some(t) = extract_codex_text_part(p) {
+                                user_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
                             }
-                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_image") {
-                            user_parts.push(p.clone());
                         }
                     }
                 }
@@ -4328,6 +4405,146 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_to_codex_input_vision_preserves_custom_detail() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"Analyze high detail"}),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/high.png",
+                        "detail": "high"
+                    }
+                }),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/low.png",
+                        "detail": "low"
+                    }
+                }),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0]["type"], "input_text");
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "https://example.com/high.png");
+        assert_eq!(parts[1]["detail"], "high");
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/low.png");
+        assert_eq!(parts[2]["detail"], "low");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_string_image_url() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"String URL"}),
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/raw_string.jpg"}),
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/with_detail.jpg", "detail":"high"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "https://example.com/raw_string.jpg");
+        assert_eq!(parts[1]["detail"], "auto");
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/with_detail.jpg");
+        assert_eq!(parts[2]["detail"], "high");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_image_only_message() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":{"url":"https://example.com/only.png"}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "input_image");
+        assert_eq!(parts[0]["image_url"], "https://example.com/only.png");
+        assert_eq!(parts[0]["detail"], "auto");
+
+        // Image-only message with string image_url
+        let messages_str = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/string_only.png"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input_str, _) = openai_to_codex_input(&messages_str, None).unwrap();
+        let parts_str = input_str[0]["content"].as_array().unwrap();
+        assert_eq!(parts_str.len(), 1);
+        assert_eq!(parts_str[0]["type"], "input_image");
+        assert_eq!(
+            parts_str[0]["image_url"],
+            "https://example.com/string_only.png"
+        );
+        assert_eq!(parts_str[0]["detail"], "auto");
+
+        // Multiple images only (no text)
+        let messages_multi = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/img1.png"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"https://example.com/img2.png", "detail":"low"}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input_multi, _) = openai_to_codex_input(&messages_multi, None).unwrap();
+        let parts_multi = input_multi[0]["content"].as_array().unwrap();
+        assert_eq!(parts_multi.len(), 2);
+        assert_eq!(parts_multi[0]["type"], "input_image");
+        assert_eq!(parts_multi[0]["image_url"], "https://example.com/img1.png");
+        assert_eq!(parts_multi[0]["detail"], "auto");
+        assert_eq!(parts_multi[1]["type"], "input_image");
+        assert_eq!(parts_multi[1]["image_url"], "https://example.com/img2.png");
+        assert_eq!(parts_multi[1]["detail"], "low");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_variations() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                // Direct url field
+                serde_json::json!({"type":"image_url", "url":"https://example.com/direct_url.png", "detail":"high"}),
+                // Type image
+                serde_json::json!({"type":"image", "url":"https://example.com/type_image.png"}),
+                // Already input_image
+                serde_json::json!({"type":"input_image", "image_url":"https://example.com/native.png", "detail":"low"}),
+                // No type, image_url key
+                serde_json::json!({"image_url":"https://example.com/inferred.png"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0]["image_url"], "https://example.com/direct_url.png");
+        assert_eq!(parts[0]["detail"], "high");
+        assert_eq!(parts[1]["image_url"], "https://example.com/type_image.png");
+        assert_eq!(parts[1]["detail"], "auto");
+        assert_eq!(parts[2]["image_url"], "https://example.com/native.png");
+        assert_eq!(parts[2]["detail"], "low");
+        assert_eq!(parts[3]["image_url"], "https://example.com/inferred.png");
+        assert_eq!(parts[3]["detail"], "auto");
+    }
+
+    #[test]
     fn test_openai_to_codex_input_translation() {
         let messages = vec![
             ChatMessage::system("System instruction"),
@@ -4675,6 +4892,132 @@ mod tests {
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["text"], "Part A, ");
         assert_eq!(parts[1]["text"], "Part B");
+    }
+
+    #[test]
+    fn test_regression_codex_text_part_content_and_input_text_variants() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                serde_json::json!({"type": "text", "content": "Question from content"}),
+                serde_json::json!({"type": "text", "input_text": "Question from input_text"}),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": "https://example.com/target.png"
+                }),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["role"], "user");
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+
+        // Variant 1: type=text with content field must not convert to empty string
+        assert_eq!(parts[0]["type"], "input_text");
+        assert_eq!(parts[0]["text"], "Question from content");
+
+        // Variant 2: type=text with input_text field must not convert to empty string
+        assert_eq!(parts[1]["type"], "input_text");
+        assert_eq!(parts[1]["text"], "Question from input_text");
+
+        // Legitimate image part priority must be preserved alongside both variants
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/target.png");
+        assert_eq!(parts[2]["detail"], "auto");
+    }
+
+    #[test]
+    fn test_regression_codex_text_precedence_and_fallbacks() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                // text takes priority over content
+                serde_json::json!({"type": "text", "text": "preferred_text", "content": "ignored_content"}),
+                // text takes priority over input_text
+                serde_json::json!({"type": "text", "text": "preferred_text_2", "input_text": "ignored_input"}),
+                // input_text takes priority over content
+                serde_json::json!({"type": "text", "input_text": "preferred_input", "content": "ignored_content_2"}),
+                // non-empty content preferred over empty text
+                serde_json::json!({"type": "text", "text": "", "content": "non_empty_content"}),
+                // non-empty input_text preferred over empty text
+                serde_json::json!({"type": "text", "text": "", "input_text": "non_empty_input"}),
+                // untyped text object
+                serde_json::json!({"content": "untyped_content"}),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 6);
+        assert_eq!(parts[0]["text"], "preferred_text");
+        assert_eq!(parts[1]["text"], "preferred_text_2");
+        assert_eq!(parts[2]["text"], "preferred_input");
+        assert_eq!(parts[3]["text"], "non_empty_content");
+        assert_eq!(parts[4]["text"], "non_empty_input");
+        assert_eq!(parts[5]["text"], "untyped_content");
+    }
+
+    #[test]
+    fn test_regression_codex_preserves_legitimate_image_priority_with_text_fields() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                // Typed image with content caption
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": "https://example.com/typed_with_content.png",
+                    "content": "caption text that must not hijack image"
+                }),
+                // Untyped image with text field
+                serde_json::json!({
+                    "image_url": "https://example.com/untyped_with_text.png",
+                    "text": "label that must not hijack image"
+                }),
+                // Typed image with detail and input_text
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/detailed.png",
+                        "detail": "high"
+                    },
+                    "input_text": "metadata that must not hijack image"
+                }),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+
+        assert_eq!(parts[0]["type"], "input_image");
+        assert_eq!(
+            parts[0]["image_url"],
+            "https://example.com/typed_with_content.png"
+        );
+
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(
+            parts[1]["image_url"],
+            "https://example.com/untyped_with_text.png"
+        );
+
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/detailed.png");
+        assert_eq!(parts[2]["detail"], "high");
     }
 
     #[test]

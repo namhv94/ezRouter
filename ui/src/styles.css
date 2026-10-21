@@ -4053,7 +4053,7 @@ textarea:focus {
   grid-template-columns: minmax(130px, 0.72fr) minmax(38px, 0.38fr) minmax(140px, 0.78fr) minmax(52px, 0.52fr) minmax(260px, 1.55fr);
   align-items: center;
   gap: 0;
-  min-height: 220px;
+  min-height: 270px;
   padding: 24px 20px;
   overflow: visible;
   width: 100%;
@@ -4245,6 +4245,10 @@ textarea:focus {
   color: #38bdf8;
 }
 
+.pf-dot-cx-img {
+  color: #fb7185;
+}
+
 .pf-dot-ext {
   color: #34d399;
 }
@@ -4277,6 +4281,12 @@ textarea:focus {
   fill: #0ea5e9;
   stroke: #bae6fd;
   filter: drop-shadow(0 0 6px rgba(14, 165, 233, 0.8));
+}
+
+.pf-terminal-node.active-cx-img {
+  fill: #f43f5e;
+  stroke: #fecdd3;
+  filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.8));
 }
 
 .pf-terminal-node.active-ext {
@@ -4341,6 +4351,12 @@ textarea:focus {
   color: #38bdf8 !important;
 }
 
+.pf-icon-cx-img {
+  border-color: rgba(244, 63, 94, 0.3) !important;
+  background: rgba(244, 63, 94, 0.12) !important;
+  color: #fb7185 !important;
+}
+
 .pf-icon-ext {
   border-color: rgba(245, 158, 11, 0.3) !important;
   background: rgba(245, 158, 11, 0.12) !important;
@@ -4352,6 +4368,22 @@ textarea:focus {
   flex-direction: column;
   min-width: 0;
   text-align: left;
+}
+
+.pf-badge-image {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  background: rgba(244, 63, 94, 0.16);
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  color: #fb7185;
+  vertical-align: middle;
 }
 
 .pf-provider-state {
