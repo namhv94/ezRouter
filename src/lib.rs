@@ -231,6 +231,10 @@ pub fn app_router(state: AppState) -> Router {
             post(routes::admin::reset_account_cooldown),
         )
         .route(
+            "/admin/accounts/:id/toggle",
+            post(routes::admin::toggle_account),
+        )
+        .route(
             "/admin/accounts/:id/refresh-quota",
             post(routes::admin::refresh_account_quota),
         )

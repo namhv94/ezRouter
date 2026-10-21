@@ -9,6 +9,7 @@ import {
 } from '../types';
 import { api } from '../api';
 import { useI18n } from '../i18n';
+import { OperationalProvidersView, OperationalProviderTab } from './OperationalProvidersView';
 import {
   IconPlus,
   IconCheck,
@@ -44,6 +45,50 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   onRefresh,
 }) => {
   const { locale, t } = useI18n();
+
+  // Operational Theme & Segmented Nav State
+  const [operationalTab, setOperationalTab] = useState<OperationalProviderTab>('google');
+  const [isOperational, setIsOperational] = useState<boolean>(() => {
+    if (typeof document !== 'undefined') {
+      return document.documentElement.dataset.theme === 'operational';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const updateTheme = () => {
+      setIsOperational(document.documentElement.dataset.theme === 'operational');
+    };
+    updateTheme();
+
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === 'attributes' && (m.attributeName === 'data-theme' || m.attributeName === 'class')) {
+          updateTheme();
+        }
+      }
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'class'],
+    });
+
+    window.addEventListener('storage', updateTheme);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('storage', updateTheme);
+    };
+  }, []);
+
+  const handleSelectProviderTab = (tab: OperationalProviderTab) => {
+    setOperationalTab(tab);
+    if (!isOperational) {
+      document.getElementById(`provider-${tab}`)?.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   // Accordion drawer states
   const [showGoogleDetails, setShowGoogleDetails] = useState<boolean>(false);
   const [showCodexDetails, setShowCodexDetails] = useState<boolean>(false);
@@ -1204,6 +1249,14 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
     }
   };
 
+  const formatCooldown = (sec?: number | null) => {
+    if (sec == null || sec <= 0) return null;
+    const s = Math.ceil(sec);
+    if (s <= 60) return `${s}s`;
+    const m = Math.ceil(s / 60);
+    return `${m}m`;
+  };
+
   const getCodexQuotaNumbers = (acc: CodexAccountRecord) => {
     if (!acc.quota || Object.keys(acc.quota).length === 0) {
       return {
@@ -1409,7 +1462,15 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               strokeDasharray={circumference}
               strokeDashoffset={percent === null ? circumference : offset}
               strokeLinecap="round"
-              className="health-ring-meter"
+              className={`health-ring-meter ${
+                percent === null
+                  ? 'meter-empty'
+                  : validPct >= 50
+                  ? 'meter-good'
+                  : validPct >= 20
+                  ? 'meter-warn'
+                  : 'meter-bad'
+              }`}
               style={{
                 '--ring-circumference': `${circumference}px`,
                 '--target-offset': `${percent === null ? circumference : offset}px`,
@@ -1497,131 +1558,168 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
   return (
     <div className="providers-view-container">
-      {/* 1. COMPACT HEADER */}
-      <div className="providers-compact-header">
-        <div className="providers-header-info">
-          <h2 className="providers-header-title">
-            <span>{t('providers.headerTitle')}</span>
-          </h2>
-          <span className="providers-header-sub">
-            {t('providers.headerSub')}
-          </span>
-        </div>
-        <div className="section-actions">
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              onRefresh();
-              loadCodexData();
-            }}
-            disabled={actionLoading || parentLoading || codexLoading}
-            title={t('providers.refreshTitle')}
-          >
-            <IconRefresh size={15} />
-            <span>{t('providers.refreshBtn')}</span>
-          </button>
-        </div>
-      </div>
+      {/* 0. OPERATIONAL-ONLY CONSOLE VIEW (TOOLBAR + SEGMENTED NAV + FOCUS SUMMARY) */}
+      {isOperational && (
+        <OperationalProvidersView
+          activeTab={operationalTab}
+          onSelectTab={setOperationalTab}
+          onFullRefresh={() => {
+            onRefresh();
+            loadCodexData();
+          }}
+          fullRefreshLoading={actionLoading || parentLoading || codexLoading}
+          quotaRefresh={quotaRefresh}
+          quotaRefreshLoading={quotaRefreshLoading}
+          onChangeRefreshInterval={handleChangeRefreshInterval}
+          onToggleAutoRefresh={handleToggleAutoRefresh}
+          onManualRunRefresh={handleManualRunRefresh}
+          formatTimestamp={formatTimestamp}
+          formatCountdown={formatCountdown}
+          googleActiveCount={googleActiveCount}
+          googleTotalCount={accounts.length}
+          googleQuotaAvg={googleQuotaAvg}
+          googleStatus={googleStopState.status}
+          codexActiveCount={codexActiveCount}
+          codexTotalCount={codexTotalCount}
+          codexPrimaryAvg={codexPrimaryAvg}
+          codexStatus={codexStopState.status}
+          openrouterModelCount={openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0}
+          openrouterBalance={typeof openrouterCredits?.total_credits === 'number' ? `$${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}` : null}
+          openrouterActive={!!openrouterProv?.is_active}
+          upstreamActiveCount={otherProviders.filter((p) => p.is_active).length}
+          upstreamTotalCount={otherProviders.length}
+        />
+      )}
 
-      {/* 2. UNIFIED HORIZONTAL STATUS STRIP (3-SECOND SCAN) */}
-      <div className="status-legend-bar">
-        <div className="route-pulse-wrapper">
-          <span
-            className={`route-pulse-dot ${
-              totalActivePools === 0 ? (totalCooling > 0 ? 'cooldown' : 'error') : ''
-            }`}
-          />
-          <span>
-            {totalActivePools > 0
-              ? t('providers.routingReady')
-              : totalCooling > 0
-              ? t('providers.waitingCooldown')
-              : t('providers.noActiveAccounts')}
-          </span>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>
-            {t('providers.readyCount', {
-              active: googleActiveCount + codexActiveCount,
-              total: accounts.length + codexTotalCount,
-            })}
-          </span>
-        </div>
-
-        <div className="status-strip-chips">
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-google')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToGoogle')}
-          >
-            <IconGoogle size={14} />
-            <span>
-              Google: <strong>{googleActiveCount}/{accounts.length}</strong>
-              {googleQuotaAvg !== null && ` • ${googleQuotaAvg}%`}
+      {/* 1. LEGACY COMPACT HEADER */}
+      {!isOperational && (
+        <div className="providers-compact-header">
+          <div className="providers-header-info">
+            <h2 className="providers-header-title">
+              <span>{t('providers.headerTitle')}</span>
+            </h2>
+            <span className="providers-header-sub">
+              {t('providers.headerSub')}
             </span>
-            <span className={`status-dot-mini ${googleStopState.status}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-codex')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToCodex')}
-          >
-            <IconOpenAI size={14} />
-            <span>
-              Codex: <strong>{codexActiveCount}/{codexTotalCount}</strong>
-              {codexPrimaryAvg !== null && ` • ${codexPrimaryAvg}%`}
-            </span>
-            <span className={`status-dot-mini ${codexStopState.status}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-openrouter')?.scrollIntoView({ behavior: 'smooth' })}
-            title="Cuộn tới OpenRouter"
-          >
-            <IconOpenRouter size={14} />
-            <span>
-              OpenRouter: <strong>{openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0} models</strong>
-              {typeof openrouterCredits?.total_credits === 'number' && ` • $${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}`}
-            </span>
-            <span className={`status-dot-mini ${openrouterProv?.is_active ? 'active' : 'neutral'}`} />
-          </button>
-
-          <button
-            type="button"
-            className="status-segment-chip"
-            onClick={() => document.getElementById('provider-upstream')?.scrollIntoView({ behavior: 'smooth' })}
-            title={t('providers.scrollToUpstream')}
-          >
-            <IconServer size={14} />
-            <span>
-              Upstream: <strong>{otherProviders.filter((p) => p.is_active).length}/{otherProviders.length}</strong>
-            </span>
-            <span className="status-dot-mini active" />
-          </button>
+          </div>
+          <div className="section-actions">
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                onRefresh();
+                loadCodexData();
+              }}
+              disabled={actionLoading || parentLoading || codexLoading}
+              title={t('providers.refreshTitle')}
+            >
+              <IconRefresh size={15} />
+              <span>{t('providers.refreshBtn')}</span>
+            </button>
+          </div>
         </div>
+      )}
 
-        <div className="status-legend-items">
-          <span className="status-legend-item">
-            <span className="status-dot-mini active" />
-            <span>{t('providers.legendActive')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini cooldown" />
-            <span>{t('providers.legendCooldown')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini stopped" />
-            <span>{t('providers.legendStopped')}</span>
-          </span>
-          <span className="status-legend-item">
-            <span className="status-dot-mini neutral" />
-            <span>{t('providers.legendDisabled')}</span>
-          </span>
+      {/* 2. LEGACY UNIFIED HORIZONTAL STATUS STRIP (3-SECOND SCAN) */}
+      {!isOperational && (
+        <div className="status-legend-bar">
+          <div className="route-pulse-wrapper">
+            <span
+              className={`route-pulse-dot ${
+                totalActivePools === 0 ? (totalCooling > 0 ? 'cooldown' : 'error') : ''
+              }`}
+            />
+            <span>
+              {totalActivePools > 0
+                ? t('providers.routingReady')
+                : totalCooling > 0
+                ? t('providers.waitingCooldown')
+                : t('providers.noActiveAccounts')}
+            </span>
+            <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: 11.5, marginLeft: 4 }}>
+              {t('providers.readyCount', {
+                active: googleActiveCount + codexActiveCount,
+                total: accounts.length + codexTotalCount,
+              })}
+            </span>
+          </div>
+
+          <div className="status-strip-chips">
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('google')}
+              title={t('providers.scrollToGoogle')}
+            >
+              <IconGoogle size={14} />
+              <span>
+                Google: <strong>{googleActiveCount}/{accounts.length}</strong>
+                {googleQuotaAvg !== null && ` • ${googleQuotaAvg}%`}
+              </span>
+              <span className={`status-dot-mini ${googleStopState.status}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('codex')}
+              title={t('providers.scrollToCodex')}
+            >
+              <IconOpenAI size={14} />
+              <span>
+                Codex: <strong>{codexActiveCount}/{codexTotalCount}</strong>
+                {codexPrimaryAvg !== null && ` • ${codexPrimaryAvg}%`}
+              </span>
+              <span className={`status-dot-mini ${codexStopState.status}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('openrouter')}
+              title="Cuộn tới OpenRouter"
+            >
+              <IconOpenRouter size={14} />
+              <span>
+                OpenRouter: <strong>{openrouterProv && Array.isArray(openrouterProv.models) ? openrouterProv.models.length : 0} models</strong>
+                {typeof openrouterCredits?.total_credits === 'number' && ` • $${((openrouterCredits.total_credits || 0) - (openrouterCredits.total_usage || 0)).toFixed(2)}`}
+              </span>
+              <span className={`status-dot-mini ${openrouterProv?.is_active ? 'active' : 'neutral'}`} />
+            </button>
+
+            <button
+              type="button"
+              className="status-segment-chip"
+              onClick={() => handleSelectProviderTab('upstream')}
+              title={t('providers.scrollToUpstream')}
+            >
+              <IconServer size={14} />
+              <span>
+                Upstream: <strong>{otherProviders.filter((p) => p.is_active).length}/{otherProviders.length}</strong>
+              </span>
+              <span className="status-dot-mini active" />
+            </button>
+          </div>
+
+          <div className="status-legend-items">
+            <span className="status-legend-item">
+              <span className="status-dot-mini active" />
+              <span>{t('providers.legendActive')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini cooldown" />
+              <span>{t('providers.legendCooldown')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini stopped" />
+              <span>{t('providers.legendStopped')}</span>
+            </span>
+            <span className="status-legend-item">
+              <span className="status-dot-mini neutral" />
+              <span>{t('providers.legendDisabled')}</span>
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Alerts */}
       {actionMessage && (
@@ -1651,84 +1749,86 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         </div>
       )}
 
-      {/* Auto Quota Refresh Panel - Gọn Gàng Hơn */}
-      <div className="auto-quota-compact-strip">
-        <div className="auto-quota-strip-left">
-          <div className="auto-quota-icon-badge">
-            <IconRefresh size={15} className={quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+      {/* Auto Quota Refresh Panel - Legacy Mode only */}
+      {!isOperational && (
+        <div className="auto-quota-compact-strip">
+          <div className="auto-quota-strip-left">
+            <div className="auto-quota-icon-badge">
+              <IconRefresh size={15} className={quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+            </div>
+            <div className="auto-quota-strip-title-wrap">
+              <span className="auto-quota-strip-title">{t('providers.autoRefreshTitle')}</span>
+              <span className="auto-quota-strip-meta">
+                {quotaRefresh?.is_refreshing ? (
+                  <span className="highlight-refreshing">{t('providers.autoRefreshRefreshing')}</span>
+                ) : quotaRefresh?.enabled ? (
+                  <>
+                    <span>{t('providers.autoRefreshLast', { time: formatTimestamp(quotaRefresh?.last_refresh ?? null) })}</span>
+                    <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>•</span>
+                    <span>{t('providers.autoRefreshNext', { time: formatCountdown(quotaRefresh?.next_refresh ?? null) })}</span>
+                  </>
+                ) : (
+                  <span style={{ color: 'var(--text-muted)' }}>{t('providers.autoRefreshDisabled')}</span>
+                )}
+              </span>
+            </div>
           </div>
-          <div className="auto-quota-strip-title-wrap">
-            <span className="auto-quota-strip-title">{t('providers.autoRefreshTitle')}</span>
-            <span className="auto-quota-strip-meta">
-              {quotaRefresh?.is_refreshing ? (
-                <span className="highlight-refreshing">{t('providers.autoRefreshRefreshing')}</span>
-              ) : quotaRefresh?.enabled ? (
-                <>
-                  <span>{t('providers.autoRefreshLast', { time: formatTimestamp(quotaRefresh?.last_refresh ?? null) })}</span>
-                  <span style={{ margin: '0 4px', color: 'var(--text-muted)' }}>•</span>
-                  <span>{t('providers.autoRefreshNext', { time: formatCountdown(quotaRefresh?.next_refresh ?? null) })}</span>
-                </>
-              ) : (
-                <span style={{ color: 'var(--text-muted)' }}>{t('providers.autoRefreshDisabled')}</span>
-              )}
-            </span>
+
+          <div className="auto-quota-strip-right">
+            <div className="auto-quota-interval-group" role="radiogroup" aria-label={t('providers.toggleAutoRefreshAria')}>
+              {[
+                { label: '1m', val: 60, title: t('providers.interval1m') },
+                { label: '5m', val: 300, title: t('providers.interval5m') },
+                { label: '15m', val: 900, title: t('providers.interval15m') },
+                { label: '30m', val: 1800, title: t('providers.interval30m') },
+              ].map(({ label, val, title }) => (
+                <button
+                  key={val}
+                  type="button"
+                  title={title}
+                  className={`interval-pill-btn ${quotaRefresh?.interval_secs === val ? 'active' : ''}`}
+                  onClick={() => handleChangeRefreshInterval(val)}
+                  disabled={quotaRefreshLoading}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className={`auto-quota-toggle-btn ${quotaRefresh?.enabled ? 'enabled' : 'disabled'}`}
+              onClick={handleToggleAutoRefresh}
+              disabled={quotaRefreshLoading}
+              aria-pressed={quotaRefresh?.enabled}
+              title={quotaRefresh?.enabled ? t('providers.turnOffAutoRefresh') : t('providers.turnOnAutoRefresh')}
+            >
+              <span className="toggle-switch-track">
+                <span className="toggle-switch-thumb" />
+              </span>
+              <span className="toggle-switch-text">{quotaRefresh?.enabled ? t('providers.toggleOn') : t('providers.toggleOff')}</span>
+            </button>
+
+            <button
+              type="button"
+              className="action-icon-btn primary manual-refresh-btn"
+              onClick={handleManualRunRefresh}
+              disabled={quotaRefreshLoading || quotaRefresh?.is_refreshing}
+              title={t('providers.manualRefreshTitle')}
+            >
+              <IconRefresh size={13} className={quotaRefreshLoading || quotaRefresh?.is_refreshing ? 'spinner' : ''} />
+              <span>{t('providers.manualRefreshBtn')}</span>
+            </button>
           </div>
+
+          {quotaRefresh?.last_error && (
+            <div className="auto-quota-error-notice" style={{ width: '100%', marginTop: 4 }}>
+              <IconAlertCircle size={14} />
+              <span>{t('providers.lastRefreshNotice', { error: quotaRefresh.last_error })}</span>
+            </div>
+          )}
         </div>
-
-        <div className="auto-quota-strip-right">
-          <div className="auto-quota-interval-group" role="radiogroup" aria-label={t('providers.toggleAutoRefreshAria')}>
-            {[
-              { label: '1m', val: 60, title: t('providers.interval1m') },
-              { label: '5m', val: 300, title: t('providers.interval5m') },
-              { label: '15m', val: 900, title: t('providers.interval15m') },
-              { label: '30m', val: 1800, title: t('providers.interval30m') },
-            ].map(({ label, val, title }) => (
-              <button
-                key={val}
-                type="button"
-                title={title}
-                className={`interval-pill-btn ${quotaRefresh?.interval_secs === val ? 'active' : ''}`}
-                onClick={() => handleChangeRefreshInterval(val)}
-                disabled={quotaRefreshLoading}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className={`auto-quota-toggle-btn ${quotaRefresh?.enabled ? 'enabled' : 'disabled'}`}
-            onClick={handleToggleAutoRefresh}
-            disabled={quotaRefreshLoading}
-            aria-pressed={quotaRefresh?.enabled}
-            title={quotaRefresh?.enabled ? t('providers.turnOffAutoRefresh') : t('providers.turnOnAutoRefresh')}
-          >
-            <span className="toggle-switch-track">
-              <span className="toggle-switch-thumb" />
-            </span>
-            <span className="toggle-switch-text">{quotaRefresh?.enabled ? t('providers.toggleOn') : t('providers.toggleOff')}</span>
-          </button>
-
-          <button
-            type="button"
-            className="action-icon-btn primary manual-refresh-btn"
-            onClick={handleManualRunRefresh}
-            disabled={quotaRefreshLoading || quotaRefresh?.is_refreshing}
-            title={t('providers.manualRefreshTitle')}
-          >
-            <IconRefresh size={13} className={quotaRefreshLoading || quotaRefresh?.is_refreshing ? 'spinner' : ''} />
-            <span>{t('providers.manualRefreshBtn')}</span>
-          </button>
-        </div>
-
-        {quotaRefresh?.last_error && (
-          <div className="auto-quota-error-notice" style={{ width: '100%', marginTop: 4 }}>
-            <IconAlertCircle size={14} />
-            <span>{t('providers.lastRefreshNotice', { error: quotaRefresh.last_error })}</span>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Loading Skeleton */}
       {parentLoading && accounts.length === 0 && (
@@ -1744,7 +1844,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       {/* TẤT CẢ PROVIDERS ĐƯỢC HIỂN THỊ ĐỒNG THỜI (KHÔNG CẦN CHIA TAB) */}
       <div className="provider-segment-container">
         {/* CARD 1: GOOGLE ANTIGRAVITY */}
-        <div id="provider-google" className="visual-card">
+        <div
+          id="provider-google"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'google' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-google' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">
@@ -1792,7 +1897,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{/* Gemini 5h: */}{t('providers.quotaGemini5h')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (gemini5hAvg ?? 0) < 20
+                        ? 'micro-bar-bad'
+                        : (gemini5hAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${gemini5hAvg ?? 0}%`,
                       background:
@@ -1812,7 +1923,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span className="micro-bar-label">{/* Gemini Tuần: */}{t('providers.quotaGeminiWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
-                      className="micro-bar-fill"
+                      className={`micro-bar-fill ${
+                        geminiWeeklyAvg < 20
+                          ? 'micro-bar-bad'
+                          : geminiWeeklyAvg < 50
+                          ? 'micro-bar-warn'
+                          : 'micro-bar-good'
+                      }`}
                       style={{
                         width: `${geminiWeeklyAvg}%`,
                         background:
@@ -1832,7 +1949,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaClaude5h')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (claude5hAvg ?? 0) < 20
+                        ? 'micro-bar-bad'
+                        : (claude5hAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${claude5hAvg ?? 0}%`,
                       background:
@@ -1852,7 +1975,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span className="micro-bar-label">{t('providers.quotaClaudeWeekly')}:</span>
                   <div className="micro-bar-track">
                     <div
-                      className="micro-bar-fill"
+                      className={`micro-bar-fill ${
+                        claudeWeeklyAvg < 20
+                          ? 'micro-bar-bad'
+                          : claudeWeeklyAvg < 50
+                          ? 'micro-bar-warn'
+                          : 'micro-bar-good'
+                      }`}
                       style={{
                         width: `${claudeWeeklyAvg}%`,
                         background:
@@ -1908,7 +2037,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowGoogleDetails(!showGoogleDetails)}
                 aria-expanded={showGoogleDetails}
                 aria-controls="google-details-drawer"
@@ -1959,7 +2087,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           const isCooling = acc.cooldown_remaining > 0;
                           return (
                             <tr key={acc.id}>
-                              <td>
+                              <td data-label={t('providers.thAccount')}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                                   <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                     {acc.email}
@@ -1970,21 +2098,24 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   id: {acc.id.slice(0, 8)}...
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
                                   {acc.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thCooldown')}>
                                 {isCooling ? (
-                                  <span className="badge badge-warning font-mono">
-                                    {Math.ceil(acc.cooldown_remaining)}s
+                                  <span
+                                    className="badge badge-warning font-mono"
+                                    title={acc.cooldown_remaining > 60 ? `${Math.ceil(acc.cooldown_remaining)}s` : undefined}
+                                  >
+                                    {formatCooldown(acc.cooldown_remaining)}
                                   </span>
                                 ) : (
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thQuotaRemaining')}>
                                 {acc.quota && (acc.quota.gemini_5h || acc.quota.claude_5h || acc.quota.gemini_weekly || acc.quota.claude_weekly) ? (
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                     {acc.quota.gemini_5h && (
@@ -2045,7 +2176,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm"
@@ -2087,7 +2218,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           </div>
 
         {/* CARD 2: OPENAI CODEX */}
-        <div id="provider-codex" className="visual-card">
+        <div
+          id="provider-codex"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'codex' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-codex' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">
@@ -2135,7 +2271,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaCodexPrimary')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (codexPrimaryAvg ?? 0) <= 2
+                        ? 'micro-bar-bad'
+                        : (codexPrimaryAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${codexPrimaryAvg ?? 0}%`,
                       background:
@@ -2154,7 +2296,13 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 <span className="micro-bar-label">{t('providers.quotaCodexWeekly')}:</span>
                 <div className="micro-bar-track">
                   <div
-                    className="micro-bar-fill"
+                    className={`micro-bar-fill ${
+                      (codexWeeklyAvg ?? 0) <= 2
+                        ? 'micro-bar-bad'
+                        : (codexWeeklyAvg ?? 0) < 50
+                        ? 'micro-bar-warn'
+                        : 'micro-bar-good'
+                    }`}
                     style={{
                       width: `${codexWeeklyAvg ?? 0}%`,
                       background:
@@ -2209,7 +2357,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowCodexDetails(!showCodexDetails)}
                 aria-expanded={showCodexDetails}
                 aria-controls="codex-details-drawer"
@@ -2262,7 +2409,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           const q = getCodexQuotaNumbers(acc);
                           return (
                             <tr key={acc.id}>
-                              <td>
+                              <td data-label={t('providers.thAccount')}>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                                   {acc.email || t('providers.accountUndefined')}
                                 </div>
@@ -2270,21 +2417,24 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   id: {acc.id.slice(0, 8)}...
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${isActiveAcc ? 'badge-success' : 'badge-neutral'}`}>
                                   {isActiveAcc ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thCooldown')}>
                                 {isCooling ? (
-                                  <span className="badge badge-warning font-mono">
-                                    {Math.ceil(acc.cooldown_remaining || 0)}s
+                                  <span
+                                    className="badge badge-warning font-mono"
+                                    title={(acc.cooldown_remaining ?? 0) > 60 ? `${Math.ceil(acc.cooldown_remaining || 0)}s` : undefined}
+                                  >
+                                    {formatCooldown(acc.cooldown_remaining)}
                                   </span>
                                 ) : (
                                   <span className="badge badge-success">{t('providers.statusReady')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thLimit')}>
                                 {q.primaryRemaining !== null ? (
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 3 }}>
                                     <div>
@@ -2342,7 +2492,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('providers.quotaNotLoaded')}</span>
                                 )}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm"
@@ -2383,7 +2533,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           </div>
 
         {/* CARD 3: OPENROUTER FIRST-CLASS PROVIDER */}
-        <div id="provider-openrouter" className="visual-card">
+        <div
+          id="provider-openrouter"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'openrouter' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-openrouter' : undefined}
+        >
           {/* Header */}
           <div className="visual-card-header">
             <div className="visual-brand-group">
@@ -2428,6 +2583,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
           <div className="visual-metrics-row">
             {/* Balance Card */}
             <div
+              className="openrouter-balance-card"
               style={{
                 flex: 1,
                 minWidth: 220,
@@ -2456,7 +2612,10 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   <span>{openrouterCreditsLoading ? 'Đang tải...' : 'Làm mới'}</span>
                 </button>
               </div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: (openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? '#f59e0b' : '#10b981' }}>
+              <div
+                className={`openrouter-balance-val ${(openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? 'balance-warn' : 'balance-good'}`}
+                style={{ fontSize: 24, fontWeight: 700, color: (openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.05) ? '#f59e0b' : '#10b981' }}
+              >
                 {openrouterCredits && typeof openrouterCredits.total_credits === 'number'
                   ? `$${Math.max(0, openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)).toFixed(2)}`
                   : openrouterCreditsLoading
@@ -2476,7 +2635,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               </div>
               {openrouterCredits && typeof openrouterCredits.total_credits === 'number' && (openrouterCredits.total_credits - (openrouterCredits.total_usage || 0)) <= 0.01 && (
                 <div style={{ marginTop: 4 }}>
-                  <span className="badge badge-warning" style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                  <span className="badge badge-warning openrouter-low-balance-badge" style={{ fontSize: 10, padding: '1px 6px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
                     ⚡ Số dư: $0.00 (Chỉ dùng được model :free, cần nạp thêm để dùng model trả phí)
                   </span>
                 </div>
@@ -2556,7 +2715,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
             <button
               className="details-toggle-btn"
-              style={{ width: 'auto' }}
               onClick={() => setShowOpenRouterDetails(!showOpenRouterDetails)}
               aria-expanded={showOpenRouterDetails}
             >
@@ -2630,7 +2788,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                         fontSize: 12.5,
                       }}
                     >
-                      <span className="badge badge-neutral" style={{ fontSize: 10, padding: '1px 5px', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
+                      <span className="badge badge-neutral openrouter-model-badge" style={{ fontSize: 10, padding: '1px 5px', color: '#818cf8', borderColor: 'rgba(99, 102, 241, 0.3)' }}>
                         OR
                       </span>
                       <span className="font-mono" style={{ fontWeight: 600 }}>
@@ -2660,7 +2818,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
         </div>
 
         {/* CARD 4: UPSTREAM CUSTOM PROVIDERS */}
-        <div id="provider-upstream" className="visual-card">
+        <div
+          id="provider-upstream"
+          className={`visual-card op-provider-panel ${isOperational && operationalTab !== 'upstream' ? 'op-hidden' : ''}`}
+          role={isOperational ? 'tabpanel' : undefined}
+          aria-labelledby={isOperational ? 'op-tab-upstream' : undefined}
+        >
             {/* Header */}
             <div className="visual-card-header">
               <div className="visual-brand-group">
@@ -2720,7 +2883,6 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
               <button
                 className="details-toggle-btn"
-                style={{ width: 'auto' }}
                 onClick={() => setShowUpstreamDetails(!showUpstreamDetails)}
                 aria-expanded={showUpstreamDetails}
                 aria-controls="upstream-details-drawer"
@@ -2774,34 +2936,34 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                             : [];
                           return (
                             <tr key={p.id}>
-                              <td>
+                              <td data-label={t('providers.thNamePrefix')}>
                                 <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{p.name}</div>
                                 <span className="badge badge-neutral font-mono" style={{ fontSize: 10, marginTop: 2 }}>
                                   {p.prefix}/*
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thType')}>
                                 <span className="badge badge-neutral">{p.type}</span>
                               </td>
-                              <td className="font-mono text-break" style={{ fontSize: 12, maxWidth: 180 }}>
+                              <td data-label={t('providers.thBaseUrl')} className="font-mono text-break" style={{ fontSize: 12, maxWidth: 180 }}>
                                 {p.base_url}
                               </td>
-                              <td>
+                              <td data-label={t('providers.thApiKey')}>
                                 <span className="font-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                                   {p.api_key ? '••••••••' : t('providers.emptyValue')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thModels')}>
                                 <span className="badge badge-neutral" style={{ fontSize: 10 }}>
                                   {modelsArr.length > 0 ? t('providers.modelsCount', { count: modelsArr.length }) : t('providers.modelsDefault')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thStatus')}>
                                 <span className={`badge ${p.is_active ? 'badge-success' : 'badge-neutral'}`}>
                                   {p.is_active ? t('providers.statusOn') : t('providers.statusOff')}
                                 </span>
                               </td>
-                              <td>
+                              <td data-label={t('providers.thActions')}>
                                 <div className="table-actions">
                                   <button
                                     className="btn btn-secondary btn-sm btn-icon-only"
@@ -3395,7 +3557,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   href="https://openrouter.ai/settings/keys"
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: 'var(--primary)', textDecoration: 'underline' }}
+                  style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }}
                 >
                   openrouter.ai/settings/keys
                 </a>
@@ -3470,7 +3632,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                   </button>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Đã chọn: <strong style={{ color: 'var(--primary)' }}>{selectedOpenRouterModels.length}</strong> model
+                  Đã chọn: <strong style={{ color: 'var(--accent-primary)' }}>{selectedOpenRouterModels.length}</strong> model
                 </span>
               </div>
 
@@ -3549,7 +3711,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                               }}
                             />
                             <div>
-                              <div className="font-mono" style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#818cf8' : 'var(--text-primary)' }}>
+                              <div className={`font-mono openrouter-picker-model ${isSelected ? 'is-selected' : ''}`} style={{ fontSize: 13, fontWeight: isSelected ? 600 : 500, color: isSelected ? '#818cf8' : 'var(--text-primary)' }}>
                                 openrouter/{m.id}
                               </div>
                               {m.name && m.name !== m.id && (
@@ -3671,7 +3833,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <div
                 style={{
                   background: 'var(--bg-card)',
-                  border: '1px solid var(--border-color)',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   padding: 12,
                   display: 'flex',
@@ -3705,7 +3867,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           </span>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-color)', paddingTop: 6, marginTop: 4 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 6, marginTop: 4 }}>
                         <span style={{ color: 'var(--text-muted)' }}>{t('providers.thQuotaLimit')}:</span>
                         <span className="badge badge-info font-mono">
                           🎟️ {t('providers.modalResetCreditAvailable', { count: q.availableTickets })}
@@ -3736,8 +3898,8 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                           gap: 8,
                           padding: 8,
                           borderRadius: 6,
-                          border: selectedCreditId === c.id ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                          background: selectedCreditId === c.id ? 'var(--primary-subtle, rgba(59, 130, 246, 0.08))' : 'var(--bg-card)',
+                          border: selectedCreditId === c.id ? '1px solid var(--accent-primary)' : '1px solid var(--border)',
+                          background: selectedCreditId === c.id ? 'var(--success-bg, rgba(16, 185, 129, 0.08))' : 'var(--bg-card)',
                           cursor: 'pointer',
                         }}
                       >
@@ -3756,7 +3918,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                             {c.description || 'Rate limit reset'}
                           </span>
                           {c.expires_at && (
-                            <span style={{ fontSize: 11, color: 'var(--text-warning, #f59e0b)' }}>
+                            <span className="reset-ticket-expiry" style={{ fontSize: 11, color: 'var(--text-warning, #f59e0b)' }}>
                               {t('providers.modalResetCreditExpires', { date: new Date(c.expires_at).toLocaleDateString() })}
                             </span>
                           )}

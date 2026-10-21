@@ -216,6 +216,7 @@ export interface AccountResponse {
   quota: any;
   plan_tier?: string;
   plan_name?: string;
+  auto_disabled_quota?: boolean;
 }
 
 export interface ListAccountsResponse {

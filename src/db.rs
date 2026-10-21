@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -252,6 +252,8 @@ pub struct AccountRecord {
     pub error_count: i64,
     pub last_error: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub auto_disabled_quota: bool,
 }
 
 impl std::fmt::Debug for AccountRecord {
@@ -330,7 +332,7 @@ impl Database {
     }
 
     fn init_connection(
-        conn: Connection,
+        mut conn: Connection,
         default_key: Option<&str>,
     ) -> Result<Self, rusqlite::Error> {
         conn.busy_timeout(Duration::from_secs(10))?;
@@ -400,7 +402,8 @@ impl Database {
                      total_requests INTEGER DEFAULT 0,
                      error_count INTEGER DEFAULT 0,
                      last_error TEXT,
-                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                     auto_disabled_quota INTEGER DEFAULT 0
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
                  CREATE INDEX IF NOT EXISTS idx_accounts_is_active ON accounts(is_active);
@@ -506,7 +509,8 @@ impl Database {
                      total_requests INTEGER DEFAULT 0,
                      error_count INTEGER DEFAULT 0,
                      last_error TEXT,
-                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                     auto_disabled_quota INTEGER DEFAULT 0
                  );
                  CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email);
                  CREATE INDEX IF NOT EXISTS idx_accounts_is_active ON accounts(is_active);
@@ -547,6 +551,135 @@ impl Database {
             // Existing installations treated every active API key as trusted. Preserve that
             // behavior during the one-time schema migration; newly created keys default client.
             let _ = conn.execute("UPDATE api_keys SET role = 'admin'", []);
+        }
+
+        let _ = conn.execute(
+            "ALTER TABLE accounts ADD COLUMN auto_disabled_quota INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
+        let mut backfilled = false;
+        for attempt in 0..15 {
+            let backfill_res = (|| -> Result<(), rusqlite::Error> {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+                // Atomic DDL + backfill within a single immediate transaction
+                tx.execute_batch(
+                    "CREATE TABLE IF NOT EXISTS request_usage_totals (
+                         id INTEGER PRIMARY KEY CHECK (id = 1),
+                         total_requests INTEGER NOT NULL DEFAULT 0,
+                         prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                         completion_tokens INTEGER NOT NULL DEFAULT 0,
+                         total_duration_ms REAL NOT NULL DEFAULT 0.0,
+                         duration_count INTEGER NOT NULL DEFAULT 0,
+                         error_count INTEGER NOT NULL DEFAULT 0,
+                         quota_count INTEGER NOT NULL DEFAULT 0
+                     );
+                     CREATE TABLE IF NOT EXISTS model_usage_totals (
+                         model TEXT PRIMARY KEY,
+                         total_requests INTEGER NOT NULL DEFAULT 0,
+                         ok_count INTEGER NOT NULL DEFAULT 0,
+                         error_count INTEGER NOT NULL DEFAULT 0,
+                         quota_count INTEGER NOT NULL DEFAULT 0,
+                         prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                         completion_tokens INTEGER NOT NULL DEFAULT 0,
+                         total_duration_ms REAL NOT NULL DEFAULT 0.0,
+                         duration_count INTEGER NOT NULL DEFAULT 0
+                     );",
+                )?;
+
+                let _ = tx.execute(
+                    "ALTER TABLE request_usage_totals ADD COLUMN duration_count INTEGER NOT NULL DEFAULT 0",
+                    [],
+                );
+                let _ = tx.execute(
+                    "ALTER TABLE model_usage_totals ADD COLUMN duration_count INTEGER NOT NULL DEFAULT 0",
+                    [],
+                );
+
+                let req_row_exists: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM request_usage_totals WHERE id = 1)",
+                    [],
+                    |row| row.get(0),
+                )?;
+
+                if !req_row_exists {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                         SELECT 1, COUNT(*),
+                                COALESCE(SUM(CASE WHEN prompt_tokens > 0 THEN prompt_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN completion_tokens > 0 THEN completion_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN duration_ms > 0.0 THEN duration_ms ELSE 0.0 END), 0.0),
+                                COUNT(duration_ms),
+                                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0)
+                         FROM request_log",
+                        [],
+                    )?;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                         VALUES (1, 0, 0, 0, 0.0, 0, 0, 0)",
+                        [],
+                    )?;
+                }
+
+                let model_initialized: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM settings WHERE key = 'model_totals_initialized')",
+                    [],
+                    |row| row.get(0),
+                )?;
+
+                if !model_initialized {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO model_usage_totals (model, total_requests, ok_count, error_count, quota_count, prompt_tokens, completion_tokens, total_duration_ms, duration_count)
+                         SELECT model,
+                                COUNT(*),
+                                COALESCE(SUM(CASE WHEN status IN ('ok', 'success', 'completed') THEN 1 ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN prompt_tokens > 0 THEN prompt_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN completion_tokens > 0 THEN completion_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN duration_ms > 0.0 THEN duration_ms ELSE 0.0 END), 0.0),
+                                COUNT(duration_ms)
+                         FROM request_log
+                         WHERE model IS NOT NULL AND model != ''
+                         GROUP BY model",
+                        [],
+                    )?;
+                }
+
+                tx.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('request_totals_initialized', 'true')",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES ('model_totals_initialized', 'true')",
+                    [],
+                )?;
+
+                tx.commit()?;
+                Ok(())
+            })();
+
+            match backfill_res {
+                Ok(()) => {
+                    backfilled = true;
+                    break;
+                }
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::DatabaseBusy
+                        || e.code == rusqlite::ErrorCode::DatabaseLocked =>
+                {
+                    std::thread::sleep(Duration::from_millis(20 * (attempt + 1)));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        if !backfilled {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                Some("request totals backfill remained busy".to_string()),
+            ));
         }
 
         if let Some(raw_key) = default_key {
@@ -766,7 +899,9 @@ impl Database {
         duration_ms: f64,
         error: Option<&str>,
     ) -> Result<i64, rusqlite::Error> {
-        let conn = self.lock_conn()?;
+        let mut conn = self.lock_conn()?;
+        let prompt_tokens = prompt_tokens.max(0);
+        let completion_tokens = completion_tokens.max(0);
         let duration_ms = duration_ms.max(0.0);
         let truncated_err = error.map(|e| {
             if e.len() > 500 {
@@ -779,7 +914,9 @@ impl Database {
             }
         });
 
-        conn.execute(
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        tx.execute(
             "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
@@ -794,7 +931,62 @@ impl Database {
             ],
         )?;
 
-        Ok(conn.last_insert_rowid())
+        let row_id = tx.last_insert_rowid();
+
+        let is_ok: i64 = if matches!(status, "ok" | "success" | "completed") {
+            1
+        } else {
+            0
+        };
+        let is_error: i64 = if status == "error" { 1 } else { 0 };
+        let is_quota: i64 = if status == "quota_exhausted" { 1 } else { 0 };
+
+        tx.execute(
+            "INSERT INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+             VALUES (1, 1, ?1, ?2, ?3, 1, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+                 total_requests = total_requests + 1,
+                 prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                 completion_tokens = completion_tokens + excluded.completion_tokens,
+                 total_duration_ms = total_duration_ms + excluded.total_duration_ms,
+                 duration_count = duration_count + 1,
+                 error_count = error_count + excluded.error_count,
+                 quota_count = quota_count + excluded.quota_count",
+            params![
+                prompt_tokens,
+                completion_tokens,
+                duration_ms,
+                is_error,
+                is_quota,
+            ],
+        )?;
+
+        tx.execute(
+            "INSERT INTO model_usage_totals (model, total_requests, ok_count, error_count, quota_count, prompt_tokens, completion_tokens, total_duration_ms, duration_count)
+             VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, 1)
+             ON CONFLICT(model) DO UPDATE SET
+                 total_requests = total_requests + 1,
+                 ok_count = ok_count + excluded.ok_count,
+                 error_count = error_count + excluded.error_count,
+                 quota_count = quota_count + excluded.quota_count,
+                 prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                 completion_tokens = completion_tokens + excluded.completion_tokens,
+                 total_duration_ms = total_duration_ms + excluded.total_duration_ms,
+                 duration_count = duration_count + 1",
+            params![
+                model,
+                is_ok,
+                is_error,
+                is_quota,
+                prompt_tokens,
+                completion_tokens,
+                duration_ms,
+            ],
+        )?;
+
+        tx.commit()?;
+
+        Ok(row_id)
     }
 
     pub fn get_admin_stats(&self) -> Result<AdminStats, rusqlite::Error> {
@@ -804,35 +996,86 @@ impl Database {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
 
-        let (total_requests, prompt_tokens, completion_tokens, avg_duration_ms, error_count, quota_count) = conn
-            .query_row(
-                "SELECT
-                    COUNT(*) AS total_requests,
-                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                    COALESCE(AVG(duration_ms), 0.0) AS avg_duration_ms,
-                    COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS error_count,
-                    COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0) AS quota_count
-                 FROM request_log",
-                [],
-                |row| {
-                    let total_requests: i64 = row.get(0)?;
-                    let prompt_tokens: i64 = row.get(1)?;
-                    let completion_tokens: i64 = row.get(2)?;
-                    let avg_duration_ms: f64 = row.get(3)?;
-                    let error_count: i64 = row.get(4)?;
-                    let quota_count: i64 = row.get(5)?;
-                    Ok((
-                        total_requests,
-                        prompt_tokens,
-                        completion_tokens,
-                        avg_duration_ms,
-                        error_count,
-                        quota_count,
-                    ))
-                },
-            )?;
+        let totals_res = conn.query_row(
+            "SELECT
+                    total_requests,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_duration_ms,
+                    duration_count,
+                    error_count,
+                    quota_count
+                 FROM request_usage_totals
+                 WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, f64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                ))
+            },
+        );
 
+        let (
+            total_requests,
+            prompt_tokens,
+            completion_tokens,
+            total_duration_ms,
+            duration_count,
+            error_count,
+            quota_count,
+        ) = match totals_res {
+            Ok(v) => v,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                conn.execute(
+                    "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                     SELECT 1, COUNT(*),
+                            COALESCE(SUM(CASE WHEN prompt_tokens > 0 THEN prompt_tokens ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN completion_tokens > 0 THEN completion_tokens ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN duration_ms > 0.0 THEN duration_ms ELSE 0.0 END), 0.0),
+                            COUNT(duration_ms),
+                            COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                            COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0)
+                     FROM request_log",
+                    [],
+                )?;
+                conn.execute(
+                    "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                     VALUES (1, 0, 0, 0, 0.0, 0, 0, 0)",
+                    [],
+                )?;
+                conn.query_row(
+                    "SELECT total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count
+                     FROM request_usage_totals WHERE id = 1",
+                    [],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, f64>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, i64>(6)?,
+                        ))
+                    },
+                )?
+            }
+            Err(e) => return Err(e),
+        };
+
+        let avg_duration_ms = if duration_count > 0 {
+            total_duration_ms / duration_count as f64
+        } else if total_requests > 0 {
+            total_duration_ms / total_requests as f64
+        } else {
+            0.0
+        };
         let rounded_avg = (avg_duration_ms * 100.0).round() / 100.0;
         let total_tokens = prompt_tokens + completion_tokens;
 
@@ -973,25 +1216,34 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT model,
-                    COUNT(*) AS requests,
-                    COALESCE(SUM(CASE WHEN status IN ('ok', 'success', 'completed') THEN 1 ELSE 0 END), 0) AS ok,
-                    COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0) AS errors,
-                    COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0) AS quota_exhausted,
-                    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                    COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
-                    COALESCE(AVG(duration_ms), 0.0) AS avg_duration_ms
-             FROM request_log
-             GROUP BY model
-             ORDER BY requests DESC, model ASC",
+                    total_requests,
+                    ok_count,
+                    error_count,
+                    quota_count,
+                    prompt_tokens,
+                    completion_tokens,
+                    (prompt_tokens + completion_tokens) AS total_tokens,
+                    total_duration_ms,
+                    duration_count
+             FROM model_usage_totals
+             ORDER BY total_requests DESC, model ASC",
         )?;
 
         let rows = stmt.query_map([], |row| {
-            let avg_duration_ms: f64 = row.get(8)?;
+            let requests: i64 = row.get(1)?;
+            let total_duration_ms: f64 = row.get(8)?;
+            let duration_count: i64 = row.get(9)?;
+            let avg_duration_ms = if duration_count > 0 {
+                total_duration_ms / duration_count as f64
+            } else if requests > 0 {
+                total_duration_ms / requests as f64
+            } else {
+                0.0
+            };
             let rounded_avg = (avg_duration_ms * 100.0).round() / 100.0;
             Ok(ModelRequestSummary {
                 model: row.get(0)?,
-                requests: row.get(1)?,
+                requests,
                 ok: row.get(2)?,
                 errors: row.get(3)?,
                 quota_exhausted: row.get(4)?,
@@ -1061,16 +1313,62 @@ impl Database {
                 COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN completion_tokens ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN total_tokens ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN requests ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN error_count ELSE 0 END), 0),
-
-                -- All time
-                COALESCE(SUM(prompt_tokens), 0),
-                COALESCE(SUM(completion_tokens), 0),
-                COALESCE(SUM(total_tokens), 0),
-                COALESCE(SUM(requests), 0),
-                COALESCE(SUM(error_count), 0)
+                COALESCE(SUM(CASE WHEN d >= date('now', '-29 days', 'localtime') THEN error_count ELSE 0 END), 0)
             FROM daily_grouped;
         ";
+
+        let totals_res = conn.query_row(
+            "SELECT total_requests, prompt_tokens, completion_tokens, error_count
+             FROM request_usage_totals
+             WHERE id = 1",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        );
+
+        let (all_time_requests, all_time_prompt, all_time_completion, all_time_errors) =
+            match totals_res {
+                Ok(v) => v,
+                Err(rusqlite::Error::QueryReturnedNoRows) => {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                         SELECT 1, COUNT(*),
+                                COALESCE(SUM(CASE WHEN prompt_tokens > 0 THEN prompt_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN completion_tokens > 0 THEN completion_tokens ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN duration_ms > 0.0 THEN duration_ms ELSE 0.0 END), 0.0),
+                                COUNT(duration_ms),
+                                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END), 0),
+                                COALESCE(SUM(CASE WHEN status = 'quota_exhausted' THEN 1 ELSE 0 END), 0)
+                         FROM request_log",
+                        [],
+                    )?;
+                    conn.execute(
+                        "INSERT OR IGNORE INTO request_usage_totals (id, total_requests, prompt_tokens, completion_tokens, total_duration_ms, duration_count, error_count, quota_count)
+                         VALUES (1, 0, 0, 0, 0.0, 0, 0, 0)",
+                        [],
+                    )?;
+                    conn.query_row(
+                        "SELECT total_requests, prompt_tokens, completion_tokens, error_count
+                         FROM request_usage_totals WHERE id = 1",
+                        [],
+                        |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, i64>(2)?,
+                                row.get::<_, i64>(3)?,
+                            ))
+                        },
+                    )?
+                }
+                Err(e) => return Err(e),
+            };
 
         let periods = conn.query_row(periods_sql, [], |row| {
             Ok(TokenPeriodsSummary {
@@ -1110,11 +1408,11 @@ impl Database {
                     error_count: row.get(24)?,
                 },
                 all_time: TokenPeriodStats {
-                    prompt_tokens: row.get(25)?,
-                    completion_tokens: row.get(26)?,
-                    total_tokens: row.get(27)?,
-                    requests: row.get(28)?,
-                    error_count: row.get(29)?,
+                    prompt_tokens: all_time_prompt,
+                    completion_tokens: all_time_completion,
+                    total_tokens: all_time_prompt + all_time_completion,
+                    requests: all_time_requests,
+                    error_count: all_time_errors,
                 },
             })
         })?;
@@ -1184,14 +1482,42 @@ impl Database {
         }
 
         let num_days = daily.len().max(1) as i64;
+        let (
+            summary_total_tokens,
+            summary_prompt_tokens,
+            summary_completion_tokens,
+            summary_total_requests,
+            summary_error_count,
+        ) = if normalized_period == "all" {
+            (
+                periods.all_time.total_tokens,
+                periods.all_time.prompt_tokens,
+                periods.all_time.completion_tokens,
+                periods.all_time.requests,
+                periods.all_time.error_count,
+            )
+        } else {
+            (
+                total_tokens,
+                prompt_tokens,
+                completion_tokens,
+                total_requests,
+                error_count,
+            )
+        };
+        // For 'all' period, daily breakdown and peak day/tokens reflect the retained request_log window.
+        // summary.total_tokens, prompt_tokens, completion_tokens, and total_requests preserve the true
+        // cumulative lifetime aggregates from request_usage_totals so retention pruning does not decrease them.
+        // To avoid inflating avg_tokens_per_day (dividing lifetime tokens by only the retained days in daily),
+        // avg_tokens_per_day is computed from the retained window total tokens over the retained active days.
         let avg_tokens_per_day = total_tokens / num_days;
 
         let summary = TokenAnalyticsSummary {
-            total_tokens,
-            prompt_tokens,
-            completion_tokens,
-            total_requests,
-            error_count,
+            total_tokens: summary_total_tokens,
+            prompt_tokens: summary_prompt_tokens,
+            completion_tokens: summary_completion_tokens,
+            total_requests: summary_total_requests,
+            error_count: summary_error_count,
             peak_day,
             peak_tokens,
             avg_tokens_per_day,
@@ -1680,8 +2006,9 @@ impl Database {
         tx.execute(
             "INSERT INTO accounts (
                 id, email, refresh_token, access_token, expires_at, is_active,
-                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                auto_disabled_quota
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 aid,
                 email,
@@ -1695,6 +2022,7 @@ impl Database {
                 0,
                 Option::<String>::None,
                 now_str,
+                0,
             ],
         )?;
         tx.commit()?;
@@ -1712,6 +2040,7 @@ impl Database {
             error_count: 0,
             last_error: None,
             created_at: now_str,
+            auto_disabled_quota: false,
         })
     }
 
@@ -1721,8 +2050,9 @@ impl Database {
         tx.execute(
             "INSERT OR REPLACE INTO accounts (
                 id, email, refresh_token, access_token, expires_at, is_active,
-                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                auto_disabled_quota
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 acc.id,
                 acc.email,
@@ -1736,6 +2066,7 @@ impl Database {
                 acc.error_count,
                 acc.last_error,
                 acc.created_at,
+                if acc.auto_disabled_quota { 1 } else { 0 },
             ],
         )?;
         tx.commit()?;
@@ -1746,13 +2077,15 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
         if let Some(row) = rows.next()? {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(Some(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1766,6 +2099,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             }))
         } else {
             Ok(None)
@@ -1779,13 +2113,15 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              WHERE email = ?1",
         )?;
         let mut rows = stmt.query(params![email])?;
         if let Some(row) = rows.next()? {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(Some(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1799,6 +2135,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             }))
         } else {
             Ok(None)
@@ -1809,12 +2146,14 @@ impl Database {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, email, refresh_token, access_token, expires_at, is_active,
-                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at
+                    cooldown_until, last_used_at, total_requests, error_count, last_error, created_at,
+                    COALESCE(auto_disabled_quota, 0)
              FROM accounts
              ORDER BY email ASC",
         )?;
         let rows = stmt.query_map([], |row| {
             let is_active_int: i64 = row.get(5)?;
+            let auto_disabled_int: i64 = row.get(12).unwrap_or(0);
             Ok(AccountRecord {
                 id: row.get(0)?,
                 email: row.get(1)?,
@@ -1828,6 +2167,7 @@ impl Database {
                 error_count: row.get(9)?,
                 last_error: row.get(10)?,
                 created_at: row.get(11)?,
+                auto_disabled_quota: auto_disabled_int != 0,
             })
         })?;
         let mut result = Vec::new();
@@ -1841,6 +2181,45 @@ impl Database {
         let mut conn = self.lock_conn()?;
         let tx = conn.transaction()?;
         let rows = tx.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
+        tx.commit()?;
+        Ok(rows > 0)
+    }
+
+    pub fn set_account_active(&self, id: &str, is_active: bool) -> Result<bool, rusqlite::Error> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let active_int = if is_active { 1 } else { 0 };
+        let rows = tx.execute(
+            "UPDATE accounts SET is_active = ?1, auto_disabled_quota = 0 WHERE id = ?2",
+            params![active_int, id],
+        )?;
+        tx.commit()?;
+        Ok(rows > 0)
+    }
+
+    pub fn set_account_auto_disabled_quota(
+        &self,
+        id: &str,
+        auto_disabled: bool,
+        is_active: bool,
+        cooldown_until: f64,
+        reason: Option<&str>,
+    ) -> Result<bool, rusqlite::Error> {
+        let mut conn = self.lock_conn()?;
+        let tx = conn.transaction()?;
+        let auto_int = if auto_disabled { 1 } else { 0 };
+        let active_int = if is_active { 1 } else { 0 };
+        let rows = if let Some(r) = reason {
+            tx.execute(
+                "UPDATE accounts SET auto_disabled_quota = ?1, is_active = ?2, cooldown_until = ?3, last_error = ?4 WHERE id = ?5",
+                params![auto_int, active_int, cooldown_until, r, id],
+            )?
+        } else {
+            tx.execute(
+                "UPDATE accounts SET auto_disabled_quota = ?1, is_active = ?2, cooldown_until = ?3 WHERE id = ?4",
+                params![auto_int, active_int, cooldown_until, id],
+            )?
+        };
         tx.commit()?;
         Ok(rows > 0)
     }
@@ -2576,6 +2955,892 @@ mod tests {
         // 4. Cleanup with 0 does nothing (disabled)
         let deleted_zero = db.cleanup_old_request_logs(0).unwrap();
         assert_eq!(deleted_zero, 0);
+    }
+
+    #[test]
+    fn test_admin_stats_cumulative_after_retention_pruning() {
+        let db = Database::open_in_memory(None).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Record an old request (10 days ago): 100 prompt, 50 completion = 150 tokens, duration 200ms
+        db.record_request(
+            Some("acc-old"),
+            "model-old",
+            now - (10.0 * 86400.0),
+            "success",
+            100,
+            50,
+            200.0,
+            None,
+        )
+        .unwrap();
+
+        // 2. Record a fresh request (1 hour ago): 200 prompt, 100 completion = 300 tokens, duration 100ms
+        db.record_request(
+            Some("acc-new"),
+            "model-new",
+            now - 3600.0,
+            "success",
+            200,
+            100,
+            100.0,
+            None,
+        )
+        .unwrap();
+
+        // Verify initial stats before pruning
+        let stats_before = db.get_admin_stats().unwrap();
+        assert_eq!(stats_before.total_requests, 2);
+        assert_eq!(stats_before.prompt_tokens, 300);
+        assert_eq!(stats_before.completion_tokens, 150);
+        assert_eq!(stats_before.total_tokens, 450);
+
+        let analytics_before = db.get_token_analytics(None).unwrap();
+        assert_eq!(analytics_before.periods.all_time.total_tokens, 450);
+        assert_eq!(analytics_before.periods.all_time.requests, 2);
+
+        let analytics_all_before = db.get_token_analytics(Some("all")).unwrap();
+        assert_eq!(analytics_all_before.summary.total_tokens, 450);
+        assert_eq!(analytics_all_before.summary.prompt_tokens, 300);
+        assert_eq!(analytics_all_before.summary.completion_tokens, 150);
+        assert_eq!(analytics_all_before.summary.total_requests, 2);
+
+        let models_before = db.get_request_summary().unwrap();
+        assert_eq!(models_before.len(), 2);
+
+        // 3. Prune old request_log records older than 7 days
+        let deleted = db.cleanup_old_request_logs(7).unwrap();
+        assert_eq!(deleted, 1);
+
+        // Detail table has only 1 remaining row
+        let remaining = db.get_requests(10, 0, None, None).unwrap();
+        assert_eq!(remaining.total, 1);
+
+        // 4. Assert cumulative stats remain unchanged
+        let stats_after = db.get_admin_stats().unwrap();
+        assert_eq!(
+            stats_after.total_requests, 2,
+            "total_requests should not decrease after retention pruning"
+        );
+        assert_eq!(
+            stats_after.prompt_tokens, 300,
+            "prompt_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            stats_after.completion_tokens, 150,
+            "completion_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            stats_after.total_tokens, 450,
+            "total_tokens should not decrease after retention pruning"
+        );
+
+        let analytics_after = db.get_token_analytics(None).unwrap();
+        assert_eq!(
+            analytics_after.periods.all_time.total_tokens, 450,
+            "all_time total_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            analytics_after.periods.all_time.requests, 2,
+            "all_time requests should not decrease after retention pruning"
+        );
+
+        let analytics_all_after = db.get_token_analytics(Some("all")).unwrap();
+        assert_eq!(
+            analytics_all_after.summary.total_tokens, 450,
+            "all period summary total_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            analytics_all_after.summary.prompt_tokens, 300,
+            "all period summary prompt_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            analytics_all_after.summary.completion_tokens, 150,
+            "all period summary completion_tokens should not decrease after retention pruning"
+        );
+        assert_eq!(
+            analytics_all_after.summary.total_requests, 2,
+            "all period summary total_requests should not decrease after retention pruning"
+        );
+
+        let models_after = db.get_request_summary().unwrap();
+        assert_eq!(
+            models_after.len(),
+            2,
+            "models list should not shrink after pruning"
+        );
+        let old_model = models_after
+            .iter()
+            .find(|m| m.model == "model-old")
+            .unwrap();
+        assert_eq!(
+            old_model.requests, 1,
+            "model-old requests should not decrease after pruning"
+        );
+        assert_eq!(
+            old_model.total_tokens, 150,
+            "model-old tokens should not decrease after pruning"
+        );
+    }
+
+    #[test]
+    fn test_migration_backfills_existing_request_log_without_double_counting() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ag-proxy-test-mig-{}", Uuid::new_v4().simple()));
+        let db_path = temp_dir.join("data.sqlite");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Step 1: Create a pre-migration database containing request_log rows, but no aggregate table
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    key TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    total_requests INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    role TEXT NOT NULL DEFAULT 'client'
+                );
+                CREATE TABLE request_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT,
+                    model TEXT,
+                    timestamp REAL,
+                    status TEXT,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    duration_ms REAL DEFAULT 0,
+                    error TEXT
+                );
+                CREATE TABLE settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );",
+            )
+            .unwrap();
+
+            // Insert 2 historical records
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-1', 'model-1', ?1, 'success', 100, 50, 120.0, NULL)",
+                params![now - (10.0 * 86400.0)],
+            )
+            .unwrap();
+
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-2', 'model-2', ?1, 'error', 200, 100, 180.0, 'fail')",
+                params![now - (5.0 * 86400.0)],
+            )
+            .unwrap();
+        }
+
+        // Step 2: Open with Database::open_file (triggering migration/initialization)
+        let db = Database::open_file(&db_path, None).unwrap();
+        let stats = db.get_admin_stats().unwrap();
+        assert_eq!(stats.total_requests, 2);
+        assert_eq!(stats.prompt_tokens, 300);
+        assert_eq!(stats.completion_tokens, 150);
+        assert_eq!(stats.total_tokens, 450);
+        assert_eq!(stats.error_count, 1);
+        let models_step2 = db.get_request_summary().unwrap();
+        assert_eq!(models_step2.len(), 2);
+        drop(db);
+
+        // Step 3: Reopen database and verify migration is idempotent (no double counting)
+        let db_reopened = Database::open_file(&db_path, None).unwrap();
+        let stats_reopened = db_reopened.get_admin_stats().unwrap();
+        assert_eq!(
+            stats_reopened.total_requests, 2,
+            "reopening must not double count requests"
+        );
+        assert_eq!(
+            stats_reopened.prompt_tokens, 300,
+            "reopening must not double count prompt tokens"
+        );
+        assert_eq!(
+            stats_reopened.completion_tokens, 150,
+            "reopening must not double count completion tokens"
+        );
+        assert_eq!(
+            stats_reopened.total_tokens, 450,
+            "reopening must not double count total tokens"
+        );
+        assert_eq!(stats_reopened.error_count, 1);
+        let models_reopened = db_reopened.get_request_summary().unwrap();
+        assert_eq!(models_reopened.len(), 2);
+        let m1 = models_reopened
+            .iter()
+            .find(|m| m.model == "model-1")
+            .unwrap();
+        assert_eq!(m1.requests, 1);
+        assert_eq!(m1.prompt_tokens, 100);
+
+        // Step 4: Record a new request
+        db_reopened
+            .record_request(Some("acc-3"), "model-3", now, "success", 50, 25, 90.0, None)
+            .unwrap();
+
+        let stats_after_new = db_reopened.get_admin_stats().unwrap();
+        assert_eq!(stats_after_new.total_requests, 3);
+        assert_eq!(stats_after_new.prompt_tokens, 350);
+        assert_eq!(stats_after_new.completion_tokens, 175);
+        assert_eq!(stats_after_new.total_tokens, 525);
+        drop(db_reopened);
+
+        // Step 5: Reopen yet again, verify totals persist correctly
+        let db_reopened_again = Database::open_file(&db_path, None).unwrap();
+        let stats_again = db_reopened_again.get_admin_stats().unwrap();
+        assert_eq!(stats_again.total_requests, 3);
+        assert_eq!(stats_again.prompt_tokens, 350);
+        assert_eq!(stats_again.completion_tokens, 175);
+        assert_eq!(stats_again.total_tokens, 525);
+
+        // Step 6: Prune logs older than 7 days (deleting the first row from 10 days ago)
+        let deleted = db_reopened_again.cleanup_old_request_logs(7).unwrap();
+        assert_eq!(deleted, 1);
+
+        let stats_after_prune = db_reopened_again.get_admin_stats().unwrap();
+        assert_eq!(
+            stats_after_prune.total_requests, 3,
+            "cumulative total_requests preserved after prune"
+        );
+        assert_eq!(
+            stats_after_prune.prompt_tokens, 350,
+            "cumulative prompt_tokens preserved after prune"
+        );
+        assert_eq!(
+            stats_after_prune.completion_tokens, 175,
+            "cumulative completion_tokens preserved after prune"
+        );
+        assert_eq!(
+            stats_after_prune.total_tokens, 525,
+            "cumulative total_tokens preserved after prune"
+        );
+
+        let models_after_prune = db_reopened_again.get_request_summary().unwrap();
+        assert_eq!(models_after_prune.len(), 3);
+        let m1_after = models_after_prune
+            .iter()
+            .find(|m| m.model == "model-1")
+            .unwrap();
+        assert_eq!(
+            m1_after.requests, 1,
+            "model-1 summary preserved after prune"
+        );
+        assert_eq!(
+            m1_after.total_tokens, 150,
+            "model-1 tokens preserved after prune"
+        );
+
+        drop(db_reopened_again);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_token_analytics_all_period_and_model_summary_retention_safe() {
+        let db = Database::open_in_memory(None).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Record an old request from 15 days ago for model-alpha
+        db.record_request(
+            Some("acc-1"),
+            "model-alpha",
+            now - (15.0 * 86400.0),
+            "ok",
+            100,
+            50,
+            120.0,
+            None,
+        )
+        .unwrap();
+
+        // 2. Record a recent request from 2 hours ago for model-beta
+        db.record_request(
+            Some("acc-2"),
+            "model-beta",
+            now - 7200.0,
+            "ok",
+            200,
+            80,
+            180.0,
+            None,
+        )
+        .unwrap();
+
+        // Check before cleanup
+        let all_before = db.get_token_analytics(Some("all")).unwrap();
+        assert_eq!(all_before.summary.total_tokens, 430);
+        assert_eq!(all_before.summary.total_requests, 2);
+        assert_eq!(all_before.summary.prompt_tokens, 300);
+        assert_eq!(all_before.summary.completion_tokens, 130);
+        assert_eq!(all_before.summary.avg_tokens_per_day, 215);
+
+        let models_before = db.get_request_summary().unwrap();
+        assert_eq!(models_before.len(), 2);
+
+        // 3. Cleanup logs older than 7 days (model-alpha log pruned)
+        let deleted = db.cleanup_old_request_logs(7).unwrap();
+        assert_eq!(deleted, 1);
+
+        // Check after cleanup:
+        // Rolling 7d summary reflects only unpruned records (280 tokens)
+        let rolling_7d_after = db.get_token_analytics(Some("7d")).unwrap();
+        assert_eq!(rolling_7d_after.summary.total_tokens, 280);
+        assert_eq!(rolling_7d_after.summary.total_requests, 1);
+
+        // But "all" and "all_time" summary MUST NOT decrease
+        let all_after = db.get_token_analytics(Some("all")).unwrap();
+        assert_eq!(
+            all_after.summary.total_tokens, 430,
+            "overview all period total_tokens must not decrease after retention cleanup"
+        );
+        assert_eq!(
+            all_after.summary.total_requests, 2,
+            "overview all period total_requests must not decrease after retention cleanup"
+        );
+        assert_eq!(
+            all_after.summary.prompt_tokens, 300,
+            "overview all period prompt_tokens must not decrease after retention cleanup"
+        );
+        assert_eq!(
+            all_after.summary.completion_tokens, 130,
+            "overview all period completion_tokens must not decrease after retention cleanup"
+        );
+        // avg_tokens_per_day is computed from retained window (280 tokens / 1 active day = 280),
+        // avoiding metric inflation from dividing lifetime tokens by retained daily length.
+        assert_eq!(all_after.summary.avg_tokens_per_day, 280);
+
+        let all_time_after = db.get_token_analytics(Some("all_time")).unwrap();
+        assert_eq!(all_time_after.summary.total_tokens, 430);
+        assert_eq!(all_time_after.summary.total_requests, 2);
+
+        // Model request summary also must not decrease
+        let models_after = db.get_request_summary().unwrap();
+        assert_eq!(models_after.len(), 2, "both models must remain present");
+        let alpha = models_after
+            .iter()
+            .find(|m| m.model == "model-alpha")
+            .unwrap();
+        assert_eq!(alpha.requests, 1);
+        assert_eq!(alpha.total_tokens, 150);
+        assert_eq!(alpha.ok, 1);
+        assert_eq!(alpha.avg_duration_ms, 120.0);
+    }
+
+    #[test]
+    fn test_partial_model_table_backfills_missing_models_without_double_counting() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ag-proxy-test-partial-{}", Uuid::new_v4().simple()));
+        let db_path = temp_dir.join("data.sqlite");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Create a database where:
+        // - request_log has records for both "model-existing" (5 reqs, 500 prompt, 250 comp)
+        //   and "model-missing" (10 reqs, 1000 prompt, 500 comp)
+        // - model_usage_totals has ONLY "model-existing" with authoritative lifetime stats (50 reqs, 5000 prompt, 2500 comp)
+        // - model_totals_initialized is NOT set
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    key TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    total_requests INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    role TEXT NOT NULL DEFAULT 'client'
+                );
+                CREATE TABLE request_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT,
+                    model TEXT,
+                    timestamp REAL,
+                    status TEXT,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    duration_ms REAL DEFAULT 0,
+                    error TEXT
+                );
+                CREATE TABLE model_usage_totals (
+                    model TEXT PRIMARY KEY,
+                    total_requests INTEGER NOT NULL DEFAULT 0,
+                    ok_count INTEGER NOT NULL DEFAULT 0,
+                    error_count INTEGER NOT NULL DEFAULT 0,
+                    quota_count INTEGER NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_duration_ms REAL NOT NULL DEFAULT 0.0,
+                    duration_count INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );",
+            )
+            .unwrap();
+
+            // Insert 5 logs for model-existing
+            for _ in 0..5 {
+                conn.execute(
+                    "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                     VALUES ('acc-1', 'model-existing', ?1, 'ok', 100, 50, 100.0, NULL)",
+                    params![now],
+                )
+                .unwrap();
+            }
+
+            // Insert 10 logs for model-missing
+            for _ in 0..10 {
+                conn.execute(
+                    "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                     VALUES ('acc-1', 'model-missing', ?1, 'ok', 100, 50, 100.0, NULL)",
+                    params![now],
+                )
+                .unwrap();
+            }
+
+            // Pre-seed model_usage_totals ONLY with model-existing having 50 lifetime requests
+            conn.execute(
+                "INSERT INTO model_usage_totals (model, total_requests, ok_count, error_count, quota_count, prompt_tokens, completion_tokens, total_duration_ms, duration_count)
+                 VALUES ('model-existing', 50, 50, 0, 0, 5000, 2500, 5000.0, 50)",
+                [],
+            )
+            .unwrap();
+        }
+
+        // 2. Open DB with Database::open_file (triggers migration)
+        let db = Database::open_file(&db_path, None).unwrap();
+        let models = db.get_request_summary().unwrap();
+        assert_eq!(models.len(), 2, "both models must be present");
+
+        let existing = models.iter().find(|m| m.model == "model-existing").unwrap();
+        assert_eq!(
+            existing.requests, 50,
+            "existing model row must not be overwritten or double counted"
+        );
+        assert_eq!(existing.prompt_tokens, 5000);
+        assert_eq!(existing.completion_tokens, 2500);
+
+        let missing = models.iter().find(|m| m.model == "model-missing").unwrap();
+        assert_eq!(
+            missing.requests, 10,
+            "missing model row must be backfilled from request_log"
+        );
+        assert_eq!(missing.prompt_tokens, 1000);
+        assert_eq!(missing.completion_tokens, 500);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_backfill_average_skips_null_durations_correctly() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ag-proxy-test-null-dur-{}",
+            Uuid::new_v4().simple()
+        ));
+        let db_path = temp_dir.join("data.sqlite");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Create legacy DB with request_log where some rows have NULL duration_ms
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    key TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    total_requests INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    role TEXT NOT NULL DEFAULT 'client'
+                );
+                CREATE TABLE request_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT,
+                    model TEXT,
+                    timestamp REAL,
+                    status TEXT,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    duration_ms REAL DEFAULT NULL,
+                    error TEXT
+                );
+                CREATE TABLE settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );",
+            )
+            .unwrap();
+
+            // Insert 2 rows with NULL duration_ms
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-1', 'model-1', ?1, 'ok', 10, 5, NULL, NULL)",
+                params![now],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-1', 'model-1', ?1, 'ok', 10, 5, NULL, NULL)",
+                params![now],
+            )
+            .unwrap();
+
+            // Insert 2 rows with non-NULL duration: 100.0 and 200.0
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-1', 'model-1', ?1, 'ok', 10, 5, 100.0, NULL)",
+                params![now],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                 VALUES ('acc-1', 'model-1', ?1, 'ok', 10, 5, 200.0, NULL)",
+                params![now],
+            )
+            .unwrap();
+        }
+
+        // 2. Open DB and verify average duration is computed over non-null durations: (100 + 200) / 2 = 150.0
+        let db = Database::open_file(&db_path, None).unwrap();
+        let stats = db.get_admin_stats().unwrap();
+        assert_eq!(stats.total_requests, 4);
+        assert_eq!(
+            stats.avg_duration_ms, 150.0,
+            "avg_duration_ms must skip NULL rows"
+        );
+
+        let models = db.get_request_summary().unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].requests, 4);
+        assert_eq!(
+            models[0].avg_duration_ms, 150.0,
+            "model avg_duration_ms must skip NULL rows"
+        );
+
+        // 3. Record a new request with duration 300.0
+        db.record_request(Some("acc-1"), "model-1", now, "ok", 10, 5, 300.0, None)
+            .unwrap();
+        let stats_after = db.get_admin_stats().unwrap();
+        assert_eq!(stats_after.total_requests, 5);
+        // Non-null rows: 100 + 200 + 300 = 600 / 3 = 200.0
+        assert_eq!(stats_after.avg_duration_ms, 200.0);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_concurrent_database_open_and_record_request() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ag-proxy-test-concur-{}", Uuid::new_v4().simple()));
+        let db_path = temp_dir.join("data.sqlite");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // 1. Create a legacy database with 20 historical rows and NO totals tables
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    key TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    total_requests INTEGER DEFAULT 0,
+                    created_at TEXT,
+                    role TEXT NOT NULL DEFAULT 'client'
+                );
+                CREATE TABLE request_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT,
+                    model TEXT,
+                    timestamp REAL,
+                    status TEXT,
+                    prompt_tokens INTEGER DEFAULT 0,
+                    completion_tokens INTEGER DEFAULT 0,
+                    duration_ms REAL DEFAULT 0,
+                    error TEXT
+                );
+                CREATE TABLE settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );",
+            )
+            .unwrap();
+
+            for i in 0..20 {
+                let model = if i % 2 == 0 { "model-a" } else { "model-b" };
+                conn.execute(
+                    "INSERT INTO request_log (account_id, model, timestamp, status, prompt_tokens, completion_tokens, duration_ms, error)
+                     VALUES ('acc-hist', ?1, ?2, 'ok', 10, 5, 50.0, NULL)",
+                    params![model, now - (i as f64 * 100.0)],
+                )
+                .unwrap();
+            }
+        }
+
+        // 2. Spawn 4 threads concurrently opening the DB and logging requests
+        let num_threads = 4;
+        let reqs_per_thread = 5;
+        let mut handles = Vec::new();
+
+        for t_idx in 0..num_threads {
+            let path_clone = db_path.clone();
+            handles.push(std::thread::spawn(move || {
+                let db = Database::open_file(&path_clone, None).unwrap();
+                let thread_model = format!("model-t{}", t_idx);
+                for _ in 0..reqs_per_thread {
+                    db.record_request(
+                        Some("acc-concur"),
+                        &thread_model,
+                        now,
+                        "ok",
+                        20,
+                        10,
+                        100.0,
+                        None,
+                    )
+                    .unwrap();
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // 3. Verify total requests and token aggregates
+        let final_db = Database::open_file(&db_path, None).unwrap();
+        let stats = final_db.get_admin_stats().unwrap();
+        // 20 historical + (4 * 5) new = 40 total requests
+        assert_eq!(stats.total_requests, 40);
+        // Historical tokens: 20 * (10 + 5) = 300
+        // New tokens: 20 * (20 + 10) = 600
+        // Total tokens = 900
+        assert_eq!(stats.prompt_tokens, (20 * 10) + (20 * 20));
+        assert_eq!(stats.completion_tokens, (20 * 5) + (20 * 10));
+        assert_eq!(stats.total_tokens, 900);
+
+        let models = final_db.get_request_summary().unwrap();
+        assert_eq!(models.len(), 6);
+        let ma = models.iter().find(|m| m.model == "model-a").unwrap();
+        assert_eq!(ma.requests, 10);
+        let mb = models.iter().find(|m| m.model == "model-b").unwrap();
+        assert_eq!(mb.requests, 10);
+
+        drop(final_db);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_record_request_clamps_negative_tokens() {
+        let db = Database::open_in_memory(None).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Record request with negative prompt, completion, duration
+        let row_id = db
+            .record_request(
+                Some("acc-neg"),
+                "model-neg",
+                now,
+                "ok",
+                -100,
+                -50,
+                -25.0,
+                None,
+            )
+            .unwrap();
+        assert!(row_id > 0);
+
+        // Verify admin stats clamped to 0
+        let stats = db.get_admin_stats().unwrap();
+        assert_eq!(stats.total_requests, 1);
+        assert_eq!(stats.prompt_tokens, 0);
+        assert_eq!(stats.completion_tokens, 0);
+        assert_eq!(stats.total_tokens, 0);
+
+        // Verify stored log item clamped to 0
+        let reqs = db.get_requests(10, 0, None, None).unwrap();
+        assert_eq!(reqs.total, 1);
+        assert_eq!(reqs.items[0].prompt_tokens, 0);
+        assert_eq!(reqs.items[0].completion_tokens, 0);
+        assert_eq!(reqs.items[0].duration_ms, 0.0);
+
+        // Verify model summary clamped to 0
+        let models = db.get_request_summary().unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].prompt_tokens, 0);
+        assert_eq!(models[0].completion_tokens, 0);
+        assert_eq!(models[0].total_tokens, 0);
+
+        // Add positive tokens: 40 prompt + 20 completion = 60
+        db.record_request(Some("acc-pos"), "model-neg", now, "ok", 40, 20, 50.0, None)
+            .unwrap();
+
+        let stats2 = db.get_admin_stats().unwrap();
+        assert_eq!(stats2.total_requests, 2);
+        assert_eq!(stats2.prompt_tokens, 40);
+        assert_eq!(stats2.completion_tokens, 20);
+        assert_eq!(stats2.total_tokens, 60);
+
+        // Adding another negative tokens request cannot decrease totals
+        db.record_request(
+            Some("acc-neg2"),
+            "model-neg",
+            now,
+            "ok",
+            -20,
+            -10,
+            -5.0,
+            None,
+        )
+        .unwrap();
+
+        let stats3 = db.get_admin_stats().unwrap();
+        assert_eq!(stats3.total_requests, 3);
+        assert_eq!(stats3.prompt_tokens, 40, "prompt tokens must not decrease");
+        assert_eq!(
+            stats3.completion_tokens, 20,
+            "completion tokens must not decrease"
+        );
+        assert_eq!(stats3.total_tokens, 60, "total tokens must not decrease");
+    }
+
+    #[test]
+    fn test_missing_marker_and_row_repair_preserves_aggregate() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("ag-proxy-test-repair-{}", Uuid::new_v4().simple()));
+        let db_path = temp_dir.join("data.sqlite");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
+
+        // Step 1: Initialize DB with existing high aggregate totals, but pruned request_log
+        {
+            let db = Database::open_file(&db_path, None).unwrap();
+            db.record_request(
+                Some("acc-1"),
+                "model-alpha",
+                now,
+                "ok",
+                100,
+                50,
+                100.0,
+                None,
+            )
+            .unwrap();
+            drop(db);
+
+            // Directly alter DB: set aggregate to high lifetime values, and delete the initialization settings marker
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute(
+                "UPDATE request_usage_totals SET total_requests = 1000, prompt_tokens = 50000, completion_tokens = 25000, total_duration_ms = 99999.0 WHERE id = 1",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE model_usage_totals SET total_requests = 1000, prompt_tokens = 50000, completion_tokens = 25000 WHERE model = 'model-alpha'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM settings WHERE key = 'request_totals_initialized'",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "DELETE FROM settings WHERE key = 'model_totals_initialized'",
+                [],
+            )
+            .unwrap();
+        }
+
+        // Step 2: Reopen DB. Even though settings marker was missing, migration MUST NOT overwrite existing row!
+        {
+            let db = Database::open_file(&db_path, None).unwrap();
+            let stats = db.get_admin_stats().unwrap();
+            assert_eq!(
+                stats.total_requests, 1000,
+                "must preserve authoritative aggregate row when marker missing"
+            );
+            assert_eq!(
+                stats.prompt_tokens, 50000,
+                "must preserve prompt tokens when marker missing"
+            );
+            assert_eq!(
+                stats.completion_tokens, 25000,
+                "must preserve completion tokens when marker missing"
+            );
+
+            let models = db.get_request_summary().unwrap();
+            let alpha = models.iter().find(|m| m.model == "model-alpha").unwrap();
+            assert_eq!(
+                alpha.requests, 1000,
+                "must preserve model aggregate row when marker missing"
+            );
+            drop(db);
+        }
+
+        // Step 3: Delete row id = 1 from request_usage_totals entirely.
+        // Calling get_admin_stats or get_token_analytics must NOT error (no HTTP 500) and must repair atomically.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute("DELETE FROM request_usage_totals WHERE id = 1", [])
+                .unwrap();
+            drop(conn);
+
+            let db = Database::open_file(&db_path, None).unwrap();
+            // Directly test get_admin_stats repairs row atomically without 500
+            let stats = db.get_admin_stats().unwrap();
+            assert!(stats.total_requests >= 1); // Repaired from request_log
+            assert_eq!(stats.prompt_tokens, 100);
+            assert_eq!(stats.completion_tokens, 50);
+
+            let analytics = db.get_token_analytics(Some("all")).unwrap();
+            assert!(analytics.summary.total_requests >= 1);
+            assert_eq!(analytics.summary.total_tokens, 150);
+
+            drop(db);
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

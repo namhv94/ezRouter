@@ -327,12 +327,12 @@ callRouter();
       {/* Security Warning Callout */}
       <div className="security-alert-box">
         <div className="security-alert-header">
-          <IconShield size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <IconShield size={22} className="security-alert-icon" style={{ flexShrink: 0 }} />
           <div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fbbf24', margin: 0 }}>
+            <h3 className="security-alert-title" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
               {t('integration.securityTitle')}
             </h3>
-            <p style={{ fontSize: 13, color: '#fef3c7', marginTop: 4, lineHeight: 1.5 }}>
+            <p className="security-alert-desc" style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
               {t('integration.securityDesc')}
             </p>
           </div>
@@ -426,6 +426,10 @@ callRouter();
               onChange={(e) => setSelectedModel(e.target.value)}
               style={{ width: '100%' }}
             >
+              <option value="ag/gemini-4-argon-high">ag/gemini-4-argon-high ({t('integration.modelOptGemini4ArgonHigh')})</option>
+              <option value="ag/gemini-4-argon-medium">ag/gemini-4-argon-medium ({t('integration.modelOptGemini4ArgonMedium')})</option>
+              <option value="ag/gemini-4-argon-low">ag/gemini-4-argon-low ({t('integration.modelOptGemini4ArgonLow')})</option>
+              <option value="ag/gemini-4-argon">ag/gemini-4-argon ({t('integration.modelOptGemini4Argon')})</option>
               <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high ({t('integration.modelOptGeminiFlash')})</option>
               <option value="ag/gemini-pro-agent">ag/gemini-pro-agent ({t('integration.modelOptGeminiProAgent')})</option>
               <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low ({t('integration.modelOptGeminiProLow')})</option>

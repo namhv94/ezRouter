@@ -123,7 +123,24 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
       setActionMessage({ type: 'success', text: t('accounts.msgResetSuccess', { email: acc.email }) });
       onRefresh();
     } catch (err: any) {
-      setActionMessage({ type: 'error', text: err?.message || t('accounts.msgResetError') });
+      setActionMessage({ type: 'error', text: err?.message || 'Lỗi reset cooldown' });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleToggle = async (acc: AccountResponse) => {
+    setActionLoading(true);
+    setActionMessage(null);
+    try {
+      await api.toggleAccount(acc.id);
+      setActionMessage({
+        type: 'success',
+        text: acc.is_active ? t('accounts.msgTurnOffSuccess') : t('accounts.msgTurnOnSuccess'),
+      });
+      onRefresh();
+    } catch (err: any) {
+      setActionMessage({ type: 'error', text: err?.message || 'Lỗi thay đổi trạng thái' });
     } finally {
       setActionLoading(false);
     }
@@ -284,9 +301,15 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                         </div>
                       </td>
                       <td>
-                        <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
-                          {acc.is_active ? t('accounts.statusActive') : t('accounts.statusInactive')}
-                        </span>
+                        {acc.auto_disabled_quota ? (
+                          <span className="badge badge-warning" title={acc.last_error || 'Hết quota tuần, tự động bật lại khi hồi'}>
+                            {t('accounts.statusQuotaSuspended')}
+                          </span>
+                        ) : (
+                          <span className={`badge ${acc.is_active ? 'badge-success' : 'badge-neutral'}`}>
+                            {acc.is_active ? t('accounts.statusActive') : t('accounts.statusInactive')}
+                          </span>
+                        )}
                       </td>
                       <td>
                         {isCooling ? (
@@ -335,6 +358,14 @@ export const AccountsTab: React.FC<AccountsTabProps> = ({
                       </td>
                       <td>
                         <div className="table-actions">
+                          <button
+                            className={`btn btn-sm ${acc.is_active ? 'btn-secondary' : 'btn-primary'}`}
+                            onClick={() => handleToggle(acc)}
+                            disabled={actionLoading}
+                            title={acc.is_active ? t('accounts.btnTurnOff') : t('accounts.btnTurnOn')}
+                          >
+                            {acc.is_active ? t('accounts.btnTurnOff') : t('accounts.btnTurnOn')}
+                          </button>
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handleTest(acc)}

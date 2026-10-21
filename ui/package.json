@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "verify:i18n": "node scripts/verify-i18n.cjs",
-    "test": "node scripts/verify-mobile-css.cjs && node scripts/verify-overview-metrics.cjs && node scripts/verify-model-dropdown.cjs && node scripts/verify-token-saver-tab.cjs && node scripts/verify-pipeline-flow.cjs && node scripts/verify-quota-formatting.cjs && node scripts/verify-i18n.cjs"
+    "test": "node scripts/verify-mobile-css.cjs && node scripts/verify-overview-metrics.cjs && node scripts/verify-model-dropdown.cjs && node scripts/verify-token-saver-tab.cjs && node scripts/verify-pipeline-flow.cjs && node scripts/verify-quota-formatting.cjs && node scripts/verify-operational-theme.cjs && node scripts/verify-i18n.cjs"
   },
   "dependencies": {
     "react": "^18.3.1",

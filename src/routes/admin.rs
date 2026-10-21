@@ -1094,6 +1094,19 @@ pub async fn reset_account_cooldown(
     Ok(Json(AccountActionResponse { ok: true }))
 }
 
+pub async fn toggle_account(
+    _auth: AdminUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let new_active = state.account_pool.toggle_account(&id)?;
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "id": id,
+        "is_active": new_active
+    })))
+}
+
 pub async fn refresh_account_quota(
     _auth: AdminUser,
     State(state): State<AppState>,

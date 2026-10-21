@@ -497,6 +497,11 @@ export interface TranslationSchema {
     thActions: string;
     statusActive: string;
     statusInactive: string;
+    statusQuotaSuspended: string;
+    btnTurnOff: string;
+    btnTurnOn: string;
+    msgTurnOffSuccess: string;
+    msgTurnOnSuccess: string;
     cooldownWait: string;
     statusReady: string;
     viewQuota: string;
@@ -757,6 +762,11 @@ export interface TranslationSchema {
     authKeyPlaceholder: string;
     authKeyHelp: string;
     responseModeLabel: string;
+    thinkingLevelLabel: string;
+    thinkingOptDefault: string;
+    thinkingOptHigh: string;
+    thinkingOptMedium: string;
+    thinkingOptLow: string;
     streamSse: string;
     nonStreamJson: string;
     quickPresetsLabel: string;
@@ -828,6 +838,10 @@ export interface TranslationSchema {
     customizerTitle: string;
     yourApiKeyLabel: string;
     modelSelectionLabel: string;
+    modelOptGemini4Argon: string;
+    modelOptGemini4ArgonHigh: string;
+    modelOptGemini4ArgonMedium: string;
+    modelOptGemini4ArgonLow: string;
     modelOptGeminiFlash: string;
     modelOptGeminiProAgent: string;
     modelOptGeminiProLow: string;
@@ -1118,6 +1132,14 @@ export interface TranslationSchema {
     en: string;
     selectLanguage: string;
     currentLanguage: string;
+  };
+  theme: {
+    selectTheme: string;
+    legacy: string;
+    legacyShort: string;
+    operational: string;
+    operationalShort: string;
+    currentTheme: string;
   };
 }
 
