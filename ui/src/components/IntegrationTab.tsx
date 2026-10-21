@@ -15,6 +15,7 @@ export const IntegrationTab: React.FC = () => {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState('ag-proxy-key');
   const [selectedModel, setSelectedModel] = useState<string>('ag/gemini-3.8-flash-high');
+  const [thinkingLevel, setThinkingLevel] = useState<'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'>('default');
   const [activeTab, setActiveTab] = useState<'hermes' | 'claude' | 'codex' | 'copilot' | 'python' | 'curl' | 'node'>('hermes');
   const [codexOs, setCodexOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
   const [claudeOs, setClaudeOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
@@ -76,6 +77,14 @@ hermes chat --model ${selectedModel}
       ? selectedModel
       : 'cx/gpt-5.6-sol';
 
+  const modelSuffixMatch = selectedModel.match(/-(low|medium|high|xhigh|max|ultra)$/i);
+  const effectiveEffort =
+    thinkingLevel !== 'default'
+      ? thinkingLevel
+      : modelSuffixMatch
+      ? modelSuffixMatch[1].toLowerCase()
+      : '';
+
   const codexOneStepBash = `curl -fsSL ${rootUrl}/setup-codex.sh | bash -s -- ${baseUrl} ${activeKey} ${codexModel}`;
   const codexOneStepPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/setup-codex.ps1))) -RouterUrl '${baseUrl}' -ApiKey '${activeKey}' -Model '${codexModel}'"`;
   const codexOneStepBat = `curl -fsSL ${rootUrl}/setup-codex.bat -o setup-codex.bat && setup-codex.bat ${baseUrl} ${activeKey} ${codexModel}`;
@@ -86,7 +95,7 @@ hermes chat --model ${selectedModel}
 
   const codexConfigSnippet = `# ~/.codex/config.toml
 # Cấu hình ezRouter cho OpenAI Codex IDE Extension & Codex CLI
-model = "${codexModel}"
+model = "${codexModel}"${effectiveEffort ? `\nmodel_reasoning_effort = "${effectiveEffort}"` : ''}
 model_provider = "ezrouter"
 
 [model_providers.ezrouter]
@@ -102,7 +111,7 @@ stream_idle_timeout_ms = 300000
 `;
 
   const codexCliSnippet = `# Kiểm tra gọi thử model từ Terminal
-codex -m ${codexModel} "Xin chào! Giới thiệu bản thân ngắn gọn"
+codex -m ${codexModel}${effectiveEffort ? ` -c model_reasoning_effort="${effectiveEffort}"` : ''} "Xin chào! Giới thiệu bản thân ngắn gọn"
 `;
 
   // Claude Code CLI Snippets
@@ -327,12 +336,12 @@ callRouter();
       {/* Security Warning Callout */}
       <div className="security-alert-box">
         <div className="security-alert-header">
-          <IconShield size={22} style={{ color: '#f59e0b', flexShrink: 0 }} />
+          <IconShield size={22} className="security-alert-icon" style={{ flexShrink: 0 }} />
           <div>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#fbbf24', margin: 0 }}>
+            <h3 className="security-alert-title" style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
               {t('integration.securityTitle')}
             </h3>
-            <p style={{ fontSize: 13, color: '#fef3c7', marginTop: 4, lineHeight: 1.5 }}>
+            <p className="security-alert-desc" style={{ fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
               {t('integration.securityDesc')}
             </p>
           </div>
@@ -426,14 +435,53 @@ callRouter();
               onChange={(e) => setSelectedModel(e.target.value)}
               style={{ width: '100%' }}
             >
+              <option value="ag/gemini-4-argon-high">ag/gemini-4-argon-high ({t('integration.modelOptGemini4ArgonHigh')})</option>
+              <option value="ag/gemini-4-argon-medium">ag/gemini-4-argon-medium ({t('integration.modelOptGemini4ArgonMedium')})</option>
+              <option value="ag/gemini-4-argon-low">ag/gemini-4-argon-low ({t('integration.modelOptGemini4ArgonLow')})</option>
+              <option value="ag/gemini-4-argon">ag/gemini-4-argon ({t('integration.modelOptGemini4Argon')})</option>
               <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high ({t('integration.modelOptGeminiFlash')})</option>
               <option value="ag/gemini-pro-agent">ag/gemini-pro-agent ({t('integration.modelOptGeminiProAgent')})</option>
               <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low ({t('integration.modelOptGeminiProLow')})</option>
               <option value="ag/claude-opus-5-5-high">ag/claude-opus-5-5-high ({t('integration.modelOptClaudeOpus55')})</option>
               <option value="ag/claude-sonnet-5-5-high">ag/claude-sonnet-5-5-high ({t('integration.modelOptClaudeSonnet55')})</option>
               <option value="cx/gpt-6.1-sol">cx/gpt-6.1-sol ({t('integration.modelOptCodex61Sol')})</option>
+              <option value="cx/gpt-6.1-sol-high">cx/gpt-6.1-sol-high ({t('integration.modelOptCodex61SolHigh')})</option>
+              <option value="cx/gpt-6.1-sol-medium">cx/gpt-6.1-sol-medium ({t('integration.modelOptCodex61SolMedium')})</option>
+              <option value="cx/gpt-6.1-sol-low">cx/gpt-6.1-sol-low ({t('integration.modelOptCodex61SolLow')})</option>
+              <option value="cx/gpt-6.1-sol-xhigh">cx/gpt-6.1-sol-xhigh ({t('integration.modelOptCodex61SolXHigh')})</option>
+              <option value="cx/gpt-6.1-sol-max">cx/gpt-6.1-sol-max ({t('integration.modelOptCodex61SolMax')})</option>
               <option value="cx/gpt-6-astra">cx/gpt-6-astra ({t('integration.modelOptCodexAstra')})</option>
+              <option value="cx/gpt-6-astra-high">cx/gpt-6-astra-high ({t('integration.modelOptCodexAstraHigh')})</option>
+              <option value="cx/gpt-6-astra-medium">cx/gpt-6-astra-medium ({t('integration.modelOptCodexAstraMedium')})</option>
+              <option value="cx/gpt-6-astra-low">cx/gpt-6-astra-low ({t('integration.modelOptCodexAstraLow')})</option>
+              <option value="cx/gpt-6-astra-xhigh">cx/gpt-6-astra-xhigh ({t('integration.modelOptCodexAstraXHigh')})</option>
+              <option value="cx/gpt-6-astra-max">cx/gpt-6-astra-max ({t('integration.modelOptCodexAstraMax')})</option>
               <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol ({t('integration.modelOptCodexSol')})</option>
+              <option value="cx/gpt-5.6-sol-high">cx/gpt-5.6-sol-high ({t('integration.modelOptCodexSolHigh')})</option>
+              <option value="cx/gpt-5.6-sol-medium">cx/gpt-5.6-sol-medium ({t('integration.modelOptCodexSolMedium')})</option>
+              <option value="cx/gpt-5.6-sol-low">cx/gpt-5.6-sol-low ({t('integration.modelOptCodexSolLow')})</option>
+              <option value="cx/gpt-5.6-sol-xhigh">cx/gpt-5.6-sol-xhigh ({t('integration.modelOptCodexSolXHigh')})</option>
+              <option value="cx/gpt-5.6-sol-max">cx/gpt-5.6-sol-max ({t('integration.modelOptCodexSolMax')})</option>
+              <option value="cx/gpt-5.6-sol-ultra">cx/gpt-5.6-sol-ultra ({t('integration.modelOptCodexSolUltra')})</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 500 }}>
+              {t('playground.thinkingLevelLabel')}
+            </label>
+            <select
+              value={thinkingLevel}
+              onChange={(e) => setThinkingLevel(e.target.value as any)}
+              style={{ width: '100%' }}
+            >
+              <option value="default">{t('playground.thinkingOptDefault')}</option>
+              <option value="low">{t('playground.thinkingOptLow')}</option>
+              <option value="medium">{t('playground.thinkingOptMedium')}</option>
+              <option value="high">{t('playground.thinkingOptHigh')}</option>
+              <option value="xhigh">{t('playground.thinkingOptXHigh')}</option>
+              <option value="max">{t('playground.thinkingOptMax')}</option>
+              <option value="ultra">{t('playground.thinkingOptUltra')}</option>
             </select>
           </div>
         </div>

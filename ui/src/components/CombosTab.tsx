@@ -162,7 +162,7 @@ export const CombosTab: React.FC = () => {
   );
 
   return (
-    <div>
+    <div className="combos-container">
       <div className="section-header">
         <div>
           <h2 className="section-title">{t('combos.title')}</h2>
@@ -230,18 +230,18 @@ export const CombosTab: React.FC = () => {
                     : [];
                   return (
                     <tr key={c.id}>
-                      <td>
+                      <td data-label={t('combos.thName')}>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{c.name}</div>
                         <div className="badge badge-neutral font-mono" style={{ fontSize: 11, marginTop: 4 }}>
                           id: {c.id}
                         </div>
                       </td>
-                      <td>
+                      <td data-label={t('combos.thStrategy')}>
                         <span className="badge badge-neutral" style={{ textTransform: 'uppercase' }}>
                           {c.strategy}
                         </span>
                       </td>
-                      <td>
+                      <td data-label={t('combos.thModels')}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                           {mList.length === 0 ? (
                             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t('combos.noModels')}</span>
@@ -265,7 +265,7 @@ export const CombosTab: React.FC = () => {
                           )}
                         </div>
                       </td>
-                      <td>
+                      <td data-label={t('combos.thActions')}>
                         <div className="table-actions">
                           <button
                             className="btn btn-secondary btn-sm btn-icon-only"
@@ -328,13 +328,13 @@ export const CombosTab: React.FC = () => {
               ) : (
                 models.map((m) => (
                   <tr key={m.id}>
-                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="font-mono">
+                    <td style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="font-mono" data-label={t('combos.thModelId')}>
                       {m.id}
                     </td>
-                    <td>
+                    <td data-label={t('combos.thModelCategory')}>
                       <span className="badge badge-neutral">{m.object}</span>
                     </td>
-                    <td className="font-mono" style={{ color: 'var(--text-secondary)' }}>
+                    <td className="font-mono" style={{ color: 'var(--text-secondary)' }} data-label={t('combos.thModelSource')}>
                       {m.owned_by}
                     </td>
                   </tr>

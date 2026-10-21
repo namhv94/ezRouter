@@ -15,23 +15,48 @@ import {
 
 const POPULAR_IMAGE_MODELS = [
   {
+    id: 'openrouter/recraft/recraft-v4.1-flash',
+    name: 'Recraft V4.1 Flash [~$0.007/ảnh] (Siêu rẻ & Game Pixel Art)',
+    desc: '$0.007/ảnh (~175đ), ~1.5s. Chuyên Pixel Art, Game Icon, Vector, hỗ trợ transparent PNG',
+  },
+  {
+    id: 'openrouter/black-forest-labs/flux.2-klein-4b',
+    name: 'FLUX.2 Klein 4B [~$0.014/ảnh] (Giá rẻ chất lượng cao)',
+    desc: '~$0.014/ảnh (~355đ). Kiến trúc FLUX 2 mới, sắc nét, tối ưu chi phí',
+  },
+  {
+    id: 'openrouter/bytedance-seed/seedream-5-0-flash',
+    name: 'ByteDance Seedream 5.0 Flash [~$0.018/ảnh] (Anime & Game Concept)',
+    desc: '~$0.018/ảnh (~450đ). Rất mạnh về Anime, Manga, Fantasy, Game Character Concept',
+  },
+  {
     id: 'openrouter/black-forest-labs/flux-1-schnell',
-    name: 'FLUX.1 Schnell (Nhanh & Sắc nét)',
+    name: 'FLUX.1 Schnell [~$0.025/ảnh] (Nhanh & Sắc nét)',
     desc: '4-step distilled latent model, siêu tốc, chất lượng cao',
   },
   {
+    id: 'openrouter/openai/gpt-5-image-mini',
+    name: 'OpenAI GPT-5 Image Mini [~$0.033/ảnh] (Bản mini tối ưu chi phí)',
+    desc: '~$0.033/ảnh (~850đ). Bản mini của OpenAI tối ưu chi phí, hiểu prompt phức tạp tốt',
+  },
+  {
+    id: 'openrouter/recraft/recraft-v4.1',
+    name: 'Recraft V4.1 [~$0.04/ảnh] (Thẩm mỹ cao, Vector & Pixel)',
+    desc: 'Model chất lượng cao từ Recraft, chuyên thiết kế đồ họa & nghệ thuật game',
+  },
+  {
     id: 'openrouter/black-forest-labs/flux-1-dev',
-    name: 'FLUX.1 Dev (Chi tiết cao)',
+    name: 'FLUX.1 Dev [~$0.05/ảnh] (Chi tiết cao)',
     desc: '12B parameter guidance-distilled model cho độ chân thực tối đa',
   },
   {
     id: 'openrouter/stabilityai/stable-diffusion-3.5-large',
-    name: 'Stable Diffusion 3.5 Large',
+    name: 'Stable Diffusion 3.5 Large (8B Model Stability AI)',
     desc: '8B parameter model từ Stability AI, hiểu prompt typography tốt',
   },
   {
     id: 'openrouter/google/imagen-3',
-    name: 'Google Imagen 3',
+    name: 'Google Imagen 3 (Photorealistic DeepMind)',
     desc: 'Photorealistic generation từ Google DeepMind',
   },
 ];

@@ -342,12 +342,10 @@ export const ConsoleLogTab: React.FC = () => {
       {/* Console Output Screen */}
       <div
         ref={consoleContainerRef}
-        className="card"
+        className="card console-screen"
         style={{
           padding: 0,
-          background: '#090d16',
           borderRadius: 'var(--radius-md, 8px)',
-          border: '1px solid var(--border-subtle, rgba(255,255,255,0.08))',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -357,33 +355,32 @@ export const ConsoleLogTab: React.FC = () => {
       >
         {/* Terminal Header bar */}
         <div
+          className="console-header"
           style={{
             padding: '8px 16px',
-            background: '#0d1322',
-            borderBottom: '1px solid rgba(255,255,255,0.06)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             fontFamily: 'var(--font-mono, monospace)',
             fontSize: 11.5,
-            color: 'var(--text-muted, #94a3b8)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#ef4444' }} />
             <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#f59e0b' }} />
             <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#10b981' }} />
-            <span style={{ marginLeft: 8, color: '#e2e8f0', fontWeight: 600 }}>ezRouter System Output</span>
+            <span className="console-header-title" style={{ marginLeft: 8, fontWeight: 600 }}>ezRouter System Output</span>
           </div>
           <div>
             <span>{t('logs.displayCount')}</span>
-            <strong style={{ color: '#38bdf8' }}>{logs.length}</strong>
+            <strong className="console-header-count">{logs.length}</strong>
             <span>{t('logs.totalEvents', { total })}</span>
           </div>
         </div>
 
         {/* Terminal Body */}
         <div
+          className="console-body"
           style={{
             padding: '12px 16px',
             flex: 1,
@@ -394,7 +391,6 @@ export const ConsoleLogTab: React.FC = () => {
             fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
             fontSize: 12.5,
             lineHeight: 1.6,
-            color: '#e2e8f0',
           }}
         >
           {loading && logs.length === 0 ? (
@@ -419,18 +415,6 @@ export const ConsoleLogTab: React.FC = () => {
           ) : (
             logs.map((log) => {
               const lvl = log.level.toUpperCase();
-              let levelColor = '#38bdf8'; // INFO - cyan
-              let levelBg = 'rgba(56, 189, 248, 0.12)';
-              if (lvl === 'WARN') {
-                levelColor = '#f59e0b'; // amber
-                levelBg = 'rgba(245, 158, 11, 0.15)';
-              } else if (lvl === 'ERROR') {
-                levelColor = '#f43f5e'; // red/rose
-                levelBg = 'rgba(244, 63, 94, 0.18)';
-              } else if (lvl === 'DEBUG') {
-                levelColor = '#a855f7'; // purple
-                levelBg = 'rgba(168, 85, 247, 0.12)';
-              }
 
               // Extract time part for compact display
               let timeStr = log.timestamp;
@@ -441,19 +425,19 @@ export const ConsoleLogTab: React.FC = () => {
               return (
                 <div
                   key={log.id}
+                  className="console-log-row"
                   style={{
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: 10,
                     padding: '3px 0',
-                    borderBottom: '1px solid rgba(255,255,255,0.02)',
                     wordBreak: 'break-word',
                   }}
                 >
                   {/* Timestamp */}
                   <span
+                    className="console-time"
                     style={{
-                      color: '#64748b',
                       fontSize: 11.5,
                       whiteSpace: 'nowrap',
                       userSelect: 'none',
@@ -465,13 +449,12 @@ export const ConsoleLogTab: React.FC = () => {
 
                   {/* Level Badge */}
                   <span
+                    className={`console-badge badge-${lvl.toLowerCase()}`}
                     style={{
                       fontSize: 10.5,
                       fontWeight: 700,
                       padding: '1px 6px',
                       borderRadius: 4,
-                      color: levelColor,
-                      backgroundColor: levelBg,
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
                       textTransform: 'uppercase',
@@ -483,8 +466,8 @@ export const ConsoleLogTab: React.FC = () => {
 
                   {/* Target/Module */}
                   <span
+                    className="console-target"
                     style={{
-                      color: '#a78bfa',
                       fontSize: 11.5,
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
@@ -495,8 +478,8 @@ export const ConsoleLogTab: React.FC = () => {
 
                   {/* Message */}
                   <span
+                    className={`console-msg ${lvl === 'ERROR' ? 'is-error' : lvl === 'WARN' ? 'is-warn' : ''}`}
                     style={{
-                      color: lvl === 'ERROR' ? '#fca5a5' : lvl === 'WARN' ? '#fde68a' : '#f1f5f9',
                       flex: 1,
                       whiteSpace: 'pre-wrap',
                     }}

@@ -27,6 +27,52 @@ struct StaticModelDef {
 
 const STATIC_MODELS: &[StaticModelDef] = &[
     StaticModelDef {
+        canonical_id: "ag/gemini-4-argon",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon",
+            "ag/gemini-argon",
+            "gemini-argon",
+            "ag/argon",
+            "argon",
+            "ag/agon",
+            "agon",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-high",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-high",
+            "ag/argon-high",
+            "argon-high",
+            "ag/agon-high",
+            "agon-high",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-medium",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-medium",
+            "ag/argon-medium",
+            "argon-medium",
+            "ag/agon-medium",
+            "agon-medium",
+        ],
+    },
+    StaticModelDef {
+        canonical_id: "ag/gemini-4-argon-low",
+        owned_by: "antigravity",
+        aliases: &[
+            "gemini-4-argon-low",
+            "ag/argon-low",
+            "argon-low",
+            "ag/agon-low",
+            "agon-low",
+        ],
+    },
+    StaticModelDef {
         canonical_id: "ag/gemini-3.8-flash-high",
         owned_by: "antigravity",
         aliases: &[
@@ -124,6 +170,31 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["gpt-6.1-sol", "gpt-6.1", "cx/gpt-6.1"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol-high", "gpt-6.1-high", "cx/gpt-6.1-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol-medium", "gpt-6.1-medium", "cx/gpt-6.1-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol-low", "gpt-6.1-low", "cx/gpt-6.1-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol-xhigh", "gpt-6.1-xhigh", "cx/gpt-6.1-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6.1-sol-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6.1-sol-max", "gpt-6.1-max", "cx/gpt-6.1-max"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-6-sol",
         owned_by: "openai-codex",
         aliases: &["gpt-6-sol", "gpt-6", "cx/gpt-6"],
@@ -139,9 +210,64 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["gpt-6-astra", "astra", "cx/astra"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-6-astra-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra-high", "astra-high", "cx/astra-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-astra-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra-medium", "astra-medium", "cx/astra-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-astra-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra-low", "astra-low", "cx/astra-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-astra-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra-xhigh", "astra-xhigh", "cx/astra-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-6-astra-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-6-astra-max", "astra-max", "cx/astra-max"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-5.6-sol",
         owned_by: "openai-codex",
         aliases: &["gpt-5.6-sol", "gpt-5.6", "cx/gpt-5.6"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-high", "gpt-5.6-high", "cx/gpt-5.6-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-medium", "gpt-5.6-medium", "cx/gpt-5.6-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-low", "gpt-5.6-low", "cx/gpt-5.6-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-xhigh", "gpt-5.6-xhigh", "cx/gpt-5.6-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-max", "gpt-5.6-max", "cx/gpt-5.6-max"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-sol-ultra",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-sol-ultra", "gpt-5.6-ultra", "cx/gpt-5.6-ultra"],
     },
     StaticModelDef {
         canonical_id: "cx/gpt-5.6-terra",
@@ -149,14 +275,94 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         aliases: &["gpt-5.6-terra"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-max"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-terra-ultra",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-terra-ultra"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-5.6-luna",
         owned_by: "openai-codex",
         aliases: &["gpt-5.6-luna"],
     },
     StaticModelDef {
+        canonical_id: "cx/gpt-5.6-luna-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-luna-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-luna-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-luna-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-luna-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-luna-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-luna-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-luna-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-5.6-luna-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-5.6-luna-max"],
+    },
+    StaticModelDef {
         canonical_id: "cx/gpt-reserve",
         owned_by: "openai-codex",
         aliases: &["gpt-reserve"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-reserve-high",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve-high"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-reserve-medium",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve-medium"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-reserve-low",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve-low"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-reserve-xhigh",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve-xhigh"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/gpt-reserve-max",
+        owned_by: "openai-codex",
+        aliases: &["gpt-reserve-max"],
     },
     StaticModelDef {
         canonical_id: "cx/gpt-5.5",
@@ -167,6 +373,17 @@ const STATIC_MODELS: &[StaticModelDef] = &[
         canonical_id: "cx/codex-auto-review",
         owned_by: "openai-codex",
         aliases: &["codex-auto-review"],
+    },
+    StaticModelDef {
+        canonical_id: "cx/image-gen",
+        owned_by: "openai-codex",
+        aliases: &[
+            "image-gen",
+            "cx/gpt-image",
+            "cx/gpt-image-2",
+            "gpt-image-2",
+            "codex-image",
+        ],
     },
 ];
 
@@ -286,17 +503,41 @@ pub fn get_cached_codex_models() -> Vec<ModelEntry> {
         Err(_) => return Vec::new(),
     };
 
-    let mut models = Vec::new();
+    let mut models: Vec<ModelEntry> = Vec::new();
     if let Some(models_arr) = parsed.get("models").and_then(|m| m.as_array()) {
         for m in models_arr {
             if let Some(slug) = m.get("slug").and_then(|s| s.as_str()) {
                 let id = format!("cx/{slug}");
-                models.push(ModelEntry {
-                    id,
-                    object: "model".to_string(),
-                    created: DEFAULT_CREATED_TIMESTAMP,
-                    owned_by: "openai-codex".to_string(),
-                });
+                if !models.iter().any(|existing| existing.id == id) {
+                    models.push(ModelEntry {
+                        id,
+                        object: "model".to_string(),
+                        created: DEFAULT_CREATED_TIMESTAMP,
+                        owned_by: "openai-codex".to_string(),
+                    });
+                }
+                if let Some(levels) = m
+                    .get("supported_reasoning_levels")
+                    .and_then(|v| v.as_array())
+                {
+                    for lvl in levels {
+                        let effort = lvl
+                            .get("effort")
+                            .and_then(|e| e.as_str())
+                            .or_else(|| lvl.as_str());
+                        if let Some(effort) = effort {
+                            let effort_id = format!("cx/{slug}-{effort}");
+                            if !models.iter().any(|existing| existing.id == effort_id) {
+                                models.push(ModelEntry {
+                                    id: effort_id,
+                                    object: "model".to_string(),
+                                    created: DEFAULT_CREATED_TIMESTAMP,
+                                    owned_by: "openai-codex".to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -316,10 +557,12 @@ pub fn is_known_codex_model(target_model: &str) -> bool {
         return true;
     }
     let stripped = target_model.strip_prefix("cx/").unwrap_or(target_model);
+    let (base_stripped, _) = crate::codex::split_codex_effort_suffix(target_model);
     let dynamic = get_cached_codex_models();
-    dynamic
-        .iter()
-        .any(|m| m.id == target_model || m.id.strip_prefix("cx/").unwrap_or(&m.id) == stripped)
+    dynamic.iter().any(|m| {
+        let dyn_stripped = m.id.strip_prefix("cx/").unwrap_or(&m.id);
+        m.id == target_model || dyn_stripped == stripped || dyn_stripped == base_stripped
+    })
 }
 
 #[cfg(test)]
@@ -333,7 +576,7 @@ mod tests {
         let list_resp = registry.list_models();
 
         assert_eq!(list_resp.object, "list");
-        assert_eq!(list_resp.data.len(), 24);
+        assert_eq!(list_resp.data.len(), 61);
 
         let mut seen_ids = HashSet::new();
         for entry in &list_resp.data {
@@ -359,18 +602,52 @@ mod tests {
 
         // Specifically check the models required by test_models.py
         let ids: Vec<&str> = list_resp.data.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids.contains(&"ag/gemini-4-argon"));
+        assert!(ids.contains(&"ag/gemini-4-argon-high"));
+        assert!(ids.contains(&"ag/gemini-4-argon-medium"));
+        assert!(ids.contains(&"ag/gemini-4-argon-low"));
         assert!(ids.contains(&"ag/gemini-3.8-flash-high"));
         assert!(ids.contains(&"ag/gemini-pro-agent"));
         assert!(ids.contains(&"ag/gemini-3.1-pro-low"));
         assert!(ids.contains(&"cx/gpt-5.6-sol"));
+        assert!(ids.contains(&"cx/gpt-5.6-sol-high"));
+        assert!(ids.contains(&"cx/gpt-5.6-sol-ultra"));
+        assert!(ids.contains(&"cx/gpt-5.6-terra-high"));
+        assert!(ids.contains(&"cx/gpt-5.6-terra-ultra"));
+        assert!(ids.contains(&"cx/gpt-5.6-luna-high"));
         assert!(ids.contains(&"cx/gpt-6.1-sol"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol-high"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol-medium"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol-low"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol-xhigh"));
+        assert!(ids.contains(&"cx/gpt-6.1-sol-max"));
         assert!(ids.contains(&"cx/gpt-6-sol"));
         assert!(ids.contains(&"cx/gpt-6-luna"));
         assert!(ids.contains(&"cx/gpt-6-astra"));
+        assert!(ids.contains(&"cx/gpt-6-astra-high"));
         assert!(ids.contains(&"cx/gpt-reserve"));
+        assert!(ids.contains(&"cx/gpt-reserve-high"));
         assert!(ids.contains(&"cx/codex-auto-review"));
         assert!(ids.contains(&"ag/claude-opus-5-5-high"));
         assert!(ids.contains(&"ag/claude-sonnet-5-5-high"));
+        assert!(!ids.contains(&"gpt-6.1-sol-high"));
+        assert!(!ids.contains(&"gpt-6.1-high"));
+        assert!(!ids.contains(&"astra-high"));
+        assert!(!ids.contains(&"gpt-5.6-sol-high"));
+        assert!(!ids.contains(&"gpt-5.6-terra-ultra"));
+        assert!(!ids.contains(&"gpt-reserve-high"));
+        assert!(!ids.contains(&"gemini-4-argon"));
+        assert!(!ids.contains(&"gemini-4-argon-high"));
+        assert!(!ids.contains(&"gemini-4-argon-medium"));
+        assert!(!ids.contains(&"gemini-4-argon-low"));
+        assert!(!ids.contains(&"ag/argon"));
+        assert!(!ids.contains(&"argon"));
+        assert!(!ids.contains(&"ag/agon"));
+        assert!(!ids.contains(&"agon"));
+        assert!(!ids.contains(&"ag/argon-high"));
+        assert!(!ids.contains(&"argon-high"));
+        assert!(!ids.contains(&"ag/agon-high"));
+        assert!(!ids.contains(&"agon-high"));
         assert!(!ids.contains(&"gemini-3.8-flash-high"));
         assert!(!ids.contains(&"gemini-pro-agent"));
         assert!(!ids.contains(&"ag/gemini-3.1-pro"));
@@ -432,6 +709,33 @@ mod tests {
         assert!(registry.get_model("cx/codex-auto-review").is_some());
         assert!(registry.get_model("codex-auto-review").is_some());
 
+        // Codex thinking level lookups
+        let m_61_high = registry.get_model("cx/gpt-6.1-sol-high");
+        assert!(m_61_high.is_some());
+        assert_eq!(m_61_high.unwrap().owned_by, "openai-codex");
+        assert!(registry.get_model("gpt-6.1-sol-high").is_some());
+        assert!(registry.get_model("gpt-6.1-high").is_some());
+        assert!(registry.get_model("cx/gpt-6.1-high").is_some());
+
+        assert!(registry.get_model("cx/gpt-6-astra-medium").is_some());
+        assert!(registry.get_model("gpt-6-astra-medium").is_some());
+        assert!(registry.get_model("astra-medium").is_some());
+        assert!(registry.get_model("cx/astra-medium").is_some());
+
+        assert!(registry.get_model("cx/gpt-5.6-sol-ultra").is_some());
+        assert!(registry.get_model("gpt-5.6-sol-ultra").is_some());
+        assert!(registry.get_model("gpt-5.6-ultra").is_some());
+        assert!(registry.get_model("cx/gpt-5.6-ultra").is_some());
+
+        assert!(registry.get_model("cx/gpt-5.6-terra-ultra").is_some());
+        assert!(registry.get_model("gpt-5.6-terra-ultra").is_some());
+
+        assert!(registry.get_model("cx/gpt-5.6-luna-low").is_some());
+        assert!(registry.get_model("gpt-5.6-luna-low").is_some());
+
+        assert!(registry.get_model("cx/gpt-reserve-max").is_some());
+        assert!(registry.get_model("gpt-reserve-max").is_some());
+
         // Claude 5.5 lookups
         let m_opus55 = registry.get_model("ag/claude-opus-5-5-high");
         assert!(m_opus55.is_some());
@@ -477,6 +781,46 @@ mod tests {
         assert!(registry.get_model("ag/gemini-pro-low").is_some());
         assert!(registry.get_model("gemini-pro-low").is_some());
 
+        // Gemini 4 Argon lookups
+        let m_argon = registry.get_model("ag/gemini-4-argon");
+        assert!(m_argon.is_some());
+        assert_eq!(m_argon.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon").is_some());
+        assert!(registry.get_model("ag/gemini-argon").is_some());
+        assert!(registry.get_model("gemini-argon").is_some());
+        assert!(registry.get_model("ag/argon").is_some());
+        assert!(registry.get_model("argon").is_some());
+        assert!(registry.get_model("ag/agon").is_some());
+        assert!(registry.get_model("agon").is_some());
+
+        // Gemini 4 Argon Thinking levels (High, Medium, Low)
+        let m_argon_high = registry.get_model("ag/gemini-4-argon-high");
+        assert!(m_argon_high.is_some());
+        assert_eq!(m_argon_high.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-high").is_some());
+        assert!(registry.get_model("ag/argon-high").is_some());
+        assert!(registry.get_model("argon-high").is_some());
+        assert!(registry.get_model("ag/agon-high").is_some());
+        assert!(registry.get_model("agon-high").is_some());
+
+        let m_argon_med = registry.get_model("ag/gemini-4-argon-medium");
+        assert!(m_argon_med.is_some());
+        assert_eq!(m_argon_med.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-medium").is_some());
+        assert!(registry.get_model("ag/argon-medium").is_some());
+        assert!(registry.get_model("argon-medium").is_some());
+        assert!(registry.get_model("ag/agon-medium").is_some());
+        assert!(registry.get_model("agon-medium").is_some());
+
+        let m_argon_low = registry.get_model("ag/gemini-4-argon-low");
+        assert!(m_argon_low.is_some());
+        assert_eq!(m_argon_low.unwrap().owned_by, "antigravity");
+        assert!(registry.get_model("gemini-4-argon-low").is_some());
+        assert!(registry.get_model("ag/argon-low").is_some());
+        assert!(registry.get_model("argon-low").is_some());
+        assert!(registry.get_model("ag/agon-low").is_some());
+        assert!(registry.get_model("agon-low").is_some());
+
         // Unknown / unsupported models return None
         assert!(registry.get_model("non-existent-model").is_none());
         assert!(registry.get_model("ag/unknown-gemini").is_none());
@@ -497,7 +841,11 @@ mod tests {
                 {
                     "slug": "gpt-future-v1",
                     "display_name": "GPT Future V1",
-                    "description": "Next gen model"
+                    "description": "Next gen model",
+                    "supported_reasoning_levels": [
+                        { "effort": "low" },
+                        { "effort": "high" }
+                    ]
                 },
                 {
                     "slug": "gpt-omni-coding",
@@ -512,17 +860,24 @@ mod tests {
 
         let cached = get_cached_codex_models();
         assert!(cached.iter().any(|m| m.id == "cx/gpt-future-v1"));
+        assert!(cached.iter().any(|m| m.id == "cx/gpt-future-v1-low"));
+        assert!(cached.iter().any(|m| m.id == "cx/gpt-future-v1-high"));
         assert!(cached.iter().any(|m| m.id == "cx/gpt-omni-coding"));
 
         // is_known_codex_model tests
         assert!(is_known_codex_model("cx/gpt-future-v1"));
         assert!(is_known_codex_model("gpt-future-v1"));
+        assert!(is_known_codex_model("cx/gpt-future-v1-high"));
+        assert!(is_known_codex_model("gpt-future-v1-high"));
+        // Unprefixed cached model with effort suffix even if not explicitly in levels (base_stripped matches cx/gpt-omni-coding)
+        assert!(is_known_codex_model("gpt-omni-coding-high"));
         assert!(is_known_codex_model("cx/gpt-omni-coding"));
         assert!(is_known_codex_model("gpt-omni-coding"));
         // Passthrough for any cx/*
         assert!(is_known_codex_model("cx/any-brand-new-model"));
         // Unknown non-cx model is false
         assert!(!is_known_codex_model("nonexistent-unprefixed-model"));
+        assert!(!is_known_codex_model("nonexistent-unprefixed-model-high"));
 
         std::env::remove_var("CODEX_MODELS_CACHE_PATH");
         let _ = std::fs::remove_dir_all(&temp_dir);

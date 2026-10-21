@@ -15,6 +15,10 @@ import {
 
 // Pre-seeded list of known Antigravity & OpenAI Codex models
 const DEFAULT_AG_MODELS = [
+  'ag/gemini-4-argon-high',
+  'ag/gemini-4-argon-medium',
+  'ag/gemini-4-argon-low',
+  'ag/gemini-4-argon',
   'ag/gemini-3.8-flash-high',
   'ag/gemini-3.8-flash-low',
   'ag/gemini-3.7-flash-tiered',
@@ -29,12 +33,34 @@ const DEFAULT_AG_MODELS = [
 
 const DEFAULT_CX_MODELS = [
   'cx/gpt-6.1-sol',
+  'cx/gpt-6.1-sol-high',
+  'cx/gpt-6.1-sol-medium',
+  'cx/gpt-6.1-sol-low',
+  'cx/gpt-6.1-sol-xhigh',
+  'cx/gpt-6.1-sol-max',
   'cx/gpt-6-sol',
   'cx/gpt-6-luna',
   'cx/gpt-6-astra',
+  'cx/gpt-6-astra-high',
+  'cx/gpt-6-astra-medium',
+  'cx/gpt-6-astra-low',
+  'cx/gpt-6-astra-xhigh',
+  'cx/gpt-6-astra-max',
   'cx/gpt-5.6-sol',
+  'cx/gpt-5.6-sol-high',
+  'cx/gpt-5.6-sol-medium',
+  'cx/gpt-5.6-sol-low',
+  'cx/gpt-5.6-sol-xhigh',
+  'cx/gpt-5.6-sol-max',
+  'cx/gpt-5.6-sol-ultra',
   'cx/gpt-5.6-terra',
+  'cx/gpt-5.6-terra-high',
+  'cx/gpt-5.6-terra-medium',
+  'cx/gpt-5.6-terra-low',
   'cx/gpt-5.6-luna',
+  'cx/gpt-5.6-luna-high',
+  'cx/gpt-5.6-luna-medium',
+  'cx/gpt-5.6-luna-low',
   'cx/gpt-reserve',
   'cx/gpt-5.5',
 ];
@@ -60,6 +86,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
 
   // Mode & prompts
   const [isStream, setIsStream] = useState<boolean>(true);
+  const [thinkingLevel, setThinkingLevel] = useState<'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'>('default');
   const [systemPrompt, setSystemPrompt] = useState<string>(
     t('playground.defaultSystemPrompt')
   );
@@ -212,11 +239,14 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
       headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const payload = {
+    const payload: Record<string, any> = {
       model: activeModel,
       messages,
       stream: isStream,
     };
+    if (thinkingLevel !== 'default') {
+      payload.reasoning_effort = thinkingLevel;
+    }
 
     const startTime = performance.now();
 
@@ -529,6 +559,32 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
               </div>
             </div>
 
+            {/* Thinking / Reasoning Effort Selector */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <label htmlFor="thinking-level-select">{t('playground.thinkingLevelLabel')}</label>
+                {thinkingLevel !== 'default' && (
+                  <span className="badge badge-accent" style={{ fontSize: 10, padding: '1px 6px' }}>
+                    {thinkingLevel.toUpperCase()}
+                  </span>
+                )}
+              </div>
+              <select
+                id="thinking-level-select"
+                value={thinkingLevel}
+                onChange={(e) => setThinkingLevel(e.target.value as any)}
+                disabled={loading}
+              >
+                <option value="default">{t('playground.thinkingOptDefault')}</option>
+                <option value="low">{t('playground.thinkingOptLow')}</option>
+                <option value="medium">{t('playground.thinkingOptMedium')}</option>
+                <option value="high">{t('playground.thinkingOptHigh')}</option>
+                <option value="xhigh">{t('playground.thinkingOptXHigh')}</option>
+                <option value="max">{t('playground.thinkingOptMax')}</option>
+                <option value="ultra">{t('playground.thinkingOptUltra')}</option>
+              </select>
+            </div>
+
             {/* Preset prompts */}
             <div>
               <label style={{ display: 'block', marginBottom: 4 }}>{t('playground.quickPresetsLabel')}</label>
@@ -819,10 +875,9 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
             </div>
           ) : (
             <pre
-              className="playground-output-box"
+              className="playground-output-box playground-raw-pre"
               style={{
                 fontSize: 12.5,
-                color: '#a5b4fc',
               }}
             >
               {rawResponse ? JSON.stringify(rawResponse, null, 2) : responseText}

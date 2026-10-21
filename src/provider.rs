@@ -37,6 +37,89 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<f64> {
     None
 }
 
+pub fn parse_duration_string(s: &str) -> Option<f64> {
+    let mut total_secs = 0.0;
+    let mut current_num = String::new();
+
+    for c in s.chars() {
+        if c.is_ascii_digit() || c == '.' {
+            current_num.push(c);
+        } else {
+            if let Ok(n) = current_num.parse::<f64>() {
+                match c {
+                    'd' => total_secs += n * 86400.0,
+                    'h' => total_secs += n * 3600.0,
+                    'm' => total_secs += n * 60.0,
+                    's' => total_secs += n,
+                    _ => {}
+                }
+            }
+            current_num.clear();
+        }
+    }
+
+    if total_secs > 0.0 {
+        Some(total_secs)
+    } else {
+        None
+    }
+}
+
+pub fn parse_google_429_reset_epoch(err_msg: &str) -> Option<f64> {
+    let now = crate::account::current_time_secs();
+
+    // 1. Try parsing JSON error body
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(err_msg) {
+        if let Some(details) = v
+            .get("error")
+            .and_then(|e| e.get("details"))
+            .and_then(|d| d.as_array())
+        {
+            for d in details {
+                if let Some(meta) = d.get("metadata") {
+                    if let Some(ts_str) = meta.get("quotaResetTimeStamp").and_then(|t| t.as_str()) {
+                        if let Some(epoch) = crate::account::parse_reset_time_epoch(ts_str) {
+                            return Some(epoch);
+                        }
+                    }
+                    if let Some(delay_str) = meta.get("quotaResetDelay").and_then(|t| t.as_str()) {
+                        if let Some(secs) = parse_duration_string(delay_str) {
+                            return Some(now + secs);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Search for quotaResetTimeStamp in raw text
+    if let Some(idx) = err_msg.find("quotaResetTimeStamp") {
+        let sub = &err_msg[idx..];
+        if let Some(start_q) = sub.find(':') {
+            let after_colon = sub[start_q + 1..].trim();
+            if let Some(stripped) = after_colon.strip_prefix('"') {
+                if let Some(end_q) = stripped.find('"') {
+                    let ts_str = &stripped[..end_q];
+                    if let Some(epoch) = crate::account::parse_reset_time_epoch(ts_str) {
+                        return Some(epoch);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Search for "Resets in XhYmZs"
+    if let Some(idx) = err_msg.find("Resets in ") {
+        let sub = &err_msg[idx + 10..];
+        let token = sub.split(['.', '"', '\n', '}']).next().unwrap_or("");
+        if let Some(secs) = parse_duration_string(token) {
+            return Some(now + secs);
+        }
+    }
+
+    None
+}
+
 pub fn deserialize_chat_message_content<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -221,6 +304,8 @@ pub struct ChatCompletionRequest {
     pub stop: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ChatCompletionRequest {
@@ -1241,6 +1326,15 @@ pub fn map_antigravity_upstream_model(model: &str) -> &str {
         "gemini-3.1-pro-low" | "gemini-pro-low" => "gemini-3.1-pro-low",
         "claude-opus-5-5" | "claude-opus-5.5" => "claude-opus-5-5-high",
         "claude-sonnet-5-5" | "claude-sonnet-5.5" => "claude-sonnet-5-5-high",
+        "gemini-4-argon-low" | "argon-low" | "agon-low" => "gemini-4-argon-low",
+        "gemini-4-argon-medium" | "argon-medium" | "agon-medium" => "gemini-4-argon-medium",
+        "gemini-4-argon-high"
+        | "argon-high"
+        | "agon-high"
+        | "gemini-4-argon"
+        | "gemini-argon"
+        | "argon"
+        | "agon" => "gemini-4-argon-high",
         other => other,
     }
 }
@@ -1644,7 +1738,18 @@ pub fn extract_text_tool_calls(text: &str) -> (String, Vec<serde_json::Value>) {
 }
 
 pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json::Value {
-    let upstream_model = map_antigravity_upstream_model(&request.model);
+    let mut upstream_model = map_antigravity_upstream_model(&request.model);
+    if upstream_model.starts_with("gemini-4-argon") {
+        if let Some(effort) = request.reasoning_effort.as_deref() {
+            if effort.eq_ignore_ascii_case("low") {
+                upstream_model = "gemini-4-argon-low";
+            } else if effort.eq_ignore_ascii_case("medium") {
+                upstream_model = "gemini-4-argon-medium";
+            } else if effort.eq_ignore_ascii_case("high") {
+                upstream_model = "gemini-4-argon-high";
+            }
+        }
+    }
     let is_claude = upstream_model.to_lowercase().contains("claude");
 
     let mut contents: Vec<serde_json::Value> = Vec::new();
@@ -1772,13 +1877,33 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
             }
             let content_str = msg.content_text();
 
+            let mut image_parts = Vec::new();
+            if let Some(MessageContent::Parts(user_parts)) = &msg.content {
+                for p in user_parts {
+                    if p.get("inlineData").is_some() {
+                        image_parts.push(p.clone());
+                    } else if let Some(img_obj) = p.get("image_url") {
+                        let url = img_obj.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                        if url.starts_with("data:") {
+                            if let Some((header, b64_data)) = url.split_once(";base64,") {
+                                let mime = header.strip_prefix("data:").unwrap_or("image/jpeg");
+                                image_parts.push(serde_json::json!({
+                                    "inlineData": {
+                                        "mimeType": mime,
+                                        "data": b64_data
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+
             if is_degraded {
                 let marker = format!("[Tool Result for {}: {}]", actual_name, content_str);
-                push_gemini_parts(
-                    &mut contents,
-                    "user",
-                    vec![serde_json::json!({ "text": marker })],
-                );
+                let mut tool_parts = vec![serde_json::json!({ "text": marker })];
+                tool_parts.extend(image_parts);
+                push_gemini_parts(&mut contents, "user", tool_parts);
             } else {
                 let content_json = serde_json::from_str::<serde_json::Value>(&content_str)
                     .unwrap_or_else(|_| serde_json::json!({ "output": content_str.as_ref() }));
@@ -1799,7 +1924,9 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
                 let part = serde_json::json!({
                     "functionResponse": fr_obj,
                 });
-                push_gemini_parts(&mut contents, "user", vec![part]);
+                let mut tool_parts = vec![part];
+                tool_parts.extend(image_parts);
+                push_gemini_parts(&mut contents, "user", tool_parts);
             }
         } else if msg.role == "assistant" && msg.tool_calls.is_some() {
             let mut parts = Vec::new();
@@ -1913,6 +2040,19 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
                         || p.get("inlineData").is_some()
                     {
                         parts.push(p.clone());
+                    } else if let Some(img_obj) = p.get("image_url") {
+                        let url = img_obj.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                        if url.starts_with("data:") {
+                            if let Some((header, b64_data)) = url.split_once(";base64,") {
+                                let mime = header.strip_prefix("data:").unwrap_or("image/jpeg");
+                                parts.push(serde_json::json!({
+                                    "inlineData": {
+                                        "mimeType": mime,
+                                        "data": b64_data
+                                    }
+                                }));
+                            }
+                        }
                     }
                 }
             }
@@ -1955,6 +2095,41 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
     });
     if !is_claude {
         gen_config["topK"] = serde_json::json!(40);
+    }
+
+    if upstream_model.contains("argon") {
+        let model_lower = request.model.to_lowercase();
+        let level = if model_lower.ends_with("-high")
+            || request
+                .reasoning_effort
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("high"))
+                .unwrap_or(false)
+        {
+            "HIGH"
+        } else if model_lower.ends_with("-low")
+            || request
+                .reasoning_effort
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("low"))
+                .unwrap_or(false)
+        {
+            "LOW"
+        } else if model_lower.ends_with("-medium")
+            || request
+                .reasoning_effort
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("medium"))
+                .unwrap_or(false)
+        {
+            "MEDIUM"
+        } else {
+            "HIGH"
+        };
+
+        gen_config["thinkingConfig"] = serde_json::json!({
+            "thinkingLevel": level
+        });
     }
 
     let mut req_obj = serde_json::json!({
@@ -2886,8 +3061,21 @@ impl Provider for AntigravityProvider {
                 }
 
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    let retry_after = parse_retry_after(&headers).unwrap_or(120.0);
-                    lease.commit_error_with_cooldown(&format!("{status}:{err_msg}"), retry_after);
+                    let now = crate::account::current_time_secs();
+                    let is_quota_exhausted = err_msg.contains("QUOTA_EXHAUSTED")
+                        || err_msg.contains("Individual quota reached");
+
+                    if is_quota_exhausted {
+                        let reset_epoch =
+                            parse_google_429_reset_epoch(&err_msg).unwrap_or(now + 43200.0);
+                        lease.commit_quota_exhausted(reset_epoch, &format!("{status}:{err_msg}"));
+                    } else {
+                        let retry_after = parse_retry_after(&headers).unwrap_or(120.0);
+                        lease.commit_error_with_cooldown(
+                            &format!("{status}:{err_msg}"),
+                            retry_after,
+                        );
+                    }
                     last_error_msg = err_msg;
                     last_status = 429;
                     continue;
@@ -3048,8 +3236,21 @@ impl Provider for AntigravityProvider {
                 }
 
                 if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                    let retry_after = parse_retry_after(&headers).unwrap_or(120.0);
-                    lease.commit_error_with_cooldown(&format!("{status}:{err_msg}"), retry_after);
+                    let now = crate::account::current_time_secs();
+                    let is_quota_exhausted = err_msg.contains("QUOTA_EXHAUSTED")
+                        || err_msg.contains("Individual quota reached");
+
+                    if is_quota_exhausted {
+                        let reset_epoch =
+                            parse_google_429_reset_epoch(&err_msg).unwrap_or(now + 43200.0);
+                        lease.commit_quota_exhausted(reset_epoch, &format!("{status}:{err_msg}"));
+                    } else {
+                        let retry_after = parse_retry_after(&headers).unwrap_or(120.0);
+                        lease.commit_error_with_cooldown(
+                            &format!("{status}:{err_msg}"),
+                            retry_after,
+                        );
+                    }
                     last_error_msg = err_msg;
                     last_status = 429;
                     continue;
@@ -3240,6 +3441,42 @@ mod tests {
 
         let last = mock.last_request().expect("should have recorded request");
         assert_eq!(last.model, "ag/gemini-3.8-flash-high");
+    }
+
+    #[test]
+    fn test_parse_google_429_reset_epoch_json() {
+        let err_json = r#"{
+          "error": {
+            "code": 429,
+            "message": "Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 11h52m8s.",
+            "status": "RESOURCE_EXHAUSTED",
+            "details": [
+              {
+                "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                "reason": "QUOTA_EXHAUSTED",
+                "domain": "cloudcode-pa.googleapis.com",
+                "metadata": {
+                  "quotaResetTimeStamp": "2026-10-10T14:53:20Z",
+                  "uiMessage": "true",
+                  "model": "gemini-3.8-flash-high",
+                  "quotaResetDelay": "11h52m8.396s"
+                }
+              }
+            ]
+          }
+        }"#;
+
+        let epoch = parse_google_429_reset_epoch(err_json).expect("should parse reset timestamp");
+        assert_eq!(epoch, 1791644000.0);
+    }
+
+    #[test]
+    fn test_parse_duration_string() {
+        let secs = parse_duration_string("11h52m8.396s").unwrap();
+        assert!((secs - (11.0 * 3600.0 + 52.0 * 60.0 + 8.396)).abs() < 0.01);
+
+        let secs_h = parse_duration_string("34h27m33s").unwrap();
+        assert_eq!(secs_h, 34.0 * 3600.0 + 27.0 * 60.0 + 33.0);
     }
 
     #[test]
@@ -3436,6 +3673,60 @@ mod tests {
             "claude-sonnet-4-6"
         );
 
+        // Argon / Agon aliases map to gemini-4-argon-*
+        assert_eq!(
+            map_antigravity_upstream_model("ag/gemini-4-argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("gemini-4-argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/gemini-argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("gemini-argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/agon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("agon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/gemini-4-argon-high"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/gemini-4-argon-medium"),
+            "gemini-4-argon-medium"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/gemini-4-argon-low"),
+            "gemini-4-argon-low"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("agon-high"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("argon-low"),
+            "gemini-4-argon-low"
+        );
+
         // Safety assertion: raw unsupported gemini-3.1-pro is never returned
         assert_ne!(
             map_antigravity_upstream_model("ag/gemini-3.1-pro"),
@@ -3486,6 +3777,62 @@ mod tests {
         };
         let payload_low = build_antigravity_payload(&req_low);
         assert_eq!(payload_low["model"], "gemini-3.1-pro-low");
+    }
+
+    #[test]
+    fn test_build_antigravity_payload_gemini_4_argon_thinking_levels() {
+        // High thinking via model suffix
+        let req_high = ChatCompletionRequest {
+            model: "ag/gemini-4-argon-high".to_string(),
+            messages: vec![ChatMessage::new("user", "Hard SWE task")],
+            ..Default::default()
+        };
+        let p_high = build_antigravity_payload(&req_high);
+        assert_eq!(p_high["model"], "gemini-4-argon-high");
+        assert_eq!(
+            p_high["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "HIGH"
+        );
+
+        // Medium thinking via model suffix
+        let req_med = ChatCompletionRequest {
+            model: "ag/gemini-4-argon-medium".to_string(),
+            messages: vec![ChatMessage::new("user", "General question")],
+            ..Default::default()
+        };
+        let p_med = build_antigravity_payload(&req_med);
+        assert_eq!(p_med["model"], "gemini-4-argon-medium");
+        assert_eq!(
+            p_med["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "MEDIUM"
+        );
+
+        // Low thinking via model suffix
+        let req_low = ChatCompletionRequest {
+            model: "ag/gemini-4-argon-low".to_string(),
+            messages: vec![ChatMessage::new("user", "Summarize text")],
+            ..Default::default()
+        };
+        let p_low = build_antigravity_payload(&req_low);
+        assert_eq!(p_low["model"], "gemini-4-argon-low");
+        assert_eq!(
+            p_low["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "LOW"
+        );
+
+        // Explicit reasoning_effort overrides or sets thinking level
+        let req_effort = ChatCompletionRequest {
+            model: "ag/gemini-4-argon".to_string(),
+            messages: vec![ChatMessage::new("user", "Reasoning effort high")],
+            reasoning_effort: Some("high".to_string()),
+            ..Default::default()
+        };
+        let p_effort = build_antigravity_payload(&req_effort);
+        assert_eq!(p_effort["model"], "gemini-4-argon-high");
+        assert_eq!(
+            p_effort["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+            "HIGH"
+        );
     }
 
     #[test]
@@ -3544,6 +3891,101 @@ mod tests {
         assert_eq!(tools.len(), 1);
         let decls = tools[0]["functionDeclarations"].as_array().unwrap();
         assert_eq!(decls[0]["name"], "lookup");
+    }
+
+    #[test]
+    fn test_build_antigravity_payload_with_image_url() {
+        let req = ChatCompletionRequest {
+            model: "ag/gemini-3.8-flash-high".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![
+                    serde_json::json!({
+                        "type": "text",
+                        "text": "Describe this image"
+                    }),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                        }
+                    }),
+                ])),
+                tool_calls: None,
+                tool_call_id: None,
+                name: None,
+            }],
+            ..Default::default()
+        };
+
+        let payload = build_antigravity_payload(&req);
+        let contents = payload["request"]["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 1);
+        let parts = contents[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "Describe this image");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(
+            parts[1]["inlineData"]["data"],
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        );
+    }
+
+    #[test]
+    fn test_build_antigravity_payload_with_tool_image_url() {
+        let req = ChatCompletionRequest {
+            model: "ag/gemini-3.8-flash-high".to_string(),
+            messages: vec![
+                ChatMessage::user("Take a screenshot"),
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: None,
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Some(serde_json::json!([{
+                        "id": "call_snap_123:thought_sig_abc",
+                        "type": "function",
+                        "function": {
+                            "name": "take_screenshot",
+                            "arguments": "{}"
+                        }
+                    }])),
+                },
+                ChatMessage {
+                    role: "tool".to_string(),
+                    content: Some(MessageContent::Parts(vec![
+                        serde_json::json!({
+                            "type": "text",
+                            "text": "Screenshot captured"
+                        }),
+                        serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                            }
+                        }),
+                    ])),
+                    name: Some("take_screenshot".to_string()),
+                    tool_call_id: Some("call_snap_123:thought_sig_abc".to_string()),
+                    tool_calls: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let payload = build_antigravity_payload(&req);
+        let contents = payload["request"]["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[2]["role"], "user");
+        let parts = contents[2]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["functionResponse"]["id"], "call_snap_123");
+        assert_eq!(parts[0]["functionResponse"]["name"], "take_screenshot");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(
+            parts[1]["inlineData"]["data"],
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        );
     }
 
     #[test]

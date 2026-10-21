@@ -192,6 +192,11 @@ export const api = {
     request<{ ok: boolean }>(`/admin/accounts/${encodeURIComponent(id)}/reset`, {
       method: 'POST',
     }),
+  toggleAccount: (id: string) =>
+    request<{ ok: boolean; id: string; is_active: boolean }>(
+      `/admin/accounts/${encodeURIComponent(id)}/toggle`,
+      { method: 'POST' }
+    ),
   refreshAccountQuota: (id: string) =>
     request<{ account_id: string; quota: any }>(
       `/admin/accounts/${encodeURIComponent(id)}/refresh-quota`,

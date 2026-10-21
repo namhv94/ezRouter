@@ -2454,6 +2454,80 @@ pub fn sanitize_codex_call_id(raw_id: &str, fallback_prefix: &str) -> String {
     }
 }
 
+fn extract_codex_text_part(p: &serde_json::Value) -> Option<&str> {
+    p.get("text")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            p.get("input_text")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            p.get("content")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| p.get("text").and_then(|v| v.as_str()))
+        .or_else(|| p.get("input_text").and_then(|v| v.as_str()))
+        .or_else(|| p.get("content").and_then(|v| v.as_str()))
+}
+
+fn extract_codex_image_part(p: &serde_json::Value) -> Option<(&str, &str)> {
+    let p_type = p.get("type").and_then(|v| v.as_str());
+    let is_img = matches!(p_type, Some("image_url" | "input_image" | "image"))
+        || p.get("image_url").is_some();
+    if !is_img {
+        return None;
+    }
+
+    let (url_from_image_url, detail_from_image_url) = match p.get("image_url") {
+        Some(serde_json::Value::String(s)) => {
+            let trimmed = s.trim();
+            (
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                },
+                None,
+            )
+        }
+        Some(serde_json::Value::Object(obj)) => {
+            let u = obj
+                .get("url")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let d = obj
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            (u, d)
+        }
+        _ => (None, None),
+    };
+
+    let url = url_from_image_url.or_else(|| {
+        p.get("url")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    })?;
+
+    let detail = detail_from_image_url
+        .or_else(|| {
+            p.get("detail")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("auto");
+
+    Some((url, detail))
+}
+
 pub fn openai_to_codex_input(
     messages: &[ChatMessage],
     tools: Option<&serde_json::Value>,
@@ -2517,12 +2591,25 @@ pub fn openai_to_codex_input(
                 let mut user_parts = Vec::new();
                 if let Some(MessageContent::Parts(parts)) = &msg.content {
                     for p in parts {
-                        if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                        if let Some(t) = p.as_str() {
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
-                        } else if let Some(t) = p.as_str() {
-                            user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
-                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_text") {
-                            user_parts.push(p.clone());
+                        } else {
+                            let p_type = p.get("type").and_then(|v| v.as_str());
+                            if matches!(p_type, Some("text" | "input_text")) {
+                                let t = extract_codex_text_part(p).unwrap_or("");
+                                user_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
+                            } else if let Some((img_url, img_detail)) = extract_codex_image_part(p)
+                            {
+                                user_parts.push(serde_json::json!({
+                                    "type": "input_image",
+                                    "image_url": img_url,
+                                    "detail": img_detail
+                                }));
+                            } else if let Some(t) = extract_codex_text_part(p) {
+                                user_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
+                            }
                         }
                     }
                 }
@@ -2532,6 +2619,7 @@ pub fn openai_to_codex_input(
                         .push(serde_json::json!({"type": "input_text", "text": text.as_ref()}));
                 }
                 converted_input.push(serde_json::json!({
+                    "type": "message",
                     "role": "user",
                     "content": user_parts
                 }));
@@ -2635,12 +2723,54 @@ pub fn openai_to_codex_input(
                 let final_call_id =
                     sanitize_codex_call_id(&call_id, &format!("call_tool_{msg_idx}"));
 
-                let output_text = msg.content_text();
-                converted_input.push(serde_json::json!({
-                    "type": "function_call_output",
-                    "call_id": final_call_id,
-                    "output": output_text.as_ref()
-                }));
+                let has_image_parts = match &msg.content {
+                    Some(MessageContent::Parts(parts)) => parts
+                        .iter()
+                        .any(|p| !p.is_string() && extract_codex_image_part(p).is_some()),
+                    _ => false,
+                };
+
+                if has_image_parts {
+                    let mut tool_parts = Vec::new();
+                    if let Some(MessageContent::Parts(parts)) = &msg.content {
+                        for p in parts {
+                            if let Some(t) = p.as_str() {
+                                tool_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
+                            } else {
+                                let p_type = p.get("type").and_then(|v| v.as_str());
+                                if matches!(p_type, Some("text" | "input_text")) {
+                                    let t = extract_codex_text_part(p).unwrap_or("");
+                                    tool_parts
+                                        .push(serde_json::json!({"type": "input_text", "text": t}));
+                                } else if let Some((img_url, img_detail)) =
+                                    extract_codex_image_part(p)
+                                {
+                                    tool_parts.push(serde_json::json!({
+                                        "type": "input_image",
+                                        "image_url": img_url,
+                                        "detail": img_detail
+                                    }));
+                                } else if let Some(t) = extract_codex_text_part(p) {
+                                    tool_parts
+                                        .push(serde_json::json!({"type": "input_text", "text": t}));
+                                }
+                            }
+                        }
+                    }
+                    converted_input.push(serde_json::json!({
+                        "type": "function_call_output",
+                        "call_id": final_call_id,
+                        "output": tool_parts
+                    }));
+                } else {
+                    let output_text = msg.content_text();
+                    converted_input.push(serde_json::json!({
+                        "type": "function_call_output",
+                        "call_id": final_call_id,
+                        "output": output_text.as_ref()
+                    }));
+                }
             }
             other => {
                 return Err(AppError::BadRequest(format!(
@@ -3149,12 +3279,24 @@ impl CodexProvider {
             .and_then(|v| v.as_str())
             .unwrap_or("cx/gpt-5.6-sol");
         let upstream_model = normalize_upstream_codex_model(requested_model).to_string();
+        let explicit_effort = payload.get("reasoning_effort").and_then(|v| v.as_str());
+        let resolved_effort = resolve_codex_reasoning_effort(requested_model, explicit_effort);
 
         let mut body = payload.clone();
         body["model"] = serde_json::json!(upstream_model);
         body["store"] = serde_json::json!(false);
         if is_stream {
             body["stream"] = serde_json::json!(true);
+        }
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("reasoning_effort");
+        }
+        if let Some(effort) = resolved_effort {
+            if let Some(r_obj) = body.get_mut("reasoning").and_then(|r| r.as_object_mut()) {
+                r_obj.insert("effort".to_string(), serde_json::json!(effort));
+            } else {
+                body["reasoning"] = serde_json::json!({ "effort": effort });
+            }
         }
 
         let url = format!("{}/codex/responses", self.base_url);
@@ -3222,9 +3364,22 @@ impl CodexProvider {
             };
 
             let status = resp.status();
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
@@ -3299,15 +3454,60 @@ pub struct RawResponsesResult {
     pub upstream_model: String,
 }
 
+pub fn split_codex_effort_suffix(model: &str) -> (&str, Option<&'static str>) {
+    let stripped = model.trim().strip_prefix("cx/").unwrap_or(model.trim());
+    const SUFFIXES: &[(&str, &str)] = &[
+        ("-medium", "medium"),
+        ("-xhigh", "xhigh"),
+        ("-ultra", "ultra"),
+        ("-high", "high"),
+        ("-low", "low"),
+        ("-max", "max"),
+    ];
+
+    for &(suffix, canonical_effort) in SUFFIXES {
+        if stripped.len() > suffix.len() {
+            let offset = stripped.len() - suffix.len();
+            if stripped.is_char_boundary(offset) && stripped[offset..].eq_ignore_ascii_case(suffix)
+            {
+                return (&stripped[..offset], Some(canonical_effort));
+            }
+        }
+    }
+
+    (stripped, None)
+}
+
 pub fn normalize_upstream_codex_model(model: &str) -> &str {
-    let stripped = model.strip_prefix("cx/").unwrap_or(model);
-    match stripped {
+    let (base, _) = split_codex_effort_suffix(model);
+    match base {
         "astra" => "gpt-6-astra",
         "gpt-6.1" => "gpt-6.1-sol",
         "gpt-6" => "gpt-6-sol",
         "gpt-5.6" => "gpt-5.6-sol",
         other => other,
     }
+}
+
+pub fn resolve_codex_reasoning_effort(
+    model: &str,
+    explicit_effort: Option<&str>,
+) -> Option<String> {
+    if let Some(raw) = explicit_effort {
+        let trimmed = raw.trim();
+        if !trimmed.is_empty()
+            && !trimmed.eq_ignore_ascii_case("default")
+            && !trimmed.eq_ignore_ascii_case("none")
+        {
+            return Some(trimmed.to_ascii_lowercase());
+        }
+    }
+
+    if let (_, Some(suffix_effort)) = split_codex_effort_suffix(model) {
+        return Some(suffix_effort.to_string());
+    }
+
+    None
 }
 
 #[axum::async_trait]
@@ -3320,15 +3520,20 @@ impl Provider for CodexProvider {
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
         let upstream_model = normalize_upstream_codex_model(&request.model);
+        let reasoning_effort =
+            resolve_codex_reasoning_effort(&request.model, request.reasoning_effort.as_deref());
 
         let is_native = self.is_native_non_stream_enabled();
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": upstream_model,
             "input": converted_input,
             "stream": !is_native,
             "store": false,
             "tools": converted_tools,
         });
+        if let Some(effort) = reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
 
         let url = format!("{}/codex/responses", self.base_url);
 
@@ -3421,9 +3626,22 @@ impl Provider for CodexProvider {
             let t5 = Instant::now();
             let upstream_headers_ms = (t5 - t4).as_secs_f64() * 1000.0;
 
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
@@ -3548,14 +3766,19 @@ impl Provider for CodexProvider {
             openai_to_codex_input(&request.messages, request.tools.as_ref())?;
 
         let upstream_model = normalize_upstream_codex_model(&request.model);
+        let reasoning_effort =
+            resolve_codex_reasoning_effort(&request.model, request.reasoning_effort.as_deref());
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": upstream_model,
             "input": converted_input,
             "stream": true,
             "store": false,
             "tools": converted_tools,
         });
+        if let Some(effort) = reasoning_effort {
+            body["reasoning"] = serde_json::json!({ "effort": effort });
+        }
 
         let url = format!("{}/codex/responses", self.base_url);
 
@@ -3643,9 +3866,22 @@ impl Provider for CodexProvider {
             let t5 = Instant::now();
             let upstream_connect_ms = (t5 - t4).as_secs_f64() * 1000.0;
 
-            if status == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
-                lease.release();
-                let _ = self.pool.refresh_token(&acc, true).await;
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                let refreshed = if attempt == 0 {
+                    self.pool.refresh_token(&acc, true).await.is_ok()
+                } else {
+                    false
+                };
+                if refreshed {
+                    lease.release();
+                    continue;
+                }
+                let err_text = resp.text().await.unwrap_or_default();
+                let is_revoked = err_text.to_lowercase().contains("token_revoked")
+                    || err_text.to_lowercase().contains("invalidated oauth token");
+                let cd = if is_revoked { 86400.0 } else { 3600.0 };
+                lease.commit_error_with_cooldown(&err_text, cd);
+                last_error = err_text;
                 continue;
             }
 
@@ -4257,6 +4493,274 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_to_codex_input_translates_image_url_parts() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"What is shown?"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"data:image/png;base64,aGVsbG8="}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["content"].as_array().unwrap().len(), 2);
+        assert_eq!(input[0]["content"][1]["type"], "input_image");
+        assert_eq!(input[0]["content"][1]["detail"], "auto");
+        assert_eq!(
+            input[0]["content"][1]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_preserves_custom_detail() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"Analyze high detail"}),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/high.png",
+                        "detail": "high"
+                    }
+                }),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/low.png",
+                        "detail": "low"
+                    }
+                }),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[0]["type"], "input_text");
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "https://example.com/high.png");
+        assert_eq!(parts[1]["detail"], "high");
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/low.png");
+        assert_eq!(parts[2]["detail"], "low");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_string_image_url() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"String URL"}),
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/raw_string.jpg"}),
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/with_detail.jpg", "detail":"high"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "https://example.com/raw_string.jpg");
+        assert_eq!(parts[1]["detail"], "auto");
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/with_detail.jpg");
+        assert_eq!(parts[2]["detail"], "high");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_image_only_message() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":{"url":"https://example.com/only.png"}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "input_image");
+        assert_eq!(parts[0]["image_url"], "https://example.com/only.png");
+        assert_eq!(parts[0]["detail"], "auto");
+
+        // Image-only message with string image_url
+        let messages_str = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/string_only.png"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input_str, _) = openai_to_codex_input(&messages_str, None).unwrap();
+        let parts_str = input_str[0]["content"].as_array().unwrap();
+        assert_eq!(parts_str.len(), 1);
+        assert_eq!(parts_str[0]["type"], "input_image");
+        assert_eq!(
+            parts_str[0]["image_url"],
+            "https://example.com/string_only.png"
+        );
+        assert_eq!(parts_str[0]["detail"], "auto");
+
+        // Multiple images only (no text)
+        let messages_multi = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/img1.png"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"https://example.com/img2.png", "detail":"low"}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input_multi, _) = openai_to_codex_input(&messages_multi, None).unwrap();
+        let parts_multi = input_multi[0]["content"].as_array().unwrap();
+        assert_eq!(parts_multi.len(), 2);
+        assert_eq!(parts_multi[0]["type"], "input_image");
+        assert_eq!(parts_multi[0]["image_url"], "https://example.com/img1.png");
+        assert_eq!(parts_multi[0]["detail"], "auto");
+        assert_eq!(parts_multi[1]["type"], "input_image");
+        assert_eq!(parts_multi[1]["image_url"], "https://example.com/img2.png");
+        assert_eq!(parts_multi[1]["detail"], "low");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_vision_variations() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                // Direct url field
+                serde_json::json!({"type":"image_url", "url":"https://example.com/direct_url.png", "detail":"high"}),
+                // Type image
+                serde_json::json!({"type":"image", "url":"https://example.com/type_image.png"}),
+                // Already input_image
+                serde_json::json!({"type":"input_image", "image_url":"https://example.com/native.png", "detail":"low"}),
+                // No type, image_url key
+                serde_json::json!({"image_url":"https://example.com/inferred.png"}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let parts = input[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[0]["image_url"], "https://example.com/direct_url.png");
+        assert_eq!(parts[0]["detail"], "high");
+        assert_eq!(parts[1]["image_url"], "https://example.com/type_image.png");
+        assert_eq!(parts[1]["detail"], "auto");
+        assert_eq!(parts[2]["image_url"], "https://example.com/native.png");
+        assert_eq!(parts[2]["detail"], "low");
+        assert_eq!(parts[3]["image_url"], "https://example.com/inferred.png");
+        assert_eq!(parts[3]["detail"], "auto");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_translates_tool_image_parts() {
+        let messages = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                tool_calls: Some(serde_json::json!([
+                    {
+                        "id": "call_vision_1",
+                        "type": "function",
+                        "function": {
+                            "name": "vision_analyze",
+                            "arguments": "{\"image\":\"chart.png\"}"
+                        }
+                    },
+                    {
+                        "id": "call_text_2",
+                        "type": "function",
+                        "function": {
+                            "name": "calculate",
+                            "arguments": "{\"expr\":\"1+1\"}"
+                        }
+                    },
+                    {
+                        "id": "call_text_3",
+                        "type": "function",
+                        "function": {
+                            "name": "notes",
+                            "arguments": "{}"
+                        }
+                    }
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_vision_1".to_string()),
+                content: Some(crate::provider::MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "Screenshot captured"}),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,toolbase64",
+                            "detail": "high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_text_2".to_string()),
+                content: Some(crate::provider::MessageContent::Text(
+                    "result: 2".to_string(),
+                )),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_text_3".to_string()),
+                content: Some(crate::provider::MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "plain text in parts"}),
+                ])),
+                ..Default::default()
+            },
+        ];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        assert_eq!(arr.len(), 6);
+
+        // Assistant function calls
+        assert_eq!(arr[0]["type"], "function_call");
+        assert_eq!(arr[0]["call_id"], "call_vision_1");
+        assert_eq!(arr[1]["type"], "function_call");
+        assert_eq!(arr[1]["call_id"], "call_text_2");
+        assert_eq!(arr[2]["type"], "function_call");
+        assert_eq!(arr[2]["call_id"], "call_text_3");
+
+        // Tool 1: tool message with image parts preserves input_image in function_call_output.output
+        assert_eq!(arr[3]["type"], "function_call_output");
+        assert_eq!(arr[3]["call_id"], "call_vision_1");
+        let tool1_parts = arr[3]["output"]
+            .as_array()
+            .expect("output should be an array of parts");
+        assert_eq!(tool1_parts.len(), 2);
+        assert_eq!(tool1_parts[0]["type"], "input_text");
+        assert_eq!(tool1_parts[0]["text"], "Screenshot captured");
+        assert_eq!(tool1_parts[1]["type"], "input_image");
+        assert_eq!(
+            tool1_parts[1]["image_url"],
+            "data:image/png;base64,toolbase64"
+        );
+        assert_eq!(tool1_parts[1]["detail"], "high");
+
+        // Tool 2: text-only tool message serializes output as string
+        assert_eq!(arr[4]["type"], "function_call_output");
+        assert_eq!(arr[4]["call_id"], "call_text_2");
+        assert_eq!(arr[4]["output"], "result: 2");
+        assert!(arr[4]["output"].is_string());
+
+        // Tool 3: text-only parts tool message serializes output as string
+        assert_eq!(arr[5]["type"], "function_call_output");
+        assert_eq!(arr[5]["call_id"], "call_text_3");
+        assert_eq!(arr[5]["output"], "plain text in parts");
+        assert!(arr[5]["output"].is_string());
+    }
+
+    #[test]
     fn test_openai_to_codex_input_translation() {
         let messages = vec![
             ChatMessage::system("System instruction"),
@@ -4604,6 +5108,132 @@ mod tests {
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["text"], "Part A, ");
         assert_eq!(parts[1]["text"], "Part B");
+    }
+
+    #[test]
+    fn test_regression_codex_text_part_content_and_input_text_variants() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                serde_json::json!({"type": "text", "content": "Question from content"}),
+                serde_json::json!({"type": "text", "input_text": "Question from input_text"}),
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": "https://example.com/target.png"
+                }),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["role"], "user");
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+
+        // Variant 1: type=text with content field must not convert to empty string
+        assert_eq!(parts[0]["type"], "input_text");
+        assert_eq!(parts[0]["text"], "Question from content");
+
+        // Variant 2: type=text with input_text field must not convert to empty string
+        assert_eq!(parts[1]["type"], "input_text");
+        assert_eq!(parts[1]["text"], "Question from input_text");
+
+        // Legitimate image part priority must be preserved alongside both variants
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/target.png");
+        assert_eq!(parts[2]["detail"], "auto");
+    }
+
+    #[test]
+    fn test_regression_codex_text_precedence_and_fallbacks() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                // text takes priority over content
+                serde_json::json!({"type": "text", "text": "preferred_text", "content": "ignored_content"}),
+                // text takes priority over input_text
+                serde_json::json!({"type": "text", "text": "preferred_text_2", "input_text": "ignored_input"}),
+                // input_text takes priority over content
+                serde_json::json!({"type": "text", "input_text": "preferred_input", "content": "ignored_content_2"}),
+                // non-empty content preferred over empty text
+                serde_json::json!({"type": "text", "text": "", "content": "non_empty_content"}),
+                // non-empty input_text preferred over empty text
+                serde_json::json!({"type": "text", "text": "", "input_text": "non_empty_input"}),
+                // untyped text object
+                serde_json::json!({"content": "untyped_content"}),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 6);
+        assert_eq!(parts[0]["text"], "preferred_text");
+        assert_eq!(parts[1]["text"], "preferred_text_2");
+        assert_eq!(parts[2]["text"], "preferred_input");
+        assert_eq!(parts[3]["text"], "non_empty_content");
+        assert_eq!(parts[4]["text"], "non_empty_input");
+        assert_eq!(parts[5]["text"], "untyped_content");
+    }
+
+    #[test]
+    fn test_regression_codex_preserves_legitimate_image_priority_with_text_fields() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                // Typed image with content caption
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": "https://example.com/typed_with_content.png",
+                    "content": "caption text that must not hijack image"
+                }),
+                // Untyped image with text field
+                serde_json::json!({
+                    "image_url": "https://example.com/untyped_with_text.png",
+                    "text": "label that must not hijack image"
+                }),
+                // Typed image with detail and input_text
+                serde_json::json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "https://example.com/detailed.png",
+                        "detail": "high"
+                    },
+                    "input_text": "metadata that must not hijack image"
+                }),
+            ])),
+            name: None,
+            tool_call_id: None,
+            tool_calls: None,
+        }];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        let parts = arr[0]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 3);
+
+        assert_eq!(parts[0]["type"], "input_image");
+        assert_eq!(
+            parts[0]["image_url"],
+            "https://example.com/typed_with_content.png"
+        );
+
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(
+            parts[1]["image_url"],
+            "https://example.com/untyped_with_text.png"
+        );
+
+        assert_eq!(parts[2]["type"], "input_image");
+        assert_eq!(parts[2]["image_url"], "https://example.com/detailed.png");
+        assert_eq!(parts[2]["detail"], "high");
     }
 
     #[test]
@@ -5663,6 +6293,53 @@ mod tests {
     }
 
     #[test]
+    fn test_split_codex_effort_suffix() {
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-high"),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("gpt-6.1-sol-high"),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-medium"),
+            ("gpt-6.1-sol", Some("medium"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-low"),
+            ("gpt-6.1-sol", Some("low"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-xhigh"),
+            ("gpt-6.1-sol", Some("xhigh"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-ultra"),
+            ("gpt-6.1-sol", Some("ultra"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol-max"),
+            ("gpt-6.1-sol", Some("max"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("  cx/gpt-6.1-sol-HIGH  "),
+            ("gpt-6.1-sol", Some("high"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("gpt-5.6-sol-XHIGH"),
+            ("gpt-5.6-sol", Some("xhigh"))
+        );
+        assert_eq!(
+            split_codex_effort_suffix("cx/gpt-6.1-sol"),
+            ("gpt-6.1-sol", None)
+        );
+        assert_eq!(split_codex_effort_suffix("gpt-6.1"), ("gpt-6.1", None));
+        assert_eq!(split_codex_effort_suffix("-high"), ("-high", None));
+        assert_eq!(split_codex_effort_suffix("high"), ("high", None));
+    }
+
+    #[test]
     fn test_normalize_upstream_codex_model() {
         assert_eq!(
             normalize_upstream_codex_model("cx/gpt-6.1-sol"),
@@ -5709,6 +6386,129 @@ mod tests {
         assert_eq!(
             normalize_upstream_codex_model("cx/codex-auto-review"),
             "codex-auto-review"
+        );
+
+        // With thinking suffixes -low, -medium, -high, -xhigh, -max, -ultra
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-sol-high"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6.1-sol-low"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-medium"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6.1-xhigh"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6.1-sol-max"),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-6-sol-high"),
+            "gpt-6-sol"
+        );
+        assert_eq!(normalize_upstream_codex_model("cx/gpt-6-high"), "gpt-6-sol");
+        assert_eq!(
+            normalize_upstream_codex_model("cx/astra-low"),
+            "gpt-6-astra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("gpt-6-astra-medium"),
+            "gpt-6-astra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-ultra"),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-sol-ultra"),
+            "gpt-5.6-sol"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-terra-ultra"),
+            "gpt-5.6-terra"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-5.6-luna-high"),
+            "gpt-5.6-luna"
+        );
+        assert_eq!(
+            normalize_upstream_codex_model("cx/gpt-reserve-max"),
+            "gpt-reserve"
+        );
+    }
+
+    #[test]
+    fn test_resolve_codex_reasoning_effort() {
+        // Explicit effort takes precedence and is lowercased
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("high")),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("HIGH")),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("  medium  ")),
+            Some("medium".to_string())
+        );
+
+        // Explicit "default", "none", or empty string ignored -> falls back to model suffix
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("default")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("none")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("")),
+            Some("low".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-low", Some("   ")),
+            Some("low".to_string())
+        );
+
+        // Fallback to model suffix when explicit effort is None
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-high", None),
+            Some("high".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol-xhigh", None),
+            Some("xhigh".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-5.6-sol-ultra", None),
+            Some("ultra".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-reserve-max", None),
+            Some("max".to_string())
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("gpt-6.1-medium", None),
+            Some("medium".to_string())
+        );
+
+        // No explicit effort and no suffix -> None
+        assert_eq!(resolve_codex_reasoning_effort("cx/gpt-6.1-sol", None), None);
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("none")),
+            None
+        );
+        assert_eq!(
+            resolve_codex_reasoning_effort("cx/gpt-6.1-sol", Some("default")),
+            None
         );
     }
 }

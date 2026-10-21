@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import { api, setStoredAdminKey } from '../api';
 import { IconKey, IconAlertCircle, EzRouterMark } from '../icons';
 import { useI18n } from '../i18n';
+import { ThemeSwitcher, ThemeMode } from './ThemeSwitcher';
 
 interface LoginModalProps {
   onSuccess: (key: string) => void;
+  theme?: ThemeMode;
+  onThemeChange?: (theme: ThemeMode) => void;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
+export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess, theme, onThemeChange }) => {
   const { t } = useI18n();
   const [keyInput, setKeyInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -38,6 +41,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
   return (
     <div className="modal-backdrop">
       <div className="modal-card login-card" style={{ maxWidth: 420 }}>
+        <div className="login-theme-wrapper" style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <ThemeSwitcher theme={theme} onThemeChange={onThemeChange} className="login-theme-switcher" />
+        </div>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div
             style={{
@@ -52,10 +58,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
           >
             <EzRouterMark size={40} />
           </div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.02em' }}>
-            {t('auth.title')} <span style={{ color: '#10b981' }}>ezRouter</span>
+          <h2 className="login-title" style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.02em' }}>
+            {t('auth.title')} <span className="brand-ez-highlight">ezRouter</span>
           </h2>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+          <p className="login-subtitle" style={{ fontSize: 13, marginTop: 4 }}>
             {t('auth.subtitle')}
           </p>
         </div>
@@ -94,7 +100,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onSuccess }) => {
                 <IconKey size={16} />
               </span>
             </div>
-            <span style={{ fontSize: 12, color: '#64748b', marginTop: 6, display: 'block' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'block' }}>
               {t('auth.storedLocally')}
             </span>
           </div>

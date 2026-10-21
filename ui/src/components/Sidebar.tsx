@@ -15,6 +15,7 @@ import {
 } from '../icons';
 import { HealthInfo } from '../types';
 import { useI18n } from '../i18n';
+import { ThemeSwitcher, ThemeMode } from './ThemeSwitcher';
 
 export type TabType =
   | 'overview'
@@ -40,6 +41,8 @@ interface SidebarProps {
   activeAccountsCount?: number;
   totalProvidersCount?: number;
   totalKeysCount?: number;
+  theme?: ThemeMode;
+  onThemeChange?: (theme: ThemeMode) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -51,6 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeAccountsCount,
   totalProvidersCount,
   totalKeysCount,
+  theme,
+  onThemeChange,
 }) => {
   const { t } = useI18n();
 
@@ -183,6 +188,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         <div className="sidebar-footer">
+          <div className="sidebar-theme-wrapper" style={{ marginBottom: 12, display: 'flex', justifyContent: 'center' }}>
+            <ThemeSwitcher theme={theme} onThemeChange={onThemeChange} />
+          </div>
           <div className="service-status-pill">
             <span className={`status-dot ${health?.status === 'ok' ? '' : 'error'}`} />
             <div>

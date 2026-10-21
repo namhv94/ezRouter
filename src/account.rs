@@ -109,7 +109,7 @@ pub const AG_MODELS_URL: &str =
     "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 pub const AG_LOAD_CODE_ASSIST_URL: &str =
     "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
-pub const AG_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
+pub const AG_USER_AGENT: &str = "antigravity/hub/2.23.0 darwin/arm64";
 pub const AG_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const AG_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
 pub const AG_SCOPES: &[&str] = &[
@@ -468,6 +468,35 @@ pub fn parse_google_quota_summary(payload: &serde_json::Value) -> serde_json::Va
     normalized
 }
 
+pub fn parse_reset_time_epoch(reset_time_str: &str) -> Option<f64> {
+    let trimmed = reset_time_str.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    chrono::DateTime::parse_from_rfc3339(trimmed)
+        .map(|dt| dt.timestamp() as f64)
+        .ok()
+}
+
+pub fn check_weekly_quota_exhausted(quota: &serde_json::Value) -> (bool, Option<f64>) {
+    // Check gemini_weekly first (primary driver of Antigravity proxying)
+    if let Some(gw) = quota.get("gemini_weekly") {
+        let rem = gw
+            .get("remaining_percent")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(100.0);
+        if rem <= 0.0 {
+            let reset_epoch = gw
+                .get("reset_time")
+                .and_then(|v| v.as_str())
+                .and_then(parse_reset_time_epoch);
+            return (true, reset_epoch);
+        }
+    }
+
+    (false, None)
+}
+
 #[axum::async_trait]
 impl GoogleQuotaFetcher for DefaultGoogleQuotaFetcher {
     async fn fetch_quota(&self, access_token: &str) -> Result<serde_json::Value, String> {
@@ -652,6 +681,8 @@ pub struct AccountResponse {
     pub plan_tier: Option<String>,
     #[serde(default)]
     pub plan_name: Option<String>,
+    #[serde(default)]
+    pub auto_disabled_quota: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -747,6 +778,16 @@ impl GoogleAccountLease {
         }
     }
 
+    pub fn commit_quota_exhausted(&mut self, cooldown_until: f64, error: &str) {
+        if !self.committed {
+            self.committed = true;
+            let _ = self
+                .pool
+                .auto_disable_for_quota(&self.account.id, cooldown_until, error);
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
     pub fn release(&mut self) {
         if !self.committed {
             self.committed = true;
@@ -785,6 +826,98 @@ impl std::fmt::Debug for AccountPool {
             .field("max_concurrency", &self.max_concurrency)
             .finish()
     }
+}
+
+pub fn filter_candidates_for_model(
+    mut candidates: Vec<AccountItem>,
+    model_id: Option<&str>,
+) -> Vec<AccountItem> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+
+    if let Some(model) = model_id {
+        let m_lower = model.to_lowercase();
+        let clean_model = model.strip_prefix("ag/").unwrap_or(model);
+        let mapped_model =
+            crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
+
+        // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
+        let mut with_model = Vec::new();
+        for item in &candidates {
+            if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array()) {
+                let has_m = models_arr.iter().any(|val| {
+                    val.as_str()
+                        .map(|s| {
+                            let s_low = s.to_lowercase();
+                            s_low == mapped_model || s_low == clean_model.to_lowercase()
+                        })
+                        .unwrap_or(false)
+                });
+                if has_m {
+                    with_model.push(item.clone());
+                }
+            }
+        }
+        if !with_model.is_empty() {
+            candidates = with_model;
+        }
+
+        // 2. Quota filtering
+        let is_claude_or_gpt = m_lower.contains("claude") || m_lower.contains("gpt");
+        let mut with_quota = Vec::new();
+        let mut without_quota = Vec::new();
+
+        for item in &candidates {
+            if is_claude_or_gpt {
+                let has_c5 = item.quota_cache.get("claude_5h");
+                let has_cw = item.quota_cache.get("claude_weekly");
+                if has_c5.is_none() && has_cw.is_none() {
+                    without_quota.push(item.clone());
+                } else {
+                    let c5_rem = has_c5
+                        .and_then(|v| v.get("remaining_percent"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    let cw_rem = has_cw
+                        .and_then(|v| v.get("remaining_percent"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    if c5_rem > 0.0 && cw_rem > 0.0 {
+                        with_quota.push(item.clone());
+                    }
+                }
+            } else {
+                let has_g5 = item.quota_cache.get("gemini_5h");
+                let has_gw = item.quota_cache.get("gemini_weekly");
+                if has_g5.is_none() && has_gw.is_none() {
+                    without_quota.push(item.clone());
+                } else {
+                    let g5_rem = has_g5
+                        .and_then(|v| v.get("remaining_percent"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    let gw_rem = has_gw
+                        .and_then(|v| v.get("remaining_percent"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    if g5_rem > 0.0 && gw_rem > 0.0 {
+                        with_quota.push(item.clone());
+                    }
+                }
+            }
+        }
+
+        candidates = if !with_quota.is_empty() {
+            with_quota
+        } else if !without_quota.is_empty() {
+            without_quota
+        } else {
+            candidates
+        };
+    }
+
+    candidates
 }
 
 impl AccountPool {
@@ -983,19 +1116,17 @@ impl AccountPool {
         map.clear();
         let count = records.len();
         for rec in records {
-            if rec.is_active {
-                map.insert(
-                    rec.id.clone(),
-                    AccountItem {
-                        record: rec,
-                        recent_requests: VecDeque::new(),
-                        quota_cache: serde_json::json!({}),
-                        quota_last_attempt: 0.0,
-                        quota_lock: Arc::new(tokio::sync::Mutex::new(())),
-                        in_flight: Arc::new(AtomicUsize::new(0)),
-                    },
-                );
-            }
+            map.insert(
+                rec.id.clone(),
+                AccountItem {
+                    record: rec,
+                    recent_requests: VecDeque::new(),
+                    quota_cache: serde_json::json!({}),
+                    quota_last_attempt: 0.0,
+                    quota_lock: Arc::new(tokio::sync::Mutex::new(())),
+                    in_flight: Arc::new(AtomicUsize::new(0)),
+                },
+            );
         }
         Ok(count)
     }
@@ -1077,6 +1208,7 @@ impl AccountPool {
                     quota: item.quota_cache.clone(),
                     plan_tier,
                     plan_name,
+                    auto_disabled_quota: item.record.auto_disabled_quota,
                 }
             })
             .collect();
@@ -1121,6 +1253,7 @@ impl AccountPool {
                 quota: item.quota_cache.clone(),
                 plan_tier,
                 plan_name,
+                auto_disabled_quota: item.record.auto_disabled_quota,
             }
         })
     }
@@ -1309,11 +1442,68 @@ impl AccountPool {
         }
     }
 
-    pub fn set_account_active(&self, account_id: &str, is_active: bool) {
+    pub fn set_account_active(
+        &self,
+        account_id: &str,
+        is_active: bool,
+    ) -> Result<bool, rusqlite::Error> {
+        let updated = self.db.set_account_active(account_id, is_active)?;
         let mut map = self.accounts.write().unwrap();
         if let Some(item) = map.get_mut(account_id) {
             item.record.is_active = is_active;
+            item.record.auto_disabled_quota = false;
         }
+        Ok(updated)
+    }
+
+    pub fn toggle_account(&self, account_id: &str) -> Result<bool, rusqlite::Error> {
+        let current = {
+            let map = self.accounts.read().unwrap();
+            map.get(account_id)
+                .map(|i| i.record.is_active)
+                .unwrap_or(false)
+        };
+        let next = !current;
+        self.set_account_active(account_id, next)?;
+        Ok(next)
+    }
+
+    pub fn auto_disable_for_quota(
+        &self,
+        account_id: &str,
+        cooldown_until: f64,
+        reason: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let updated = self.db.set_account_auto_disabled_quota(
+            account_id,
+            true,
+            false,
+            cooldown_until,
+            Some(reason),
+        )?;
+        let mut map = self.accounts.write().unwrap();
+        if let Some(item) = map.get_mut(account_id) {
+            item.record.is_active = false;
+            item.record.auto_disabled_quota = true;
+            item.record.cooldown_until = cooldown_until;
+            item.record.last_error = Some(reason.to_string());
+        }
+        Ok(updated)
+    }
+
+    pub fn auto_enable_for_quota(&self, account_id: &str) -> Result<bool, rusqlite::Error> {
+        let updated = self
+            .db
+            .set_account_auto_disabled_quota(account_id, false, true, 0.0, None)?;
+        let mut map = self.accounts.write().unwrap();
+        if let Some(item) = map.get_mut(account_id) {
+            item.record.is_active = true;
+            item.record.auto_disabled_quota = false;
+            item.record.cooldown_until = 0.0;
+            item.record.error_count = 0;
+            item.record.last_error = None;
+        }
+        Ok(updated)
     }
 
     pub fn set_account_cooldown(&self, account_id: &str, cooldown_until: f64) {
@@ -1419,6 +1609,26 @@ impl AccountPool {
         match self.quota_fetcher.fetch_quota(&access_token).await {
             Ok(quota) => {
                 self.set_quota_cache(account_id, quota.clone());
+
+                let (exhausted, reset_opt) = check_weekly_quota_exhausted(&quota);
+                let is_auto_disabled = {
+                    let map = self.accounts.read().unwrap();
+                    map.get(account_id)
+                        .map(|i| i.record.auto_disabled_quota)
+                        .unwrap_or(false)
+                };
+
+                if exhausted {
+                    let reset_epoch = reset_opt.unwrap_or(now + 86400.0);
+                    let _ = self.auto_disable_for_quota(account_id, reset_epoch, "Hết quota tuần");
+                    tracing::warn!(
+                        "Account '{account_id}' weekly quota exhausted, auto-disabled until {reset_epoch}"
+                    );
+                } else if is_auto_disabled {
+                    let _ = self.auto_enable_for_quota(account_id);
+                    tracing::info!("Account '{account_id}' weekly quota recovered, auto-enabled!");
+                }
+
                 Ok(quota)
             }
             Err(e) => {
@@ -1668,7 +1878,7 @@ impl AccountPool {
     pub fn peek_account(&self, model_id: Option<&str>) -> Option<AccountRecord> {
         let now = current_time_secs();
         let map = self.accounts.read().unwrap();
-        let mut candidates: Vec<AccountItem> = map
+        let candidates: Vec<AccountItem> = map
             .values()
             .filter(|item| item.record.is_active && item.record.cooldown_until <= now)
             .cloned()
@@ -1677,54 +1887,8 @@ impl AccountPool {
             return None;
         }
 
-        if let Some(model) = model_id {
-            let m_lower = model.to_lowercase();
-            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
-            let mapped_model =
-                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
-
-            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
-            let mut with_model = Vec::new();
-            for item in &candidates {
-                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
-                {
-                    let has_m = models_arr.iter().any(|val| {
-                        val.as_str()
-                            .map(|s| {
-                                let s_low = s.to_lowercase();
-                                s_low == mapped_model || s_low == clean_model.to_lowercase()
-                            })
-                            .unwrap_or(false)
-                    });
-                    if has_m {
-                        with_model.push(item.clone());
-                    }
-                }
-            }
-            if !with_model.is_empty() {
-                candidates = with_model;
-            }
-
-            if m_lower.contains("claude") || m_lower.contains("gpt") {
-                let mut with_quota = Vec::new();
-                for item in &candidates {
-                    if let Some(claude) = item.quota_cache.get("claude_5h") {
-                        let remaining = claude
-                            .get("remaining_percent")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        if remaining > 0.0 {
-                            with_quota.push(item.clone());
-                        }
-                    }
-                }
-                if !with_quota.is_empty() {
-                    candidates = with_quota;
-                }
-            }
-        }
-
-        candidates.sort_by(|a, b| {
+        let mut sorted = filter_candidates_for_model(candidates, model_id);
+        sorted.sort_by(|a, b| {
             a.record
                 .last_used_at
                 .partial_cmp(&b.record.last_used_at)
@@ -1732,7 +1896,7 @@ impl AccountPool {
                 .then_with(|| a.record.id.cmp(&b.record.id))
         });
 
-        candidates.first().map(|c| c.record.clone())
+        sorted.first().map(|c| c.record.clone())
     }
 
     pub async fn acquire_lease(
@@ -1776,64 +1940,9 @@ impl AccountPool {
             return None;
         }
 
-        let mut sorted = candidates;
-
-        if let Some(model) = model_id {
-            let m_lower = model.to_lowercase();
-            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
-            let mapped_model =
-                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
-
-            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
-            let mut with_model = Vec::new();
-            for item in &sorted {
-                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
-                {
-                    let has_m = models_arr.iter().any(|val| {
-                        val.as_str()
-                            .map(|s| {
-                                let s_low = s.to_lowercase();
-                                s_low == mapped_model || s_low == clean_model.to_lowercase()
-                            })
-                            .unwrap_or(false)
-                    });
-                    if has_m {
-                        with_model.push(item.clone());
-                    }
-                }
-            }
-            if !with_model.is_empty() {
-                sorted = with_model;
-            }
-
-            if m_lower.contains("claude") || m_lower.contains("gpt") {
-                let mut with_quota = Vec::new();
-                let mut without_quota = Vec::new();
-
-                for item in &sorted {
-                    if let Some(claude) = item.quota_cache.get("claude_5h") {
-                        let remaining = claude
-                            .get("remaining_percent")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        if remaining > 0.0 {
-                            with_quota.push(item.clone());
-                        }
-                    } else {
-                        without_quota.push(item.clone());
-                    }
-                }
-
-                sorted = if !with_quota.is_empty() {
-                    with_quota
-                } else {
-                    without_quota
-                };
-
-                if sorted.is_empty() {
-                    return None;
-                }
-            }
+        let mut sorted = filter_candidates_for_model(candidates, model_id);
+        if sorted.is_empty() {
+            return None;
         }
 
         sorted.sort_by(|a, b| {
@@ -2014,70 +2123,11 @@ impl AccountPool {
             return None;
         }
 
-        let mut sorted = candidates;
-
-        // Model-specific quota filtering (e.g. claude / gpt)
-        if let Some(model) = model_id {
-            let m_lower = model.to_lowercase();
-            let clean_model = model.strip_prefix("ag/").unwrap_or(model);
-            let mapped_model =
-                crate::provider::map_antigravity_upstream_model(clean_model).to_lowercase();
-
-            // 1. Model capability filtering: if accounts report models, prefer accounts supporting requested model
-            let mut with_model = Vec::new();
-            for item in &sorted {
-                if let Some(models_arr) = item.quota_cache.get("models").and_then(|v| v.as_array())
-                {
-                    let has_m = models_arr.iter().any(|val| {
-                        val.as_str()
-                            .map(|s| {
-                                let s_low = s.to_lowercase();
-                                s_low == mapped_model || s_low == clean_model.to_lowercase()
-                            })
-                            .unwrap_or(false)
-                    });
-                    if has_m {
-                        with_model.push(item.clone());
-                    }
-                }
-            }
-            if !with_model.is_empty() {
-                sorted = with_model;
-            }
-
-            if m_lower.contains("claude") || m_lower.contains("gpt") {
-                let mut with_quota = Vec::new();
-                let mut without_quota = Vec::new();
-
-                for item in &sorted {
-                    if let Some(claude) = item.quota_cache.get("claude_5h") {
-                        let remaining = claude
-                            .get("remaining_percent")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
-                        if remaining > 0.0 {
-                            with_quota.push(item.clone());
-                        }
-                    } else {
-                        without_quota.push(item.clone());
-                    }
-                }
-
-                sorted = if !with_quota.is_empty() {
-                    with_quota
-                } else {
-                    without_quota
-                };
-
-                if sorted.is_empty() {
-                    return None;
-                }
-            }
+        let mut sorted = filter_candidates_for_model(candidates, model_id);
+        if sorted.is_empty() {
+            return None;
         }
 
-        // Deterministic LRU / Round-Robin ordering:
-        // Primary: last_used_at ASC
-        // Secondary: id ASC
         sorted.sort_by(|a, b| {
             a.record
                 .last_used_at
@@ -2273,6 +2323,76 @@ mod tests {
             .await
             .expect("should pick B");
         assert_eq!(picked.id, acc_b.id);
+    }
+
+    #[tokio::test]
+    async fn test_quota_filtering_gemini() {
+        let db =
+            Arc::new(Database::open_or_create(std::path::Path::new(":memory:"), None).unwrap());
+        let pool = AccountPool::new(db.clone());
+
+        let acc_a = pool.add_account("a@example.com", "tok-a").unwrap();
+        let acc_b = pool.add_account("b@example.com", "tok-b").unwrap();
+
+        // A has 0% gemini weekly quota, B has 40%
+        pool.set_quota_cache(
+            &acc_a.id,
+            serde_json::json!({
+                "gemini_5h": { "remaining_percent": 100.0 },
+                "gemini_weekly": { "remaining_percent": 0.0, "reset_time": "2026-10-10T14:53:20Z" }
+            }),
+        );
+        pool.set_quota_cache(
+            &acc_b.id,
+            serde_json::json!({
+                "gemini_5h": { "remaining_percent": 100.0 },
+                "gemini_weekly": { "remaining_percent": 40.0, "reset_time": "2026-10-14T02:38:10Z" }
+            }),
+        );
+
+        // Requesting gemini model should pick B
+        let picked = pool
+            .pick_account(Some("ag/gemini-3.8-flash-high"))
+            .await
+            .expect("should pick B");
+        assert_eq!(picked.id, acc_b.id);
+    }
+
+    #[tokio::test]
+    async fn test_auto_disable_and_enable_on_quota_recovery() {
+        let db =
+            Arc::new(Database::open_or_create(std::path::Path::new(":memory:"), None).unwrap());
+        let pool = AccountPool::new(db.clone());
+
+        let acc = pool.add_account("user@example.com", "rt-user").unwrap();
+        assert!(acc.is_active);
+        assert!(!acc.auto_disabled_quota);
+
+        // Auto-disable for weekly quota exhaustion
+        let reset_epoch = current_time_secs() + 3600.0;
+        pool.auto_disable_for_quota(&acc.id, reset_epoch, "Weekly quota reached")
+            .unwrap();
+
+        let resp = pool.get_account(&acc.id).unwrap();
+        assert!(!resp.is_active);
+        assert!(resp.auto_disabled_quota);
+        assert!(resp.cooldown_remaining > 0.0);
+        assert_eq!(resp.last_error, Some("Weekly quota reached".to_string()));
+
+        // Cannot be picked while disabled
+        assert!(pool.pick_account(None).await.is_none());
+
+        // Auto-enable when quota recovers
+        pool.auto_enable_for_quota(&acc.id).unwrap();
+
+        let resp_recovered = pool.get_account(&acc.id).unwrap();
+        assert!(resp_recovered.is_active);
+        assert!(!resp_recovered.auto_disabled_quota);
+        assert_eq!(resp_recovered.cooldown_remaining, 0.0);
+        assert_eq!(resp_recovered.last_error, None);
+
+        // Can be picked again
+        assert!(pool.pick_account(None).await.is_some());
     }
 
     #[tokio::test]

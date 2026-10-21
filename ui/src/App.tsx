@@ -27,9 +27,11 @@ import { CombosTab } from './components/CombosTab';
 import { ApiKeysTab } from './components/ApiKeysTab';
 import { TokenSaverTab } from './components/TokenSaverTab';
 import { ConsoleLogTab } from './components/ConsoleLogTab';
+import { ThemeMode, getStoredTheme, applyTheme } from './components/ThemeSwitcher';
 
 export const App: React.FC = () => {
   const { t } = useI18n();
+  const [theme, setTheme] = useState<ThemeMode>(getStoredTheme);
   const [adminKey, setAdminKey] = useState<string>(getStoredAdminKey());
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [initialChecking, setInitialChecking] = useState<boolean>(true);
@@ -49,6 +51,15 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  const handleThemeChange = (newTheme: ThemeMode) => {
+    const validated = applyTheme(newTheme);
+    setTheme(validated);
+  };
 
   // Initial authentication check
   useEffect(() => {
@@ -160,6 +171,7 @@ export const App: React.FC = () => {
     return (
       <div
         className="state-container"
+        data-theme={theme}
         style={{ minHeight: '100vh', justifyContent: 'center' }}
       >
         <div className="spinner" />
@@ -169,7 +181,13 @@ export const App: React.FC = () => {
   }
 
   if (!isAuthenticated) {
-    return <LoginModal onSuccess={handleLoginSuccess} />;
+    return (
+      <LoginModal
+        onSuccess={handleLoginSuccess}
+        theme={theme}
+        onThemeChange={handleThemeChange}
+      />
+    );
   }
 
   const activeAccountsCount = accounts.filter(
@@ -177,7 +195,7 @@ export const App: React.FC = () => {
   ).length;
 
   return (
-    <div className="app-container">
+    <div className="app-container" data-theme={theme}>
       <Sidebar
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
@@ -187,6 +205,8 @@ export const App: React.FC = () => {
         activeAccountsCount={activeAccountsCount}
         totalProvidersCount={providers.length}
         totalKeysCount={apiKeys.length}
+        theme={theme}
+        onThemeChange={handleThemeChange}
       />
 
       <div className="main-wrapper">
@@ -197,6 +217,8 @@ export const App: React.FC = () => {
           refreshing={refreshing}
           adminKey={adminKey}
           onLogout={handleLogout}
+          theme={theme}
+          onThemeChange={handleThemeChange}
         />
 
         <main className="content-body">

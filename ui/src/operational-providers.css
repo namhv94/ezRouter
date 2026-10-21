@@ -1,0 +1,496 @@
+/* ==========================================================================
+   Operational Providers Redesign Styles
+   Scoped cleanly to [data-theme="operational"]
+   Legacy theme visuals and behaviors remain 100% intact.
+   ========================================================================== */
+
+/* 1. Root & Container Layout under Operational */
+[data-theme="operational"] .providers-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+/* Hide operational chrome under non-operational / legacy mode */
+:root:not([data-theme="operational"]) .op-segmented-nav-wrapper,
+:root:not([data-theme="operational"]) .op-toolbar,
+:root:not([data-theme="operational"]) .op-focus-summary {
+  display: none !important;
+}
+
+/* Ensure all provider panels remain fully visible in legacy mode */
+:root:not([data-theme="operational"]) .op-provider-panel.op-hidden {
+  display: block !important;
+}
+
+/* In operational mode: hide legacy status strip & legacy auto quota strip if operational chrome is active */
+[data-theme="operational"] .providers-compact-header.op-replaced-header,
+[data-theme="operational"] .status-legend-bar.op-replaced-bar,
+[data-theme="operational"] .auto-quota-compact-strip.op-replaced-strip {
+  display: none !important;
+}
+
+/* In operational mode: hide panels that are not currently active */
+[data-theme="operational"] .op-provider-panel.op-hidden {
+  display: none !important;
+}
+
+/* Provider panel styling in operational mode */
+[data-theme="operational"] .op-provider-panel {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  animation: opPanelFadeIn 0.15s ease-in-out;
+}
+
+@keyframes opPanelFadeIn {
+  from {
+    opacity: 0.85;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="operational"] .op-provider-panel {
+    animation: none !important;
+  }
+}
+
+/* 2. Operational Command Toolbar */
+[data-theme="operational"] .op-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+[data-theme="operational"] .op-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+[data-theme="operational"] .op-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-theme="operational"] .op-route-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-primary, #0f172a);
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #f8fafc;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+[data-theme="operational"] .op-route-pill .route-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+[data-theme="operational"] .op-route-pill .route-pulse-dot.cooldown {
+  background: #f59e0b;
+}
+
+[data-theme="operational"] .op-route-pill .route-pulse-dot.error {
+  background: #ef4444;
+}
+
+[data-theme="operational"] .op-refresh-meta {
+  font-size: 11.5px;
+  color: var(--text-muted, #64748b);
+  font-family: var(--font-mono, monospace);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+[data-theme="operational"] .op-interval-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+}
+
+[data-theme="operational"] .op-interval-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: 3px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  min-height: 28px;
+  min-width: 28px;
+  transition: all 0.15s ease-in-out;
+}
+
+[data-theme="operational"] .op-interval-btn:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="operational"] .op-interval-btn.active {
+  background: var(--accent-primary, #0f766e);
+  color: #ffffff;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="operational"] .op-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  background: #ffffff;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  min-height: 32px;
+  transition: all 0.15s ease-in-out;
+}
+
+[data-theme="operational"] .op-toggle-btn.enabled {
+  background: #f0fdfa;
+  border-color: #99f6e4;
+  color: #0f766e;
+}
+
+[data-theme="operational"] .op-toggle-btn .toggle-switch-track {
+  width: 24px;
+  height: 14px;
+  border-radius: 7px;
+  background: #cbd5e1;
+  position: relative;
+  transition: background 0.15s ease;
+  display: inline-block;
+}
+
+[data-theme="operational"] .op-toggle-btn.enabled .toggle-switch-track {
+  background: #0f766e;
+}
+
+[data-theme="operational"] .op-toggle-btn .toggle-switch-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ffffff;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.15s ease;
+}
+
+[data-theme="operational"] .op-toggle-btn.enabled .toggle-switch-thumb {
+  transform: translateX(10px);
+}
+
+[data-theme="operational"] .op-manual-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: var(--accent-primary, #0f766e);
+  color: #ffffff;
+  cursor: pointer;
+  min-height: 32px;
+  transition: background 0.15s ease;
+}
+
+[data-theme="operational"] .op-manual-refresh-btn:hover:not(:disabled) {
+  background: #115e59;
+}
+
+[data-theme="operational"] .op-manual-refresh-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 3. Operational Segmented Navigation */
+[data-theme="operational"] .op-segmented-nav-wrapper {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+[data-theme="operational"] .op-segmented-tablist {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #f1f5f9;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  padding: 4px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+[data-theme="operational"] .op-segmented-tablist::-webkit-scrollbar {
+  display: none;
+}
+
+[data-theme="operational"] .op-segmented-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1 1 0;
+  min-width: 160px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 40px;
+  transition: all 0.15s ease-in-out;
+  outline: none;
+}
+
+[data-theme="operational"] .op-segmented-tab:hover {
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="operational"] .op-segmented-tab:focus-visible {
+  outline: 2px solid var(--accent-primary, #0f766e);
+  outline-offset: 1px;
+}
+
+[data-theme="operational"] .op-segmented-tab[aria-selected="true"] {
+  background: #ffffff;
+  color: var(--accent-primary, #0f766e);
+  border-color: var(--border-subtle, #e2e8f0);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+[data-theme="operational"] .op-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  background: #e2e8f0;
+  color: #334155;
+}
+
+[data-theme="operational"] .op-segmented-tab[aria-selected="true"] .op-tab-badge {
+  background: #ccfbf1;
+  color: #0f766e;
+}
+
+[data-theme="operational"] .op-tab-quota-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-family: var(--font-mono, monospace);
+  background: #f8fafc;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  color: var(--text-secondary, #475569);
+}
+
+[data-theme="operational"] .op-status-dot-mini {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+[data-theme="operational"] .op-status-dot-mini.active {
+  background: #10b981;
+}
+
+[data-theme="operational"] .op-status-dot-mini.cooldown {
+  background: #f59e0b;
+}
+
+[data-theme="operational"] .op-status-dot-mini.stopped {
+  background: #ef4444;
+}
+
+[data-theme="operational"] .op-status-dot-mini.neutral {
+  background: #94a3b8;
+}
+
+/* 4. Focus Summary Header for Focused Provider */
+[data-theme="operational"] .op-focus-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+[data-theme="operational"] .op-focus-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+[data-theme="operational"] .op-focus-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="operational"] .op-focus-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+[data-theme="operational"] .op-focus-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+[data-theme="operational"] .op-focus-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: #f8fafc;
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  font-size: 11.5px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary, #475569);
+}
+
+[data-theme="operational"] .op-focus-stat-pill strong {
+  color: var(--text-primary, #0f172a);
+}
+
+/* 5. Mobile & Responsive Layout Invariants (<=768px, <=640px, <=390px) */
+@media (max-width: 768px) {
+  [data-theme="operational"] .op-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  [data-theme="operational"] .op-toolbar-left,
+  [data-theme="operational"] .op-toolbar-right {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  [data-theme="operational"] .op-interval-btn {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  [data-theme="operational"] .op-toggle-btn {
+    min-height: 44px;
+    padding: 6px 14px;
+  }
+
+  [data-theme="operational"] .op-manual-refresh-btn {
+    min-height: 44px;
+    padding: 6px 16px;
+  }
+
+  [data-theme="operational"] .op-segmented-tab {
+    min-height: 44px;
+    padding: 8px 14px;
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 640px) {
+  [data-theme="operational"] .op-focus-summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  [data-theme="operational"] .op-focus-stats {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 390px) {
+  [data-theme="operational"] .op-segmented-tablist {
+    gap: 4px;
+    padding: 3px;
+  }
+
+  [data-theme="operational"] .op-segmented-tab {
+    min-width: 140px;
+    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  [data-theme="operational"] .op-interval-btn {
+    min-height: 44px;
+    min-width: 44px;
+    font-size: 12px;
+  }
+}

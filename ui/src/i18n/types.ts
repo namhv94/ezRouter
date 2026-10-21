@@ -497,6 +497,11 @@ export interface TranslationSchema {
     thActions: string;
     statusActive: string;
     statusInactive: string;
+    statusQuotaSuspended: string;
+    btnTurnOff: string;
+    btnTurnOn: string;
+    msgTurnOffSuccess: string;
+    msgTurnOnSuccess: string;
     cooldownWait: string;
     statusReady: string;
     viewQuota: string;
@@ -757,6 +762,14 @@ export interface TranslationSchema {
     authKeyPlaceholder: string;
     authKeyHelp: string;
     responseModeLabel: string;
+    thinkingLevelLabel: string;
+    thinkingOptDefault: string;
+    thinkingOptHigh: string;
+    thinkingOptMedium: string;
+    thinkingOptLow: string;
+    thinkingOptXHigh: string;
+    thinkingOptMax: string;
+    thinkingOptUltra: string;
     streamSse: string;
     nonStreamJson: string;
     quickPresetsLabel: string;
@@ -828,14 +841,34 @@ export interface TranslationSchema {
     customizerTitle: string;
     yourApiKeyLabel: string;
     modelSelectionLabel: string;
+    modelOptGemini4Argon: string;
+    modelOptGemini4ArgonHigh: string;
+    modelOptGemini4ArgonMedium: string;
+    modelOptGemini4ArgonLow: string;
     modelOptGeminiFlash: string;
     modelOptGeminiProAgent: string;
     modelOptGeminiProLow: string;
     modelOptClaudeOpus55: string;
     modelOptClaudeSonnet55: string;
     modelOptCodexSol: string;
+    modelOptCodexSolHigh: string;
+    modelOptCodexSolMedium: string;
+    modelOptCodexSolLow: string;
+    modelOptCodexSolXHigh: string;
+    modelOptCodexSolMax: string;
+    modelOptCodexSolUltra: string;
     modelOptCodex61Sol: string;
+    modelOptCodex61SolHigh: string;
+    modelOptCodex61SolMedium: string;
+    modelOptCodex61SolLow: string;
+    modelOptCodex61SolXHigh: string;
+    modelOptCodex61SolMax: string;
     modelOptCodexAstra: string;
+    modelOptCodexAstraHigh: string;
+    modelOptCodexAstraMedium: string;
+    modelOptCodexAstraLow: string;
+    modelOptCodexAstraXHigh: string;
+    modelOptCodexAstraMax: string;
     modelCatalogTitle: string;
     copyModelTitle: string;
     geminiFlashDesc: string;
@@ -1118,6 +1151,14 @@ export interface TranslationSchema {
     en: string;
     selectLanguage: string;
     currentLanguage: string;
+  };
+  theme: {
+    selectTheme: string;
+    legacy: string;
+    legacyShort: string;
+    operational: string;
+    operationalShort: string;
+    currentTheme: string;
   };
 }
 

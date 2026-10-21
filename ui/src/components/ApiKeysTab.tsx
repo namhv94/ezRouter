@@ -94,7 +94,7 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
   };
 
   return (
-    <div>
+    <div className="api-keys-container">
       <div className="section-header">
         <div>
           <h2 className="section-title">{t('apiKeys.title')}</h2>
@@ -187,25 +187,25 @@ export const ApiKeysTab: React.FC<ApiKeysTabProps> = ({
               <tbody>
                 {apiKeys.map((k) => (
                   <tr key={k.id}>
-                    <td>
+                    <td data-label={t('apiKeys.colName')}>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{k.name}</div>
                       <div className="badge badge-neutral font-mono" style={{ fontSize: 11, marginTop: 4 }}>
                         id: {k.id.slice(0, 8)}...
                       </div>
                     </td>
-                    <td className="font-mono text-break" style={{ fontSize: 12 }}>
+                    <td className="font-mono text-break" style={{ fontSize: 12 }} data-label={t('apiKeys.colKeyMasked')}>
                       {k.key}
                     </td>
-                    <td>
+                    <td data-label={t('apiKeys.colStatus')}>
                       <span className={`badge ${k.is_active ? 'badge-success' : 'badge-neutral'}`}>
                         {k.is_active ? t('apiKeys.statusActive') : t('apiKeys.statusLocked')}
                       </span>
                     </td>
-                    <td className="font-mono">{k.total_requests.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US')}</td>
-                    <td className="font-mono" style={{ fontSize: 12 }}>
+                    <td className="font-mono" data-label={t('apiKeys.colTotalRequests')}>{k.total_requests.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-US')}</td>
+                    <td className="font-mono" style={{ fontSize: 12 }} data-label={t('apiKeys.colCreatedAt')}>
                       {k.created_at}
                     </td>
-                    <td>
+                    <td data-label={t('apiKeys.colActions')}>
                       <div className="table-actions">
                         <button
                           className="btn btn-secondary btn-sm"

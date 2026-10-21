@@ -305,6 +305,20 @@ impl QuotaRefreshWorker {
         let mut eligible_google = Vec::new();
         for acc in google_accounts {
             if !acc.is_active {
+                if acc.auto_disabled_quota {
+                    if acc.cooldown_remaining > 0.0 {
+                        summary.google_skipped_cooldown += 1;
+                        continue;
+                    }
+                    if let Some(last_attempt) = self.account_pool.get_quota_last_attempt(&acc.id) {
+                        if now - last_attempt < cooldown_window {
+                            summary.google_skipped_cooldown += 1;
+                            continue;
+                        }
+                    }
+                    eligible_google.push(acc);
+                    continue;
+                }
                 summary.google_skipped_inactive += 1;
                 continue;
             }
@@ -710,7 +724,7 @@ mod tests {
 
         // 2. Create inactive account
         let acc2 = ag_pool.add_account("inactive@test.com", "rt-2").unwrap();
-        ag_pool.set_account_active(&acc2.id, false);
+        let _ = ag_pool.set_account_active(&acc2.id, false);
 
         // 3. Create account in error cooldown
         let acc3 = ag_pool.add_account("cooldown@test.com", "rt-3").unwrap();

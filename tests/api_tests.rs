@@ -14,7 +14,8 @@ use tower::ServiceExt;
 
 use ezrouter::error::AppError;
 use ezrouter::provider::{
-    ChatCompletionRequest, ChatCompletionResponse, HttpUpstreamProvider, MockProvider, Provider,
+    ChatCompletionRequest, ChatCompletionResponse, HttpUpstreamProvider, MessageContent,
+    MockProvider, Provider,
 };
 use ezrouter::{
     app_router, AccountPool, AntigravityProvider, AppState, ChatMessage, CodexLatencyTrace,
@@ -3180,7 +3181,11 @@ async fn test_phase4a_schema_parity_table_info() {
     );
     assert_eq!(col_map.get("last_error").map(|s| s.as_str()), Some("TEXT"));
     assert_eq!(col_map.get("created_at").map(|s| s.as_str()), Some("TEXT"));
-    assert_eq!(col_map.len(), 12);
+    assert_eq!(
+        col_map.get("auto_disabled_quota").map(|s| s.as_str()),
+        Some("INTEGER")
+    );
+    assert_eq!(col_map.len(), 13);
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -3963,7 +3968,7 @@ async fn test_phase4b_antigravity_transport_mock_http_non_streaming() {
     let headers = received_headers.lock().unwrap();
     assert_eq!(headers.len(), 1);
     assert_eq!(headers[0].0, "Bearer valid-ag-token-4b");
-    assert_eq!(headers[0].1, "antigravity/ide/2.11.0 darwin/arm64");
+    assert_eq!(headers[0].1, "antigravity/hub/2.23.0 darwin/arm64");
     assert!(headers[0]
         .2
         .contains("/v1internal:streamGenerateContent?alt=sse"));
@@ -4623,7 +4628,7 @@ async fn test_phase4b_antigravity_headers_and_payload_spec() {
 
     let (auth, ua, ct, uri, body) = captured_req.lock().unwrap().take().unwrap();
     assert_eq!(auth, "Bearer spec-token-123");
-    assert_eq!(ua, "antigravity/ide/2.11.0 darwin/arm64");
+    assert_eq!(ua, "antigravity/hub/2.23.0 darwin/arm64");
     assert_eq!(ct, "application/json");
     assert!(uri.contains("/v1internal:streamGenerateContent?alt=sse"));
 
@@ -5917,7 +5922,14 @@ async fn test_phase4c_codex_tool_payload_mock_http_non_streaming() {
 
     let request = ChatCompletionRequest {
         model: "cx/gpt-5.6-sol".to_string(),
-        messages: vec![ChatMessage::user("What is 42 * 2?")],
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"Describe this"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"data:image/png;base64,aGVsbG8="}}),
+            ])),
+            ..Default::default()
+        }],
         stream: Some(false),
         tools: Some(tools_def),
         ..Default::default()
@@ -5939,8 +5951,14 @@ async fn test_phase4c_codex_tool_payload_mock_http_non_streaming() {
     // Verify tools sent upstream in OpenAI Responses format
     let b_guard = received_body.lock().unwrap();
     let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
-    assert!(sent_json["tools"].is_array());
     assert_eq!(sent_json["tools"][0]["name"], "calculator");
+    assert_eq!(sent_json["input"][0]["type"], "message");
+    assert_eq!(sent_json["input"][0]["content"][1]["type"], "input_image");
+    assert_eq!(sent_json["input"][0]["content"][1]["detail"], "auto");
+    assert_eq!(
+        sent_json["input"][0]["content"][1]["image_url"],
+        "data:image/png;base64,aGVsbG8="
+    );
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -6035,6 +6053,579 @@ async fn test_phase4c_codex_tool_payload_mock_http_streaming() {
     assert!(combined.contains("call_stream_1"));
     assert!(combined.contains("\"finish_reason\":\"tool_calls\""));
     assert!(combined.contains("data: [DONE]"));
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_phase4c_codex_vision_payload_mock_http_non_streaming() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mock_base_url = format!("http://127.0.0.1:{port}");
+
+    let received_body = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let body_clone = received_body.clone();
+
+    let mock_app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let body_clone = body_clone.clone();
+        async move {
+            let bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            body_clone.lock().unwrap().push(bytes.to_vec());
+
+            let sse_stream = "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_1\", \"role\": \"assistant\"}}\n\nevent: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"delta\": \"Vision analysis complete.\"}\n\nevent: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_1\"}}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"usage\": {\"input_tokens\": 42, \"output_tokens\": 15}}}\n\n";
+
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                sse_stream,
+            )
+        }
+    });
+
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.unwrap();
+    });
+
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-p4c-vis-nonstream-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let db =
+        Arc::new(Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap());
+    let pool = Arc::new(CodexPool::with_components(
+        db.clone(),
+        Arc::new(MockCodexTokenRefresher::with_token("test-vis-token")),
+        Arc::new(MockCodexQuotaFetcher::new()),
+        PathBuf::from(&test_dir).join("accounts"),
+        PathBuf::from(&test_dir).join("default.json"),
+        mock_base_url.clone(),
+    ));
+
+    let tokens = serde_json::json!({
+        "access_token": "valid-token",
+        "refresh_token": "valid-rt",
+        "account_id": "account-vis-nonstream"
+    });
+    pool.add_account_with_tokens(tokens, Some("acc-vis-nonstream"))
+        .unwrap();
+    pool.load_from_db().unwrap();
+
+    let provider = CodexProvider::with_base_url(pool.clone(), &mock_base_url);
+
+    let request = ChatCompletionRequest {
+        model: "cx/gpt-5.6-sol".to_string(),
+        messages: vec![
+            ChatMessage::system("Vision test system"),
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![
+                    serde_json::json!({"type":"text", "text":"Analyze this image with high detail"}),
+                    serde_json::json!({
+                        "type":"image_url",
+                        "image_url":{
+                            "url":"https://example.com/high_detail.png",
+                            "detail":"high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage::assistant(Some("Understood"), None),
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![serde_json::json!({
+                    "type":"image_url",
+                    "image_url":"https://example.com/string_url.png",
+                    "detail":"low"
+                })])),
+                ..Default::default()
+            },
+            ChatMessage::assistant(Some("Second image received"), None),
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![serde_json::json!({
+                    "type":"image_url",
+                    "image_url":{"url":"data:image/jpeg;base64,1234"}
+                })])),
+                ..Default::default()
+            },
+        ],
+        stream: Some(false),
+        ..Default::default()
+    };
+
+    let resp = provider.complete(&request).await.unwrap();
+    assert_eq!(resp.choices[0].finish_reason, "stop");
+    assert_eq!(
+        resp.choices[0].message.content.as_deref(),
+        Some("Vision analysis complete.")
+    );
+    assert_eq!(resp.usage.prompt_tokens, 42);
+    assert_eq!(resp.usage.completion_tokens, 15);
+
+    let b_guard = received_body.lock().unwrap();
+    assert_eq!(b_guard.len(), 1);
+    let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
+    let input = sent_json["input"].as_array().unwrap();
+    assert_eq!(input.len(), 6);
+
+    // 0: system
+    assert_eq!(input[0]["role"], "developer");
+
+    // 1: user with text + high-detail image_url object
+    assert_eq!(input[1]["type"], "message");
+    assert_eq!(input[1]["role"], "user");
+    assert_eq!(input[1]["content"][0]["type"], "input_text");
+    assert_eq!(input[1]["content"][1]["type"], "input_image");
+    assert_eq!(
+        input[1]["content"][1]["image_url"],
+        "https://example.com/high_detail.png"
+    );
+    assert_eq!(input[1]["content"][1]["detail"], "high");
+
+    // 2: assistant
+    assert_eq!(input[2]["role"], "assistant");
+
+    // 3: user with string image_url and low detail
+    assert_eq!(input[3]["type"], "message");
+    assert_eq!(input[3]["role"], "user");
+    assert_eq!(input[3]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(input[3]["content"][0]["type"], "input_image");
+    assert_eq!(
+        input[3]["content"][0]["image_url"],
+        "https://example.com/string_url.png"
+    );
+    assert_eq!(input[3]["content"][0]["detail"], "low");
+
+    // 4: assistant
+    assert_eq!(input[4]["role"], "assistant");
+
+    // 5: user with image-only message (defaults detail to auto)
+    assert_eq!(input[5]["type"], "message");
+    assert_eq!(input[5]["role"], "user");
+    assert_eq!(input[5]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(input[5]["content"][0]["type"], "input_image");
+    assert_eq!(
+        input[5]["content"][0]["image_url"],
+        "data:image/jpeg;base64,1234"
+    );
+    assert_eq!(input[5]["content"][0]["detail"], "auto");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_phase4c_codex_vision_payload_mock_http_streaming() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mock_base_url = format!("http://127.0.0.1:{port}");
+
+    let received_body = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let body_clone = received_body.clone();
+
+    let mock_app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let body_clone = body_clone.clone();
+        async move {
+            let bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            body_clone.lock().unwrap().push(bytes.to_vec());
+
+            let sse_stream = "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_stream\", \"role\": \"assistant\"}}\n\nevent: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"delta\": \"Streaming image description.\"}\n\nevent: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_stream\"}}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"usage\": {\"input_tokens\": 35, \"output_tokens\": 12}}}\n\n";
+
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                sse_stream,
+            )
+        }
+    });
+
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.unwrap();
+    });
+
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-p4c-vis-stream-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let db =
+        Arc::new(Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap());
+    let pool = Arc::new(CodexPool::with_components(
+        db.clone(),
+        Arc::new(MockCodexTokenRefresher::with_token("test-vis-token-stream")),
+        Arc::new(MockCodexQuotaFetcher::new()),
+        PathBuf::from(&test_dir).join("accounts"),
+        PathBuf::from(&test_dir).join("default.json"),
+        mock_base_url.clone(),
+    ));
+
+    let tokens = serde_json::json!({
+        "access_token": "valid-token",
+        "refresh_token": "valid-rt",
+        "account_id": "account-vis-stream"
+    });
+    pool.add_account_with_tokens(tokens, Some("acc-vis-stream"))
+        .unwrap();
+    pool.load_from_db().unwrap();
+
+    let provider = CodexProvider::with_base_url(pool.clone(), &mock_base_url);
+
+    let request = ChatCompletionRequest {
+        model: "cx/gpt-5.6-terra".to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                serde_json::json!({"type":"image_url", "image_url":"https://example.com/stream_img.png"}),
+            ])),
+            ..Default::default()
+        }],
+        stream: Some(true),
+        ..Default::default()
+    };
+
+    let mut stream = provider.stream_chat_completion(&request).await.unwrap();
+    use futures_util::StreamExt;
+
+    let mut chunks = Vec::new();
+    while let Some(item) = stream.next().await {
+        let bytes = item.unwrap();
+        let s = String::from_utf8_lossy(&bytes).to_string();
+        chunks.push(s);
+    }
+
+    assert!(!chunks.is_empty());
+    let combined = chunks.concat();
+    assert!(combined.contains("Streaming image description."));
+    assert!(combined.contains("data: [DONE]"));
+
+    let b_guard = received_body.lock().unwrap();
+    assert_eq!(b_guard.len(), 1);
+    let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
+    assert_eq!(sent_json["stream"], true);
+    let input = sent_json["input"].as_array().unwrap();
+    assert_eq!(input.len(), 1);
+    assert_eq!(input[0]["type"], "message");
+    assert_eq!(input[0]["role"], "user");
+    let content = input[0]["content"].as_array().unwrap();
+    assert_eq!(content.len(), 1);
+    assert_eq!(content[0]["type"], "input_image");
+    assert_eq!(
+        content[0]["image_url"],
+        "https://example.com/stream_img.png"
+    );
+    assert_eq!(content[0]["detail"], "auto");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_phase4c_codex_vision_text_part_fidelity_content_and_input_text_variants() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mock_base_url = format!("http://127.0.0.1:{port}");
+
+    let received_body = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let body_clone = received_body.clone();
+
+    let mock_app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let body_clone = body_clone.clone();
+        async move {
+            let bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            body_clone.lock().unwrap().push(bytes.to_vec());
+
+            let sse_stream = "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_var\", \"role\": \"assistant\"}}\n\nevent: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"delta\": \"Vision variants handled.\"}\n\nevent: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"item\": {\"type\": \"message\", \"id\": \"msg_vis_var\"}}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"usage\": {\"input_tokens\": 30, \"output_tokens\": 10}}}\n\n";
+
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                sse_stream,
+            )
+        }
+    });
+
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.unwrap();
+    });
+
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-p4c-vis-variants-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let db =
+        Arc::new(Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap());
+    let pool = Arc::new(CodexPool::with_components(
+        db.clone(),
+        Arc::new(MockCodexTokenRefresher::with_token("test-vis-token")),
+        Arc::new(MockCodexQuotaFetcher::new()),
+        PathBuf::from(&test_dir).join("accounts"),
+        PathBuf::from(&test_dir).join("default.json"),
+        mock_base_url.clone(),
+    ));
+
+    let tokens = serde_json::json!({
+        "access_token": "valid-token",
+        "refresh_token": "valid-rt",
+        "account_id": "account-vis-variants"
+    });
+    pool.add_account_with_tokens(tokens, Some("acc-vis-variants"))
+        .unwrap();
+    pool.load_from_db().unwrap();
+
+    let provider = CodexProvider::with_base_url(pool.clone(), &mock_base_url);
+
+    let request = ChatCompletionRequest {
+        model: "cx/gpt-5.6-sol".to_string(),
+        messages: vec![
+            ChatMessage::system("Vision test system"),
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![
+                    // Variant 1: type=text with content field
+                    serde_json::json!({
+                        "type": "text",
+                        "content": "What is depicted in the first image?"
+                    }),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "https://example.com/first.png",
+                            "detail": "high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage::assistant(Some("First image analyzed"), None),
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some(MessageContent::Parts(vec![
+                    // Variant 2: type=text with input_text field
+                    serde_json::json!({
+                        "type": "text",
+                        "input_text": "And what is in the second image?"
+                    }),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": "https://example.com/second.png"
+                    }),
+                ])),
+                ..Default::default()
+            },
+        ],
+        stream: Some(false),
+        ..Default::default()
+    };
+
+    let resp = provider.complete(&request).await.unwrap();
+    assert_eq!(resp.choices[0].finish_reason, "stop");
+    assert_eq!(
+        resp.choices[0].message.content.as_deref(),
+        Some("Vision variants handled.")
+    );
+
+    let b_guard = received_body.lock().unwrap();
+    assert_eq!(b_guard.len(), 1);
+    let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
+    let input = sent_json["input"].as_array().unwrap();
+    assert_eq!(input.len(), 4);
+
+    // Turn 1 (index 1): user message with type=text and content variant + image
+    assert_eq!(input[1]["role"], "user");
+    let turn1_content = input[1]["content"].as_array().unwrap();
+    assert_eq!(turn1_content.len(), 2);
+    assert_eq!(turn1_content[0]["type"], "input_text");
+    assert_eq!(
+        turn1_content[0]["text"],
+        "What is depicted in the first image?"
+    );
+    assert_eq!(turn1_content[1]["type"], "input_image");
+    assert_eq!(
+        turn1_content[1]["image_url"],
+        "https://example.com/first.png"
+    );
+    assert_eq!(turn1_content[1]["detail"], "high");
+
+    // Turn 2 (index 3): user message with type=text and input_text variant + image
+    assert_eq!(input[3]["role"], "user");
+    let turn2_content = input[3]["content"].as_array().unwrap();
+    assert_eq!(turn2_content.len(), 2);
+    assert_eq!(turn2_content[0]["type"], "input_text");
+    assert_eq!(turn2_content[0]["text"], "And what is in the second image?");
+    assert_eq!(turn2_content[1]["type"], "input_image");
+    assert_eq!(
+        turn2_content[1]["image_url"],
+        "https://example.com/second.png"
+    );
+    assert_eq!(turn2_content[1]["detail"], "auto");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_phase4c_codex_tool_payload_image_parts_mock_http() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mock_base_url = format!("http://127.0.0.1:{port}");
+
+    let received_body = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let body_clone = received_body.clone();
+
+    let mock_app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let body_clone = body_clone.clone();
+        async move {
+            let bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            body_clone.lock().unwrap().push(bytes.to_vec());
+
+            let sse_stream = "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"item\": {\"type\": \"message\", \"id\": \"msg_tool_img_1\", \"role\": \"assistant\"}}\n\nevent: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"delta\": \"Tool image processed successfully.\"}\n\nevent: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"item\": {\"type\": \"message\", \"id\": \"msg_tool_img_1\"}}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"usage\": {\"input_tokens\": 50, \"output_tokens\": 10}}}\n\n";
+
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                sse_stream,
+            )
+        }
+    });
+
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.unwrap();
+    });
+
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-p4c-tool-img-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let db =
+        Arc::new(Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap());
+    let pool = Arc::new(CodexPool::with_components(
+        db.clone(),
+        Arc::new(MockCodexTokenRefresher::with_token("test-vis-token")),
+        Arc::new(MockCodexQuotaFetcher::new()),
+        PathBuf::from(&test_dir).join("accounts"),
+        PathBuf::from(&test_dir).join("default.json"),
+        mock_base_url.clone(),
+    ));
+
+    let tokens = serde_json::json!({
+        "access_token": "valid-token",
+        "refresh_token": "valid-rt",
+        "account_id": "account-tool-img"
+    });
+    pool.add_account_with_tokens(tokens, Some("acc-tool-img"))
+        .unwrap();
+    pool.load_from_db().unwrap();
+
+    let provider = CodexProvider::with_base_url(pool.clone(), &mock_base_url);
+
+    let request = ChatCompletionRequest {
+        model: "cx/gpt-5.6-sol".to_string(),
+        messages: vec![
+            ChatMessage::user("Please inspect this chart and calculate values"),
+            ChatMessage {
+                role: "assistant".to_string(),
+                tool_calls: Some(serde_json::json!([
+                    {
+                        "id": "call_img_1",
+                        "type": "function",
+                        "function": {
+                            "name": "vision_analyze",
+                            "arguments": "{\"image\":\"chart.png\"}"
+                        }
+                    },
+                    {
+                        "id": "call_txt_2",
+                        "type": "function",
+                        "function": {
+                            "name": "calculator",
+                            "arguments": "{\"expr\":\"1+1\"}"
+                        }
+                    }
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_img_1".to_string()),
+                content: Some(MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "Screenshot result"}),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,toolimagebase64",
+                            "detail": "high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_txt_2".to_string()),
+                content: Some(MessageContent::Text("result: 42".to_string())),
+                ..Default::default()
+            },
+        ],
+        stream: Some(false),
+        ..Default::default()
+    };
+
+    let resp = provider.complete(&request).await.unwrap();
+    assert_eq!(resp.choices[0].finish_reason, "stop");
+    assert_eq!(
+        resp.choices[0].message.content.as_deref(),
+        Some("Tool image processed successfully.")
+    );
+
+    let b_guard = received_body.lock().unwrap();
+    assert_eq!(b_guard.len(), 1);
+    let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
+    let input = sent_json["input"].as_array().unwrap();
+    assert_eq!(input.len(), 5);
+
+    // 0: user message
+    assert_eq!(input[0]["role"], "user");
+
+    // 1 & 2: function calls from assistant
+    assert_eq!(input[1]["type"], "function_call");
+    assert_eq!(input[1]["call_id"], "call_img_1");
+    assert_eq!(input[2]["type"], "function_call");
+    assert_eq!(input[2]["call_id"], "call_txt_2");
+
+    // 3: tool message with image parts preserves input_image in function_call_output.output
+    assert_eq!(input[3]["type"], "function_call_output");
+    assert_eq!(input[3]["call_id"], "call_img_1");
+    let tool1_output = input[3]["output"]
+        .as_array()
+        .expect("tool 1 output should be an array of parts");
+    assert_eq!(tool1_output.len(), 2);
+    assert_eq!(tool1_output[0]["type"], "input_text");
+    assert_eq!(tool1_output[0]["text"], "Screenshot result");
+    assert_eq!(tool1_output[1]["type"], "input_image");
+    assert_eq!(
+        tool1_output[1]["image_url"],
+        "data:image/png;base64,toolimagebase64"
+    );
+    assert_eq!(tool1_output[1]["detail"], "high");
+
+    // 4: text-only tool message serializes output as string
+    assert_eq!(input[4]["type"], "function_call_output");
+    assert_eq!(input[4]["call_id"], "call_txt_2");
+    assert_eq!(input[4]["output"], "result: 42");
+    assert!(input[4]["output"].is_string());
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
@@ -7282,12 +7873,30 @@ async fn test_regression_gemini_pro_model_list_canonical_and_aliases() {
         .collect();
 
     // Canonical models present
+    assert!(ids.contains(&"ag/gemini-4-argon"));
+    assert!(ids.contains(&"ag/gemini-4-argon-high"));
+    assert!(ids.contains(&"ag/gemini-4-argon-medium"));
+    assert!(ids.contains(&"ag/gemini-4-argon-low"));
     assert!(ids.contains(&"ag/gemini-pro-agent"));
     assert!(ids.contains(&"ag/gemini-3.1-pro-low"));
     assert!(ids.contains(&"ag/gemini-3.8-flash-high"));
     assert!(ids.contains(&"cx/gpt-5.6-sol"));
 
     // Aliases MUST NOT be advertised in canonical list
+    assert!(!ids.contains(&"gemini-4-argon"));
+    assert!(!ids.contains(&"gemini-4-argon-high"));
+    assert!(!ids.contains(&"gemini-4-argon-medium"));
+    assert!(!ids.contains(&"gemini-4-argon-low"));
+    assert!(!ids.contains(&"ag/gemini-argon"));
+    assert!(!ids.contains(&"gemini-argon"));
+    assert!(!ids.contains(&"ag/argon"));
+    assert!(!ids.contains(&"argon"));
+    assert!(!ids.contains(&"ag/agon"));
+    assert!(!ids.contains(&"agon"));
+    assert!(!ids.contains(&"ag/argon-high"));
+    assert!(!ids.contains(&"argon-high"));
+    assert!(!ids.contains(&"ag/agon-high"));
+    assert!(!ids.contains(&"agon-high"));
     assert!(!ids.contains(&"gemini-pro-agent"));
     assert!(!ids.contains(&"ag/gemini-3.1-pro"));
     assert!(!ids.contains(&"gemini-3.1-pro"));
@@ -7305,6 +7914,24 @@ async fn test_regression_gemini_pro_model_list_canonical_and_aliases() {
 
     // 2. Canonical and alias detail lookups
     for model_id in [
+        "ag/gemini-4-argon",
+        "gemini-4-argon",
+        "ag/gemini-4-argon-high",
+        "gemini-4-argon-high",
+        "ag/gemini-4-argon-medium",
+        "gemini-4-argon-medium",
+        "ag/gemini-4-argon-low",
+        "gemini-4-argon-low",
+        "ag/gemini-argon",
+        "gemini-argon",
+        "ag/argon",
+        "argon",
+        "ag/agon",
+        "agon",
+        "argon-high",
+        "agon-high",
+        "argon-low",
+        "agon-low",
         "ag/gemini-pro-agent",
         "ag/gemini-3.1-pro-low",
         "ag/gemini-3.1-pro",
@@ -7502,6 +8129,65 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
     assert_ne!(
         map_antigravity_upstream_model("gemini-3.1-pro"),
         "gemini-3.1-pro"
+    );
+
+    // ag/gemini-4-argon and agon alias -> upstream gemini-4-argon-*
+    let req_argon1 = ChatCompletionRequest {
+        model: "ag/gemini-4-argon".to_string(),
+        messages: vec![ChatMessage::user("Hi")],
+        ..Default::default()
+    };
+    let p_argon1 = build_antigravity_payload(&req_argon1);
+    assert_eq!(p_argon1["model"], "gemini-4-argon-high");
+    assert_eq!(
+        p_argon1["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "HIGH"
+    );
+
+    let req_argon2 = ChatCompletionRequest {
+        model: "ag/gemini-4-argon-low".to_string(),
+        messages: vec![ChatMessage::user("Hi")],
+        ..Default::default()
+    };
+    let p_argon2 = build_antigravity_payload(&req_argon2);
+    assert_eq!(p_argon2["model"], "gemini-4-argon-low");
+    assert_eq!(
+        p_argon2["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "LOW"
+    );
+
+    let req_argon3 = ChatCompletionRequest {
+        model: "agon".to_string(),
+        messages: vec![ChatMessage::user("Hi")],
+        reasoning_effort: Some("medium".to_string()),
+        ..Default::default()
+    };
+    let p_argon3 = build_antigravity_payload(&req_argon3);
+    assert_eq!(p_argon3["model"], "gemini-4-argon-medium");
+    assert_eq!(
+        p_argon3["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
+        "MEDIUM"
+    );
+
+    assert_eq!(
+        map_antigravity_upstream_model("ag/gemini-4-argon"),
+        "gemini-4-argon-high"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("agon"),
+        "gemini-4-argon-high"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("ag/argon"),
+        "gemini-4-argon-high"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("argon-low"),
+        "gemini-4-argon-low"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("ag/gemini-4-argon-medium"),
+        "gemini-4-argon-medium"
     );
 
     // 2. 400 safety: invalid requests correctly reject with 400 Bad Request
