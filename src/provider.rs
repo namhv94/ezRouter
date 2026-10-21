@@ -2980,7 +2980,15 @@ impl Provider for AntigravityProvider {
                 },
             };
 
-            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", self.base_url);
+            let upstream_model = map_antigravity_upstream_model(&request.model);
+            let effective_base_url = if upstream_model.contains("argon")
+                && self.base_url.contains("daily-cloudcode-pa.googleapis.com")
+            {
+                "https://cloudcode-pa.googleapis.com"
+            } else {
+                self.base_url.as_str()
+            };
+            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", effective_base_url);
             let payload = build_antigravity_payload(request);
 
             let res = self
@@ -3155,7 +3163,15 @@ impl Provider for AntigravityProvider {
                 },
             };
 
-            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", self.base_url);
+            let upstream_model = map_antigravity_upstream_model(&request.model);
+            let effective_base_url = if upstream_model.contains("argon")
+                && self.base_url.contains("daily-cloudcode-pa.googleapis.com")
+            {
+                "https://cloudcode-pa.googleapis.com"
+            } else {
+                self.base_url.as_str()
+            };
+            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", effective_base_url);
             let payload = build_antigravity_payload(request);
 
             let res = self
