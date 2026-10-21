@@ -59,6 +59,43 @@ pub struct AnthropicMessagesRequest {
     pub tools: Option<Vec<serde_json::Value>>,
 }
 
+fn parse_anthropic_image_part(block: &serde_json::Value) -> Option<serde_json::Value> {
+    let b_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if b_type == "image" {
+        if let Some(source) = block.get("source") {
+            let s_type = source.get("type").and_then(|v| v.as_str());
+            if s_type == Some("base64") {
+                let media_type = source
+                    .get("media_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("image/jpeg");
+                let data = source.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                if !data.is_empty() {
+                    return Some(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": format!("data:{media_type};base64,{data}")
+                        }
+                    }));
+                }
+            } else if s_type == Some("url") {
+                let url = source.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                if !url.is_empty() {
+                    return Some(serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": url
+                        }
+                    }));
+                }
+            }
+        }
+    } else if b_type == "image_url" {
+        return Some(block.clone());
+    }
+    None
+}
+
 /// Converts Anthropic Messages payload into standard OpenAI ChatCompletionRequest
 pub fn anthropic_to_openai_request(
     req: AnthropicMessagesRequest,
@@ -107,6 +144,8 @@ pub fn anthropic_to_openai_request(
             }
             serde_json::Value::Array(blocks) => {
                 let mut text_parts = Vec::new();
+                let mut content_parts = Vec::new();
+                let mut has_image = false;
                 let mut tool_calls = Vec::new();
 
                 for block in blocks {
@@ -115,6 +154,16 @@ pub fn anthropic_to_openai_request(
                         "text" => {
                             if let Some(txt) = block.get("text").and_then(|t| t.as_str()) {
                                 text_parts.push(txt.to_string());
+                                content_parts.push(serde_json::json!({
+                                    "type": "text",
+                                    "text": txt,
+                                }));
+                            }
+                        }
+                        "image" | "image_url" => {
+                            if let Some(img_part) = parse_anthropic_image_part(&block) {
+                                has_image = true;
+                                content_parts.push(img_part);
                             }
                         }
                         "tool_use" => {
@@ -148,20 +197,63 @@ pub fn anthropic_to_openai_request(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            let content_val = block.get("content");
-                            let content_str = if let Some(cv) = content_val {
-                                if let Some(s) = cv.as_str() {
-                                    s.to_string()
-                                } else {
-                                    serde_json::to_string(cv).unwrap_or_default()
+
+                            let mut tool_parts_opt = None;
+                            if let Some(sub_blocks) =
+                                block.get("content").and_then(|c| c.as_array())
+                            {
+                                let has_image_block = sub_blocks.iter().any(|b| {
+                                    let t = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                    t == "image" || t == "image_url"
+                                });
+                                if has_image_block {
+                                    let mut sub_parts = Vec::new();
+                                    for sub in sub_blocks {
+                                        let s_type =
+                                            sub.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                                        if s_type == "text" {
+                                            if let Some(txt) =
+                                                sub.get("text").and_then(|t| t.as_str())
+                                            {
+                                                sub_parts.push(serde_json::json!({
+                                                    "type": "text",
+                                                    "text": txt,
+                                                }));
+                                            }
+                                        } else if let Some(img_part) =
+                                            parse_anthropic_image_part(sub)
+                                        {
+                                            sub_parts.push(img_part);
+                                        } else if let Some(txt) = sub.as_str() {
+                                            sub_parts.push(serde_json::json!({
+                                                "type": "text",
+                                                "text": txt,
+                                            }));
+                                        }
+                                    }
+                                    tool_parts_opt = Some(sub_parts);
                                 }
+                            }
+
+                            let content = if let Some(parts) = tool_parts_opt {
+                                MessageContent::Parts(parts)
                             } else {
-                                String::new()
+                                let content_val = block.get("content");
+                                let content_str = if let Some(cv) = content_val {
+                                    if let Some(s) = cv.as_str() {
+                                        s.to_string()
+                                    } else {
+                                        serde_json::to_string(cv).unwrap_or_default()
+                                    }
+                                } else {
+                                    String::new()
+                                };
+                                MessageContent::Text(content_str)
                             };
 
                             chat_messages.push(ChatMessage {
                                 role: "tool".to_string(),
-                                content: Some(MessageContent::Text(content_str)),
+                                content: Some(content),
                                 name: None,
                                 tool_calls: None,
                                 tool_call_id: Some(tool_use_id),
@@ -171,7 +263,13 @@ pub fn anthropic_to_openai_request(
                     }
                 }
 
-                let combined_text = if text_parts.is_empty() {
+                let combined_content = if has_image {
+                    if content_parts.is_empty() {
+                        None
+                    } else {
+                        Some(MessageContent::Parts(content_parts))
+                    }
+                } else if text_parts.is_empty() {
                     None
                 } else {
                     Some(MessageContent::Text(text_parts.join("")))
@@ -183,10 +281,10 @@ pub fn anthropic_to_openai_request(
                     Some(serde_json::Value::Array(tool_calls))
                 };
 
-                if combined_text.is_some() || calls_opt.is_some() {
+                if combined_content.is_some() || calls_opt.is_some() {
                     chat_messages.push(ChatMessage {
                         role,
-                        content: combined_text,
+                        content: combined_content,
                         name: None,
                         tool_calls: calls_opt,
                         tool_call_id: None,

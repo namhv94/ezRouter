@@ -2723,12 +2723,54 @@ pub fn openai_to_codex_input(
                 let final_call_id =
                     sanitize_codex_call_id(&call_id, &format!("call_tool_{msg_idx}"));
 
-                let output_text = msg.content_text();
-                converted_input.push(serde_json::json!({
-                    "type": "function_call_output",
-                    "call_id": final_call_id,
-                    "output": output_text.as_ref()
-                }));
+                let has_image_parts = match &msg.content {
+                    Some(MessageContent::Parts(parts)) => parts
+                        .iter()
+                        .any(|p| !p.is_string() && extract_codex_image_part(p).is_some()),
+                    _ => false,
+                };
+
+                if has_image_parts {
+                    let mut tool_parts = Vec::new();
+                    if let Some(MessageContent::Parts(parts)) = &msg.content {
+                        for p in parts {
+                            if let Some(t) = p.as_str() {
+                                tool_parts
+                                    .push(serde_json::json!({"type": "input_text", "text": t}));
+                            } else {
+                                let p_type = p.get("type").and_then(|v| v.as_str());
+                                if matches!(p_type, Some("text" | "input_text")) {
+                                    let t = extract_codex_text_part(p).unwrap_or("");
+                                    tool_parts
+                                        .push(serde_json::json!({"type": "input_text", "text": t}));
+                                } else if let Some((img_url, img_detail)) =
+                                    extract_codex_image_part(p)
+                                {
+                                    tool_parts.push(serde_json::json!({
+                                        "type": "input_image",
+                                        "image_url": img_url,
+                                        "detail": img_detail
+                                    }));
+                                } else if let Some(t) = extract_codex_text_part(p) {
+                                    tool_parts
+                                        .push(serde_json::json!({"type": "input_text", "text": t}));
+                                }
+                            }
+                        }
+                    }
+                    converted_input.push(serde_json::json!({
+                        "type": "function_call_output",
+                        "call_id": final_call_id,
+                        "output": tool_parts
+                    }));
+                } else {
+                    let output_text = msg.content_text();
+                    converted_input.push(serde_json::json!({
+                        "type": "function_call_output",
+                        "call_id": final_call_id,
+                        "output": output_text.as_ref()
+                    }));
+                }
             }
             other => {
                 return Err(AppError::BadRequest(format!(
@@ -4542,6 +4584,113 @@ mod tests {
         assert_eq!(parts[2]["detail"], "low");
         assert_eq!(parts[3]["image_url"], "https://example.com/inferred.png");
         assert_eq!(parts[3]["detail"], "auto");
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_translates_tool_image_parts() {
+        let messages = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                tool_calls: Some(serde_json::json!([
+                    {
+                        "id": "call_vision_1",
+                        "type": "function",
+                        "function": {
+                            "name": "vision_analyze",
+                            "arguments": "{\"image\":\"chart.png\"}"
+                        }
+                    },
+                    {
+                        "id": "call_text_2",
+                        "type": "function",
+                        "function": {
+                            "name": "calculate",
+                            "arguments": "{\"expr\":\"1+1\"}"
+                        }
+                    },
+                    {
+                        "id": "call_text_3",
+                        "type": "function",
+                        "function": {
+                            "name": "notes",
+                            "arguments": "{}"
+                        }
+                    }
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_vision_1".to_string()),
+                content: Some(crate::provider::MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "Screenshot captured"}),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,toolbase64",
+                            "detail": "high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_text_2".to_string()),
+                content: Some(crate::provider::MessageContent::Text(
+                    "result: 2".to_string(),
+                )),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_text_3".to_string()),
+                content: Some(crate::provider::MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "plain text in parts"}),
+                ])),
+                ..Default::default()
+            },
+        ];
+
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        let arr = input.as_array().unwrap();
+        assert_eq!(arr.len(), 6);
+
+        // Assistant function calls
+        assert_eq!(arr[0]["type"], "function_call");
+        assert_eq!(arr[0]["call_id"], "call_vision_1");
+        assert_eq!(arr[1]["type"], "function_call");
+        assert_eq!(arr[1]["call_id"], "call_text_2");
+        assert_eq!(arr[2]["type"], "function_call");
+        assert_eq!(arr[2]["call_id"], "call_text_3");
+
+        // Tool 1: tool message with image parts preserves input_image in function_call_output.output
+        assert_eq!(arr[3]["type"], "function_call_output");
+        assert_eq!(arr[3]["call_id"], "call_vision_1");
+        let tool1_parts = arr[3]["output"]
+            .as_array()
+            .expect("output should be an array of parts");
+        assert_eq!(tool1_parts.len(), 2);
+        assert_eq!(tool1_parts[0]["type"], "input_text");
+        assert_eq!(tool1_parts[0]["text"], "Screenshot captured");
+        assert_eq!(tool1_parts[1]["type"], "input_image");
+        assert_eq!(
+            tool1_parts[1]["image_url"],
+            "data:image/png;base64,toolbase64"
+        );
+        assert_eq!(tool1_parts[1]["detail"], "high");
+
+        // Tool 2: text-only tool message serializes output as string
+        assert_eq!(arr[4]["type"], "function_call_output");
+        assert_eq!(arr[4]["call_id"], "call_text_2");
+        assert_eq!(arr[4]["output"], "result: 2");
+        assert!(arr[4]["output"].is_string());
+
+        // Tool 3: text-only parts tool message serializes output as string
+        assert_eq!(arr[5]["type"], "function_call_output");
+        assert_eq!(arr[5]["call_id"], "call_text_3");
+        assert_eq!(arr[5]["output"], "plain text in parts");
+        assert!(arr[5]["output"].is_string());
     }
 
     #[test]

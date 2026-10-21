@@ -151,3 +151,159 @@ async fn test_serve_claude_code_scripts() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn test_anthropic_to_openai_request_with_image_in_user_and_tool_result() {
+    use ezrouter::provider::MessageContent;
+    use ezrouter::routes::messages::{anthropic_to_openai_request, AnthropicMessagesRequest};
+
+    let b64_pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    let b64_jpeg = "dGVzdC1qcGVnLWRhdGE=";
+
+    let json_req = serde_json::json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Analyze this screenshot:"
+                    },
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": b64_pixel
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_crop_01",
+                        "name": "crop_selection",
+                        "input": {"x": 10, "y": 20}
+                    }
+                ]
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_crop_01",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Crop output:"
+                            },
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": b64_jpeg
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    let anthropic_req: AnthropicMessagesRequest = serde_json::from_value(json_req).unwrap();
+    let (openai_req, _mapped_model) = anthropic_to_openai_request(anthropic_req);
+
+    // 1. User message checks
+    assert_eq!(openai_req.messages[0].role, "user");
+    match &openai_req.messages[0].content {
+        Some(MessageContent::Parts(parts)) => {
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[0]["type"], "text");
+            assert_eq!(parts[0]["text"], "Analyze this screenshot:");
+            assert_eq!(parts[1]["type"], "image_url");
+            assert_eq!(
+                parts[1]["image_url"]["url"],
+                format!("data:image/png;base64,{b64_pixel}")
+            );
+        }
+        other => panic!("Expected user MessageContent::Parts, got {:?}", other),
+    }
+
+    // 2. Assistant tool_use message checks
+    assert_eq!(openai_req.messages[1].role, "assistant");
+    assert!(openai_req.messages[1].tool_calls.is_some());
+
+    // 3. Tool result message checks
+    assert_eq!(openai_req.messages[2].role, "tool");
+    assert_eq!(
+        openai_req.messages[2].tool_call_id.as_deref(),
+        Some("toolu_crop_01")
+    );
+    match &openai_req.messages[2].content {
+        Some(MessageContent::Parts(parts)) => {
+            assert_eq!(parts.len(), 2);
+            assert_eq!(parts[0]["type"], "text");
+            assert_eq!(parts[0]["text"], "Crop output:");
+            assert_eq!(parts[1]["type"], "image_url");
+            assert_eq!(
+                parts[1]["image_url"]["url"],
+                format!("data:image/jpeg;base64,{b64_jpeg}")
+            );
+        }
+        other => panic!("Expected tool MessageContent::Parts, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_post_messages_with_image_content_mock() {
+    let (state, dir) = test_state(true);
+    let app = app_router(state);
+
+    let req_body = serde_json::json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "What is this?"
+                    },
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                        }
+                    }
+                ]
+            }
+        ]
+    });
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("x-api-key", "test-secret-key")
+        .body(Body::from(serde_json::to_string(&req_body).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["type"], "message");
+    assert_eq!(json["role"], "assistant");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
