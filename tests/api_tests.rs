@@ -7973,14 +7973,14 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         "gemini-3.1-pro"
     );
 
-    // ag/gemini-4-argon and agon alias -> upstream gemini-4-argon
+    // ag/gemini-4-argon and agon alias -> upstream gemini-4-argon-*
     let req_argon1 = ChatCompletionRequest {
         model: "ag/gemini-4-argon".to_string(),
         messages: vec![ChatMessage::user("Hi")],
         ..Default::default()
     };
     let p_argon1 = build_antigravity_payload(&req_argon1);
-    assert_eq!(p_argon1["model"], "gemini-4-argon");
+    assert_eq!(p_argon1["model"], "gemini-4-argon-high");
     assert_eq!(
         p_argon1["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "HIGH"
@@ -7992,7 +7992,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         ..Default::default()
     };
     let p_argon2 = build_antigravity_payload(&req_argon2);
-    assert_eq!(p_argon2["model"], "gemini-4-argon");
+    assert_eq!(p_argon2["model"], "gemini-4-argon-low");
     assert_eq!(
         p_argon2["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "LOW"
@@ -8005,7 +8005,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         ..Default::default()
     };
     let p_argon3 = build_antigravity_payload(&req_argon3);
-    assert_eq!(p_argon3["model"], "gemini-4-argon");
+    assert_eq!(p_argon3["model"], "gemini-4-argon-medium");
     assert_eq!(
         p_argon3["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "MEDIUM"
@@ -8013,10 +8013,12 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
 
     assert_eq!(
         map_antigravity_upstream_model("ag/gemini-4-argon"),
-        "gemini-4-argon"
+        "gemini-4-argon-high"
     );
-    assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon");
-    assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon");
+    assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon-high");
+    assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon-high");
+    assert_eq!(map_antigravity_upstream_model("argon-low"), "gemini-4-argon-low");
+    assert_eq!(map_antigravity_upstream_model("ag/gemini-4-argon-medium"), "gemini-4-argon-medium");
 
     // 2. 400 safety: invalid requests correctly reject with 400 Bad Request
     let temp_dir = format!(
