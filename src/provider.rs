@@ -1877,13 +1877,33 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
             }
             let content_str = msg.content_text();
 
+            let mut image_parts = Vec::new();
+            if let Some(MessageContent::Parts(user_parts)) = &msg.content {
+                for p in user_parts {
+                    if p.get("inlineData").is_some() {
+                        image_parts.push(p.clone());
+                    } else if let Some(img_obj) = p.get("image_url") {
+                        let url = img_obj.get("url").and_then(|u| u.as_str()).unwrap_or("");
+                        if url.starts_with("data:") {
+                            if let Some((header, b64_data)) = url.split_once(";base64,") {
+                                let mime = header.strip_prefix("data:").unwrap_or("image/jpeg");
+                                image_parts.push(serde_json::json!({
+                                    "inlineData": {
+                                        "mimeType": mime,
+                                        "data": b64_data
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+
             if is_degraded {
                 let marker = format!("[Tool Result for {}: {}]", actual_name, content_str);
-                push_gemini_parts(
-                    &mut contents,
-                    "user",
-                    vec![serde_json::json!({ "text": marker })],
-                );
+                let mut tool_parts = vec![serde_json::json!({ "text": marker })];
+                tool_parts.extend(image_parts);
+                push_gemini_parts(&mut contents, "user", tool_parts);
             } else {
                 let content_json = serde_json::from_str::<serde_json::Value>(&content_str)
                     .unwrap_or_else(|_| serde_json::json!({ "output": content_str.as_ref() }));
@@ -1904,7 +1924,9 @@ pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json:
                 let part = serde_json::json!({
                     "functionResponse": fr_obj,
                 });
-                push_gemini_parts(&mut contents, "user", vec![part]);
+                let mut tool_parts = vec![part];
+                tool_parts.extend(image_parts);
+                push_gemini_parts(&mut contents, "user", tool_parts);
             }
         } else if msg.role == "assistant" && msg.tool_calls.is_some() {
             let mut parts = Vec::new();
@@ -3668,10 +3690,22 @@ mod tests {
             map_antigravity_upstream_model("gemini-argon"),
             "gemini-4-argon-high"
         );
-        assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon-high");
-        assert_eq!(map_antigravity_upstream_model("argon"), "gemini-4-argon-high");
-        assert_eq!(map_antigravity_upstream_model("ag/agon"), "gemini-4-argon-high");
-        assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon-high");
+        assert_eq!(
+            map_antigravity_upstream_model("ag/argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("argon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("ag/agon"),
+            "gemini-4-argon-high"
+        );
+        assert_eq!(
+            map_antigravity_upstream_model("agon"),
+            "gemini-4-argon-high"
+        );
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-4-argon-high"),
             "gemini-4-argon-high"
@@ -3890,6 +3924,63 @@ mod tests {
         let parts = contents[0]["parts"].as_array().unwrap();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["text"], "Describe this image");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(
+            parts[1]["inlineData"]["data"],
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        );
+    }
+
+    #[test]
+    fn test_build_antigravity_payload_with_tool_image_url() {
+        let req = ChatCompletionRequest {
+            model: "ag/gemini-3.8-flash-high".to_string(),
+            messages: vec![
+                ChatMessage::user("Take a screenshot"),
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: None,
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Some(serde_json::json!([{
+                        "id": "call_snap_123:thought_sig_abc",
+                        "type": "function",
+                        "function": {
+                            "name": "take_screenshot",
+                            "arguments": "{}"
+                        }
+                    }])),
+                },
+                ChatMessage {
+                    role: "tool".to_string(),
+                    content: Some(MessageContent::Parts(vec![
+                        serde_json::json!({
+                            "type": "text",
+                            "text": "Screenshot captured"
+                        }),
+                        serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+                            }
+                        }),
+                    ])),
+                    name: Some("take_screenshot".to_string()),
+                    tool_call_id: Some("call_snap_123:thought_sig_abc".to_string()),
+                    tool_calls: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let payload = build_antigravity_payload(&req);
+        let contents = payload["request"]["contents"].as_array().unwrap();
+        assert_eq!(contents.len(), 3);
+        assert_eq!(contents[2]["role"], "user");
+        let parts = contents[2]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["functionResponse"]["id"], "call_snap_123");
+        assert_eq!(parts[0]["functionResponse"]["name"], "take_screenshot");
         assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
         assert_eq!(
             parts[1]["inlineData"]["data"],

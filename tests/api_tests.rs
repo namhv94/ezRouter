@@ -3968,7 +3968,7 @@ async fn test_phase4b_antigravity_transport_mock_http_non_streaming() {
     let headers = received_headers.lock().unwrap();
     assert_eq!(headers.len(), 1);
     assert_eq!(headers[0].0, "Bearer valid-ag-token-4b");
-    assert_eq!(headers[0].1, "antigravity/ide/2.11.0 darwin/arm64");
+    assert_eq!(headers[0].1, "antigravity/hub/2.23.0 darwin/arm64");
     assert!(headers[0]
         .2
         .contains("/v1internal:streamGenerateContent?alt=sse"));
@@ -4628,7 +4628,7 @@ async fn test_phase4b_antigravity_headers_and_payload_spec() {
 
     let (auth, ua, ct, uri, body) = captured_req.lock().unwrap().take().unwrap();
     assert_eq!(auth, "Bearer spec-token-123");
-    assert_eq!(ua, "antigravity/ide/2.11.0 darwin/arm64");
+    assert_eq!(ua, "antigravity/hub/2.23.0 darwin/arm64");
     assert_eq!(ct, "application/json");
     assert!(uri.contains("/v1internal:streamGenerateContent?alt=sse"));
 
@@ -6473,6 +6473,164 @@ async fn test_phase4c_codex_vision_text_part_fidelity_content_and_input_text_var
 }
 
 #[tokio::test]
+async fn test_phase4c_codex_tool_payload_image_parts_mock_http() {
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let mock_base_url = format!("http://127.0.0.1:{port}");
+
+    let received_body = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let body_clone = received_body.clone();
+
+    let mock_app = axum::Router::new().fallback(move |req: axum::extract::Request| {
+        let body_clone = body_clone.clone();
+        async move {
+            let bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
+                .await
+                .unwrap_or_default();
+            body_clone.lock().unwrap().push(bytes.to_vec());
+
+            let sse_stream = "event: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"item\": {\"type\": \"message\", \"id\": \"msg_tool_img_1\", \"role\": \"assistant\"}}\n\nevent: response.output_text.delta\ndata: {\"type\": \"response.output_text.delta\", \"delta\": \"Tool image processed successfully.\"}\n\nevent: response.output_item.done\ndata: {\"type\": \"response.output_item.done\", \"item\": {\"type\": \"message\", \"id\": \"msg_tool_img_1\"}}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"usage\": {\"input_tokens\": 50, \"output_tokens\": 10}}}\n\n";
+
+            (
+                StatusCode::OK,
+                [("content-type", "text/event-stream")],
+                sse_stream,
+            )
+        }
+    });
+
+    tokio::spawn(async move {
+        axum::serve(listener, mock_app).await.unwrap();
+    });
+
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-p4c-tool-img-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let db =
+        Arc::new(Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap());
+    let pool = Arc::new(CodexPool::with_components(
+        db.clone(),
+        Arc::new(MockCodexTokenRefresher::with_token("test-vis-token")),
+        Arc::new(MockCodexQuotaFetcher::new()),
+        PathBuf::from(&test_dir).join("accounts"),
+        PathBuf::from(&test_dir).join("default.json"),
+        mock_base_url.clone(),
+    ));
+
+    let tokens = serde_json::json!({
+        "access_token": "valid-token",
+        "refresh_token": "valid-rt",
+        "account_id": "account-tool-img"
+    });
+    pool.add_account_with_tokens(tokens, Some("acc-tool-img"))
+        .unwrap();
+    pool.load_from_db().unwrap();
+
+    let provider = CodexProvider::with_base_url(pool.clone(), &mock_base_url);
+
+    let request = ChatCompletionRequest {
+        model: "cx/gpt-5.6-sol".to_string(),
+        messages: vec![
+            ChatMessage::user("Please inspect this chart and calculate values"),
+            ChatMessage {
+                role: "assistant".to_string(),
+                tool_calls: Some(serde_json::json!([
+                    {
+                        "id": "call_img_1",
+                        "type": "function",
+                        "function": {
+                            "name": "vision_analyze",
+                            "arguments": "{\"image\":\"chart.png\"}"
+                        }
+                    },
+                    {
+                        "id": "call_txt_2",
+                        "type": "function",
+                        "function": {
+                            "name": "calculator",
+                            "arguments": "{\"expr\":\"1+1\"}"
+                        }
+                    }
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_img_1".to_string()),
+                content: Some(MessageContent::Parts(vec![
+                    serde_json::json!({"type": "text", "text": "Screenshot result"}),
+                    serde_json::json!({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": "data:image/png;base64,toolimagebase64",
+                            "detail": "high"
+                        }
+                    }),
+                ])),
+                ..Default::default()
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                tool_call_id: Some("call_txt_2".to_string()),
+                content: Some(MessageContent::Text("result: 42".to_string())),
+                ..Default::default()
+            },
+        ],
+        stream: Some(false),
+        ..Default::default()
+    };
+
+    let resp = provider.complete(&request).await.unwrap();
+    assert_eq!(resp.choices[0].finish_reason, "stop");
+    assert_eq!(
+        resp.choices[0].message.content.as_deref(),
+        Some("Tool image processed successfully.")
+    );
+
+    let b_guard = received_body.lock().unwrap();
+    assert_eq!(b_guard.len(), 1);
+    let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
+    let input = sent_json["input"].as_array().unwrap();
+    assert_eq!(input.len(), 5);
+
+    // 0: user message
+    assert_eq!(input[0]["role"], "user");
+
+    // 1 & 2: function calls from assistant
+    assert_eq!(input[1]["type"], "function_call");
+    assert_eq!(input[1]["call_id"], "call_img_1");
+    assert_eq!(input[2]["type"], "function_call");
+    assert_eq!(input[2]["call_id"], "call_txt_2");
+
+    // 3: tool message with image parts preserves input_image in function_call_output.output
+    assert_eq!(input[3]["type"], "function_call_output");
+    assert_eq!(input[3]["call_id"], "call_img_1");
+    let tool1_output = input[3]["output"]
+        .as_array()
+        .expect("tool 1 output should be an array of parts");
+    assert_eq!(tool1_output.len(), 2);
+    assert_eq!(tool1_output[0]["type"], "input_text");
+    assert_eq!(tool1_output[0]["text"], "Screenshot result");
+    assert_eq!(tool1_output[1]["type"], "input_image");
+    assert_eq!(
+        tool1_output[1]["image_url"],
+        "data:image/png;base64,toolimagebase64"
+    );
+    assert_eq!(tool1_output[1]["detail"], "high");
+
+    // 4: text-only tool message serializes output as string
+    assert_eq!(input[4]["type"], "function_call_output");
+    assert_eq!(input[4]["call_id"], "call_txt_2");
+    assert_eq!(input[4]["output"], "result: 42");
+    assert!(input[4]["output"].is_string());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
 async fn test_phase4c_codex_oauth_exchange_mock_http() {
     use base64::Engine;
     use tokio::net::TcpListener;
@@ -7973,14 +8131,14 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         "gemini-3.1-pro"
     );
 
-    // ag/gemini-4-argon and agon alias -> upstream gemini-4-argon
+    // ag/gemini-4-argon and agon alias -> upstream gemini-4-argon-*
     let req_argon1 = ChatCompletionRequest {
         model: "ag/gemini-4-argon".to_string(),
         messages: vec![ChatMessage::user("Hi")],
         ..Default::default()
     };
     let p_argon1 = build_antigravity_payload(&req_argon1);
-    assert_eq!(p_argon1["model"], "gemini-4-argon");
+    assert_eq!(p_argon1["model"], "gemini-4-argon-high");
     assert_eq!(
         p_argon1["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "HIGH"
@@ -7992,7 +8150,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         ..Default::default()
     };
     let p_argon2 = build_antigravity_payload(&req_argon2);
-    assert_eq!(p_argon2["model"], "gemini-4-argon");
+    assert_eq!(p_argon2["model"], "gemini-4-argon-low");
     assert_eq!(
         p_argon2["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "LOW"
@@ -8005,7 +8163,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
         ..Default::default()
     };
     let p_argon3 = build_antigravity_payload(&req_argon3);
-    assert_eq!(p_argon3["model"], "gemini-4-argon");
+    assert_eq!(p_argon3["model"], "gemini-4-argon-medium");
     assert_eq!(
         p_argon3["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
         "MEDIUM"
@@ -8013,10 +8171,24 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
 
     assert_eq!(
         map_antigravity_upstream_model("ag/gemini-4-argon"),
-        "gemini-4-argon"
+        "gemini-4-argon-high"
     );
-    assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon");
-    assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon");
+    assert_eq!(
+        map_antigravity_upstream_model("agon"),
+        "gemini-4-argon-high"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("ag/argon"),
+        "gemini-4-argon-high"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("argon-low"),
+        "gemini-4-argon-low"
+    );
+    assert_eq!(
+        map_antigravity_upstream_model("ag/gemini-4-argon-medium"),
+        "gemini-4-argon-medium"
+    );
 
     // 2. 400 safety: invalid requests correctly reject with 400 Bad Request
     let temp_dir = format!(
