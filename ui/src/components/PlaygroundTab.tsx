@@ -33,12 +33,34 @@ const DEFAULT_AG_MODELS = [
 
 const DEFAULT_CX_MODELS = [
   'cx/gpt-6.1-sol',
+  'cx/gpt-6.1-sol-high',
+  'cx/gpt-6.1-sol-medium',
+  'cx/gpt-6.1-sol-low',
+  'cx/gpt-6.1-sol-xhigh',
+  'cx/gpt-6.1-sol-max',
   'cx/gpt-6-sol',
   'cx/gpt-6-luna',
   'cx/gpt-6-astra',
+  'cx/gpt-6-astra-high',
+  'cx/gpt-6-astra-medium',
+  'cx/gpt-6-astra-low',
+  'cx/gpt-6-astra-xhigh',
+  'cx/gpt-6-astra-max',
   'cx/gpt-5.6-sol',
+  'cx/gpt-5.6-sol-high',
+  'cx/gpt-5.6-sol-medium',
+  'cx/gpt-5.6-sol-low',
+  'cx/gpt-5.6-sol-xhigh',
+  'cx/gpt-5.6-sol-max',
+  'cx/gpt-5.6-sol-ultra',
   'cx/gpt-5.6-terra',
+  'cx/gpt-5.6-terra-high',
+  'cx/gpt-5.6-terra-medium',
+  'cx/gpt-5.6-terra-low',
   'cx/gpt-5.6-luna',
+  'cx/gpt-5.6-luna-high',
+  'cx/gpt-5.6-luna-medium',
+  'cx/gpt-5.6-luna-low',
   'cx/gpt-reserve',
   'cx/gpt-5.5',
 ];
@@ -64,7 +86,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
 
   // Mode & prompts
   const [isStream, setIsStream] = useState<boolean>(true);
-  const [thinkingLevel, setThinkingLevel] = useState<'default' | 'high' | 'medium' | 'low'>('default');
+  const [thinkingLevel, setThinkingLevel] = useState<'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'>('default');
   const [systemPrompt, setSystemPrompt] = useState<string>(
     t('playground.defaultSystemPrompt')
   );
@@ -554,9 +576,12 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                 disabled={loading}
               >
                 <option value="default">{t('playground.thinkingOptDefault')}</option>
-                <option value="high">{t('playground.thinkingOptHigh')}</option>
-                <option value="medium">{t('playground.thinkingOptMedium')}</option>
                 <option value="low">{t('playground.thinkingOptLow')}</option>
+                <option value="medium">{t('playground.thinkingOptMedium')}</option>
+                <option value="high">{t('playground.thinkingOptHigh')}</option>
+                <option value="xhigh">{t('playground.thinkingOptXHigh')}</option>
+                <option value="max">{t('playground.thinkingOptMax')}</option>
+                <option value="ultra">{t('playground.thinkingOptUltra')}</option>
               </select>
             </div>
 
