@@ -2521,6 +2521,18 @@ pub fn openai_to_codex_input(
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
                         } else if let Some(t) = p.as_str() {
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
+                        } else if let Some(image_obj) = p.get("image_url") {
+                            let image_url =
+                                image_obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                            if !image_url.is_empty() {
+                                user_parts.push(serde_json::json!({
+                                    "type": "input_image",
+                                    "image_url": image_url,
+                                    "detail": "auto"
+                                }));
+                            }
+                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_image") {
+                            user_parts.push(p.clone());
                         } else if p.get("type").and_then(|v| v.as_str()) == Some("input_text") {
                             user_parts.push(p.clone());
                         }
@@ -2532,6 +2544,7 @@ pub fn openai_to_codex_input(
                         .push(serde_json::json!({"type": "input_text", "text": text.as_ref()}));
                 }
                 converted_input.push(serde_json::json!({
+                    "type": "message",
                     "role": "user",
                     "content": user_parts
                 }));
