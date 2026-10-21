@@ -14,7 +14,8 @@ use tower::ServiceExt;
 
 use ezrouter::error::AppError;
 use ezrouter::provider::{
-    ChatCompletionRequest, ChatCompletionResponse, HttpUpstreamProvider, MockProvider, Provider,
+    ChatCompletionRequest, ChatCompletionResponse, HttpUpstreamProvider, MessageContent,
+    MockProvider, Provider,
 };
 use ezrouter::{
     app_router, AccountPool, AntigravityProvider, AppState, ChatMessage, CodexLatencyTrace,
@@ -5921,7 +5922,14 @@ async fn test_phase4c_codex_tool_payload_mock_http_non_streaming() {
 
     let request = ChatCompletionRequest {
         model: "cx/gpt-5.6-sol".to_string(),
-        messages: vec![ChatMessage::user("What is 42 * 2?")],
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"Describe this"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"data:image/png;base64,aGVsbG8="}}),
+            ])),
+            ..Default::default()
+        }],
         stream: Some(false),
         tools: Some(tools_def),
         ..Default::default()
@@ -5943,8 +5951,14 @@ async fn test_phase4c_codex_tool_payload_mock_http_non_streaming() {
     // Verify tools sent upstream in OpenAI Responses format
     let b_guard = received_body.lock().unwrap();
     let sent_json: serde_json::Value = serde_json::from_slice(&b_guard[0]).unwrap();
-    assert!(sent_json["tools"].is_array());
     assert_eq!(sent_json["tools"][0]["name"], "calculator");
+    assert_eq!(sent_json["input"][0]["type"], "message");
+    assert_eq!(sent_json["input"][0]["content"][1]["type"], "input_image");
+    assert_eq!(sent_json["input"][0]["content"][1]["detail"], "auto");
+    assert_eq!(
+        sent_json["input"][0]["content"][1]["image_url"],
+        "data:image/png;base64,aGVsbG8="
+    );
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }

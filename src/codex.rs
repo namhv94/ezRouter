@@ -2521,7 +2521,17 @@ pub fn openai_to_codex_input(
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
                         } else if let Some(t) = p.as_str() {
                             user_parts.push(serde_json::json!({"type": "input_text", "text": t}));
-                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_text") {
+                        } else if let Some(image_obj) = p.get("image_url") {
+                            let image_url =
+                                image_obj.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                            if !image_url.is_empty() {
+                                user_parts.push(serde_json::json!({
+                                    "type": "input_image",
+                                    "image_url": image_url,
+                                    "detail": "auto"
+                                }));
+                            }
+                        } else if p.get("type").and_then(|v| v.as_str()) == Some("input_image") {
                             user_parts.push(p.clone());
                         }
                     }
@@ -2532,6 +2542,7 @@ pub fn openai_to_codex_input(
                         .push(serde_json::json!({"type": "input_text", "text": text.as_ref()}));
                 }
                 converted_input.push(serde_json::json!({
+                    "type": "message",
                     "role": "user",
                     "content": user_parts
                 }));
@@ -4293,6 +4304,27 @@ mod tests {
         let read = std::fs::read_to_string(&file_path).unwrap();
         assert!(read.contains("\"test\": \"data\""));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_openai_to_codex_input_translates_image_url_parts() {
+        let messages = vec![ChatMessage {
+            role: "user".to_string(),
+            content: Some(crate::provider::MessageContent::Parts(vec![
+                serde_json::json!({"type":"text", "text":"What is shown?"}),
+                serde_json::json!({"type":"image_url", "image_url":{"url":"data:image/png;base64,aGVsbG8="}}),
+            ])),
+            ..Default::default()
+        }];
+        let (input, _) = openai_to_codex_input(&messages, None).unwrap();
+        assert_eq!(input[0]["type"], "message");
+        assert_eq!(input[0]["content"].as_array().unwrap().len(), 2);
+        assert_eq!(input[0]["content"][1]["type"], "input_image");
+        assert_eq!(input[0]["content"][1]["detail"], "auto");
+        assert_eq!(
+            input[0]["content"][1]["image_url"],
+            "data:image/png;base64,aGVsbG8="
+        );
     }
 
     #[test]
