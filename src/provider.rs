@@ -1326,19 +1326,15 @@ pub fn map_antigravity_upstream_model(model: &str) -> &str {
         "gemini-3.1-pro-low" | "gemini-pro-low" => "gemini-3.1-pro-low",
         "claude-opus-5-5" | "claude-opus-5.5" => "claude-opus-5-5-high",
         "claude-sonnet-5-5" | "claude-sonnet-5.5" => "claude-sonnet-5-5-high",
-        "gemini-4-argon"
-        | "gemini-4-argon-high"
-        | "gemini-4-argon-medium"
-        | "gemini-4-argon-low"
-        | "gemini-argon"
-        | "argon"
-        | "agon"
+        "gemini-4-argon-low" | "argon-low" | "agon-low" => "gemini-4-argon-low",
+        "gemini-4-argon-medium" | "argon-medium" | "agon-medium" => "gemini-4-argon-medium",
+        "gemini-4-argon-high"
         | "argon-high"
         | "agon-high"
-        | "argon-medium"
-        | "agon-medium"
-        | "argon-low"
-        | "agon-low" => "gemini-4-argon",
+        | "gemini-4-argon"
+        | "gemini-argon"
+        | "argon"
+        | "agon" => "gemini-4-argon-high",
         other => other,
     }
 }
@@ -1742,7 +1738,18 @@ pub fn extract_text_tool_calls(text: &str) -> (String, Vec<serde_json::Value>) {
 }
 
 pub fn build_antigravity_payload(request: &ChatCompletionRequest) -> serde_json::Value {
-    let upstream_model = map_antigravity_upstream_model(&request.model);
+    let mut upstream_model = map_antigravity_upstream_model(&request.model);
+    if upstream_model.starts_with("gemini-4-argon") {
+        if let Some(effort) = request.reasoning_effort.as_deref() {
+            if effort.eq_ignore_ascii_case("low") {
+                upstream_model = "gemini-4-argon-low";
+            } else if effort.eq_ignore_ascii_case("medium") {
+                upstream_model = "gemini-4-argon-medium";
+            } else if effort.eq_ignore_ascii_case("high") {
+                upstream_model = "gemini-4-argon-high";
+            }
+        }
+    }
     let is_claude = upstream_model.to_lowercase().contains("claude");
 
     let mut contents: Vec<serde_json::Value> = Vec::new();
@@ -2980,15 +2987,7 @@ impl Provider for AntigravityProvider {
                 },
             };
 
-            let upstream_model = map_antigravity_upstream_model(&request.model);
-            let effective_base_url = if upstream_model.contains("argon")
-                && self.base_url.contains("daily-cloudcode-pa.googleapis.com")
-            {
-                "https://cloudcode-pa.googleapis.com"
-            } else {
-                self.base_url.as_str()
-            };
-            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", effective_base_url);
+            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", self.base_url);
             let payload = build_antigravity_payload(request);
 
             let res = self
@@ -3163,15 +3162,7 @@ impl Provider for AntigravityProvider {
                 },
             };
 
-            let upstream_model = map_antigravity_upstream_model(&request.model);
-            let effective_base_url = if upstream_model.contains("argon")
-                && self.base_url.contains("daily-cloudcode-pa.googleapis.com")
-            {
-                "https://cloudcode-pa.googleapis.com"
-            } else {
-                self.base_url.as_str()
-            };
-            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", effective_base_url);
+            let url = format!("{}/v1internal:streamGenerateContent?alt=sse", self.base_url);
             let payload = build_antigravity_payload(request);
 
             let res = self
@@ -3660,46 +3651,46 @@ mod tests {
             "claude-sonnet-4-6"
         );
 
-        // Argon / Agon aliases map to gemini-4-argon
+        // Argon / Agon aliases map to gemini-4-argon-*
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-4-argon"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             map_antigravity_upstream_model("gemini-4-argon"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-argon"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             map_antigravity_upstream_model("gemini-argon"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
-        assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon");
-        assert_eq!(map_antigravity_upstream_model("argon"), "gemini-4-argon");
-        assert_eq!(map_antigravity_upstream_model("ag/agon"), "gemini-4-argon");
-        assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon");
+        assert_eq!(map_antigravity_upstream_model("ag/argon"), "gemini-4-argon-high");
+        assert_eq!(map_antigravity_upstream_model("argon"), "gemini-4-argon-high");
+        assert_eq!(map_antigravity_upstream_model("ag/agon"), "gemini-4-argon-high");
+        assert_eq!(map_antigravity_upstream_model("agon"), "gemini-4-argon-high");
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-4-argon-high"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-4-argon-medium"),
-            "gemini-4-argon"
+            "gemini-4-argon-medium"
         );
         assert_eq!(
             map_antigravity_upstream_model("ag/gemini-4-argon-low"),
-            "gemini-4-argon"
+            "gemini-4-argon-low"
         );
         assert_eq!(
             map_antigravity_upstream_model("agon-high"),
-            "gemini-4-argon"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             map_antigravity_upstream_model("argon-low"),
-            "gemini-4-argon"
+            "gemini-4-argon-low"
         );
 
         // Safety assertion: raw unsupported gemini-3.1-pro is never returned
@@ -3763,7 +3754,7 @@ mod tests {
             ..Default::default()
         };
         let p_high = build_antigravity_payload(&req_high);
-        assert_eq!(p_high["model"], "gemini-4-argon");
+        assert_eq!(p_high["model"], "gemini-4-argon-high");
         assert_eq!(
             p_high["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "HIGH"
@@ -3776,7 +3767,7 @@ mod tests {
             ..Default::default()
         };
         let p_med = build_antigravity_payload(&req_med);
-        assert_eq!(p_med["model"], "gemini-4-argon");
+        assert_eq!(p_med["model"], "gemini-4-argon-medium");
         assert_eq!(
             p_med["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "MEDIUM"
@@ -3789,7 +3780,7 @@ mod tests {
             ..Default::default()
         };
         let p_low = build_antigravity_payload(&req_low);
-        assert_eq!(p_low["model"], "gemini-4-argon");
+        assert_eq!(p_low["model"], "gemini-4-argon-low");
         assert_eq!(
             p_low["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "LOW"
@@ -3803,7 +3794,7 @@ mod tests {
             ..Default::default()
         };
         let p_effort = build_antigravity_payload(&req_effort);
-        assert_eq!(p_effort["model"], "gemini-4-argon");
+        assert_eq!(p_effort["model"], "gemini-4-argon-high");
         assert_eq!(
             p_effort["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"],
             "HIGH"

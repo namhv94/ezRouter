@@ -109,7 +109,7 @@ pub const AG_MODELS_URL: &str =
     "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 pub const AG_LOAD_CODE_ASSIST_URL: &str =
     "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
-pub const AG_USER_AGENT: &str = "antigravity/ide/2.11.0 darwin/arm64";
+pub const AG_USER_AGENT: &str = "antigravity/hub/2.23.0 darwin/arm64";
 pub const AG_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub const AG_USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v1/userinfo";
 pub const AG_SCOPES: &[&str] = &[
