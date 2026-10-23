@@ -407,6 +407,7 @@ export interface TranslationSchema {
     quotaAvgLabel: string;
     quotaGemini5h: string;
     quotaGeminiWeekly: string;
+    quotaArgonWeekly: string;
     quotaClaude5h: string;
     quotaClaudeWeekly: string;
     refreshGooglePoolQuota: string;
