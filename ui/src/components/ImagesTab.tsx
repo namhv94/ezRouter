@@ -154,7 +154,12 @@ export const ImagesTab: React.FC<ImagesTabProps> = ({ adminKey }) => {
                       lower.includes('diffusion') ||
                       lower.includes('image') ||
                       lower.includes('dall-e') ||
-                      lower.includes('midjourney')
+                      lower.includes('midjourney') ||
+                      lower.includes('recraft') ||
+                      lower.includes('seedream') ||
+                      lower.includes('krea') ||
+                      lower.includes('riverflow') ||
+                      lower.includes('banana')
                     ) {
                       const qualified = p.prefix ? `${p.prefix}/${mId}` : mId;
                       if (!found.includes(qualified)) {

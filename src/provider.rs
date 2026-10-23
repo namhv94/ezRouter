@@ -508,6 +508,16 @@ pub fn resolve_image_generations_url(base_url: &str) -> String {
     }
 }
 
+/// Resolves the upstream endpoint for image models, avoiding duplicate `/v1`.
+pub fn resolve_image_models_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/v1") {
+        format!("{trimmed}/images/models")
+    } else {
+        format!("{trimmed}/v1/images/models")
+    }
+}
+
 pub fn format_reqwest_stream_error(err: &reqwest::Error) -> AppError {
     let mut details = err.to_string();
     let mut curr: &dyn std::error::Error = err;
@@ -3361,6 +3371,34 @@ mod tests {
         assert_eq!(
             resolve_embeddings_url("http://127.0.0.1:11434/v1"),
             "http://127.0.0.1:11434/v1/embeddings"
+        );
+    }
+
+    #[test]
+    fn test_resolve_image_models_and_generations_url() {
+        assert_eq!(
+            resolve_image_generations_url("https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1/images/generations"
+        );
+        assert_eq!(
+            resolve_image_generations_url("https://openrouter.ai/api/v1/"),
+            "https://openrouter.ai/api/v1/images/generations"
+        );
+        assert_eq!(
+            resolve_image_generations_url("https://api.openai.com"),
+            "https://api.openai.com/v1/images/generations"
+        );
+        assert_eq!(
+            resolve_image_models_url("https://openrouter.ai/api/v1"),
+            "https://openrouter.ai/api/v1/images/models"
+        );
+        assert_eq!(
+            resolve_image_models_url("https://openrouter.ai/api/v1/"),
+            "https://openrouter.ai/api/v1/images/models"
+        );
+        assert_eq!(
+            resolve_image_models_url("https://api.openai.com"),
+            "https://api.openai.com/v1/images/models"
         );
     }
 

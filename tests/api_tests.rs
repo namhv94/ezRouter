@@ -2943,6 +2943,102 @@ async fn test_phase3c_provider_fetch_test_sync_endpoints() {
 }
 
 #[tokio::test]
+async fn test_openrouter_provider_sync_models_includes_image_models() {
+    let test_dir = format!(
+        "/tmp/ag-proxy-rust-test-or-img-{}",
+        uuid::Uuid::new_v4().simple()
+    );
+    let mut config = Config::parse(
+        Some("127.0.0.1".to_string()),
+        Some("20229".to_string()),
+        Some(test_dir.clone()),
+        Some("test-secret-key".to_string()),
+    )
+    .unwrap();
+    config.use_mock_provider = true;
+    let app = app_router(AppState::new(config));
+
+    // 1. Create OpenRouter provider with minimal models
+    let prov_req = serde_json::json!({
+        "name": "OpenRouter Test",
+        "prefix": "or-img-test",
+        "type": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-or-dummy-key",
+        "models": ["google/gemma-4-26b-a4b-it:free"]
+    });
+
+    let req = Request::builder()
+        .uri("/admin/providers")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&prov_req).unwrap()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let created: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let pid = created["id"].as_str().unwrap();
+
+    // 2. Sync models for OpenRouter provider
+    let req = Request::builder()
+        .uri(format!("/admin/providers/{pid}/sync-models"))
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let sync_res: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(sync_res["status"], "ok");
+
+    let synced = sync_res["models"].as_array().expect("models must be array");
+    assert!(
+        synced
+            .iter()
+            .any(|m| m.as_str() == Some("recraft/recraft-v4.1-flash")),
+        "Syncing openrouter must include recraft/recraft-v4.1-flash"
+    );
+    assert!(
+        synced
+            .iter()
+            .any(|m| m.as_str() == Some("black-forest-labs/flux.2-klein-4b")),
+        "Syncing openrouter must include black-forest-labs/flux.2-klein-4b"
+    );
+
+    // 3. Test /admin/providers/fetch-models for OpenRouter type
+    let fetch_req = serde_json::json!({
+        "type": "openrouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key": "sk-dummy"
+    });
+    let req = Request::builder()
+        .uri("/admin/providers/fetch-models")
+        .method("POST")
+        .header(AUTHORIZATION, "Bearer test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&fetch_req).unwrap()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let fetch_res: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let fetched = fetch_res["models"]
+        .as_array()
+        .expect("models must be array");
+    assert!(
+        fetched
+            .iter()
+            .any(|m| m.as_str() == Some("recraft/recraft-v4.1-flash")),
+        "fetch-models for openrouter must include image models"
+    );
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
 async fn test_phase3c_persistence_and_restart() {
     let test_dir = format!(
         "/tmp/ag-proxy-rust-test-p3c-persist-{}",

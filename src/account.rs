@@ -422,6 +422,15 @@ pub fn parse_google_quota_summary(payload: &serde_json::Value) -> serde_json::Va
                             "gemini-weekly" | "gemini_weekly" => {
                                 Some(("gemini_weekly", "Gemini Weekly"))
                             }
+                            "gemini-argon-wtu-weekly"
+                            | "gemini_argon_wtu_weekly"
+                            | "gemini-argon-weekly"
+                            | "gemini_argon_weekly"
+                            | "argon-weekly"
+                            | "argon_weekly" => Some(("argon_weekly", "Argon Weekly")),
+                            "gemini-argon-5h" | "gemini_argon_5h" | "argon-5h" | "argon_5h" => {
+                                Some(("argon_5h", "Argon 5h"))
+                            }
                             "3p-5h" | "3p_5h" => Some(("claude_5h", "Claude/GPT 5h")),
                             "3p-weekly" | "3p_weekly" => {
                                 Some(("claude_weekly", "Claude/GPT Weekly"))
@@ -864,12 +873,49 @@ pub fn filter_candidates_for_model(
         }
 
         // 2. Quota filtering
+        let is_argon = m_lower.contains("argon") || m_lower.contains("agon");
         let is_claude_or_gpt = m_lower.contains("claude") || m_lower.contains("gpt");
         let mut with_quota = Vec::new();
         let mut without_quota = Vec::new();
 
         for item in &candidates {
-            if is_claude_or_gpt {
+            if is_argon {
+                let has_aw = item.quota_cache.get("argon_weekly");
+                if let Some(aw) = has_aw {
+                    let aw_rem = aw
+                        .get("remaining_percent")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    let a5_rem = item
+                        .quota_cache
+                        .get("argon_5h")
+                        .and_then(|v| v.get("remaining_percent"))
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(100.0);
+                    if aw_rem > 0.0 && a5_rem > 0.0 {
+                        with_quota.push(item.clone());
+                    }
+                } else {
+                    // Fallback for Ultra or accounts without dedicated Argon bucket
+                    let has_g5 = item.quota_cache.get("gemini_5h");
+                    let has_gw = item.quota_cache.get("gemini_weekly");
+                    if has_g5.is_none() && has_gw.is_none() {
+                        without_quota.push(item.clone());
+                    } else {
+                        let g5_rem = has_g5
+                            .and_then(|v| v.get("remaining_percent"))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(100.0);
+                        let gw_rem = has_gw
+                            .and_then(|v| v.get("remaining_percent"))
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(100.0);
+                        if g5_rem > 0.0 && gw_rem > 0.0 {
+                            with_quota.push(item.clone());
+                        }
+                    }
+                }
+            } else if is_claude_or_gpt {
                 let has_c5 = item.quota_cache.get("claude_5h");
                 let has_cw = item.quota_cache.get("claude_weekly");
                 if has_c5.is_none() && has_cw.is_none() {
@@ -2359,6 +2405,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_quota_filtering_argon() {
+        let db =
+            Arc::new(Database::open_or_create(std::path::Path::new(":memory:"), None).unwrap());
+        let pool = AccountPool::new(db.clone());
+
+        let acc_a = pool.add_account("a@example.com", "tok-a").unwrap();
+        let acc_b = pool.add_account("b@example.com", "tok-b").unwrap();
+
+        // A has 0% argon weekly quota, B has 95%
+        pool.set_quota_cache(
+            &acc_a.id,
+            serde_json::json!({
+                "argon_weekly": { "remaining_percent": 0.0, "reset_time": "2026-10-30T00:00:00Z" },
+                "gemini_weekly": { "remaining_percent": 100.0 }
+            }),
+        );
+        pool.set_quota_cache(
+            &acc_b.id,
+            serde_json::json!({
+                "argon_weekly": { "remaining_percent": 95.0, "reset_time": "2026-10-30T00:00:00Z" },
+                "gemini_weekly": { "remaining_percent": 10.0 }
+            }),
+        );
+
+        // Requesting argon model should pick B despite A having 100% gemini_weekly
+        let picked = pool
+            .pick_account(Some("ag/gemini-4-argon"))
+            .await
+            .expect("should pick B");
+        assert_eq!(picked.id, acc_b.id);
+    }
+
+    #[tokio::test]
     async fn test_auto_disable_and_enable_on_quota_recovery() {
         let db =
             Arc::new(Database::open_or_create(std::path::Path::new(":memory:"), None).unwrap());
@@ -2599,6 +2678,18 @@ mod tests {
                             "remainingFraction": 0.9997848
                         }
                     ]
+                },
+                {
+                    "displayName": "Gemini 4 Argon",
+                    "buckets": [
+                        {
+                            "bucketId": "gemini-argon-wtu-weekly",
+                            "displayName": "Gemini 4 Argon Weekly Limit",
+                            "window": "weekly",
+                            "resetTime": "2026-10-30T03:06:47Z",
+                            "remainingFraction": 0.9997885
+                        }
+                    ]
                 }
             ]
         });
@@ -2622,6 +2713,11 @@ mod tests {
         let claude_weekly = parsed.get("claude_weekly").unwrap();
         assert_eq!(claude_weekly["remaining_percent"], 53.9);
         assert_eq!(claude_weekly["reset_time"], "2026-09-27T15:16:05Z");
+
+        let argon_weekly = parsed.get("argon_weekly").unwrap();
+        assert_eq!(argon_weekly["remaining_percent"], 100.0);
+        assert_eq!(argon_weekly["reset_time"], "2026-10-30T03:06:47Z");
+        assert_eq!(argon_weekly["display_name"], "Argon Weekly");
     }
 
     #[tokio::test]

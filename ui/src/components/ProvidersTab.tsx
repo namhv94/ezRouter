@@ -272,18 +272,47 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
   const loadAllOpenRouterModels = async () => {
     setAllModelsLoading(true);
     try {
-      const res = await fetch('https://openrouter.ai/api/v1/models');
-      if (res.ok) {
-        const json = await res.json();
+      const [res, imgRes] = await Promise.allSettled([
+        fetch('https://openrouter.ai/api/v1/models'),
+        fetch('https://openrouter.ai/api/v1/images/models'),
+      ]);
+      const list: any[] = [];
+      const seen = new Set<string>();
+
+      if (res.status === 'fulfilled' && res.value.ok) {
+        const json = await res.value.json();
         if (Array.isArray(json.data)) {
-          setAllOpenRouterModels(
-            json.data.map((m: any) => ({
-              id: m.id,
-              name: m.name || m.id,
-              context_length: m.context_length,
-            }))
-          );
+          for (const m of json.data) {
+            if (m?.id && !seen.has(m.id)) {
+              seen.add(m.id);
+              list.push({
+                id: m.id,
+                name: m.name || m.id,
+                context_length: m.context_length,
+              });
+            }
+          }
         }
+      }
+
+      if (imgRes.status === 'fulfilled' && imgRes.value.ok) {
+        const json = await imgRes.value.json();
+        if (Array.isArray(json.data)) {
+          for (const m of json.data) {
+            if (m?.id && !seen.has(m.id)) {
+              seen.add(m.id);
+              list.push({
+                id: m.id,
+                name: m.name ? `${m.name} [Image]` : m.id,
+                context_length: 0,
+              });
+            }
+          }
+        }
+      }
+
+      if (list.length > 0) {
+        setAllOpenRouterModels(list);
       }
     } catch (e) {
       console.error('Failed to load OpenRouter models:', e);
@@ -1340,6 +1369,12 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
       ? Math.round(geminiWeeklyAccs.reduce((sum, a) => sum + a.quota.gemini_weekly.remaining_percent, 0) / geminiWeeklyAccs.length)
       : null;
 
+  const argonWeeklyAccs = accounts.filter((a) => a.is_active && typeof a.quota?.argon_weekly?.remaining_percent === 'number');
+  const argonWeeklyAvg =
+    argonWeeklyAccs.length > 0
+      ? Math.round(argonWeeklyAccs.reduce((sum, a) => sum + a.quota.argon_weekly.remaining_percent, 0) / argonWeeklyAccs.length)
+      : null;
+
   const googleClaudeStoppedCount = accounts.filter(
     (a) => a.is_active && typeof a.quota?.claude_5h?.remaining_percent === 'number' && a.quota.claude_5h.remaining_percent <= 0
   ).length;
@@ -1945,6 +1980,33 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                 </div>
               )}
 
+              {argonWeeklyAvg !== null && (
+                <div className="micro-bar-row">
+                  <span className="micro-bar-label">{t('providers.quotaArgonWeekly')}:</span>
+                  <div className="micro-bar-track">
+                    <div
+                      className={`micro-bar-fill ${
+                        argonWeeklyAvg < 20
+                          ? 'micro-bar-bad'
+                          : argonWeeklyAvg < 50
+                          ? 'micro-bar-warn'
+                          : 'micro-bar-good'
+                      }`}
+                      style={{
+                        width: `${argonWeeklyAvg}%`,
+                        background:
+                          argonWeeklyAvg < 20
+                            ? '#ef4444'
+                            : argonWeeklyAvg < 50
+                            ? '#f59e0b'
+                            : '#10b981',
+                      }}
+                    />
+                  </div>
+                  <span className="micro-bar-val">{`${argonWeeklyAvg}%`}</span>
+                </div>
+              )}
+
               <div className="micro-bar-row">
                 <span className="micro-bar-label">{t('providers.quotaClaude5h')}:</span>
                 <div className="micro-bar-track">
@@ -2116,7 +2178,7 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                 )}
                               </td>
                               <td data-label={t('providers.thQuotaRemaining')}>
-                                {acc.quota && (acc.quota.gemini_5h || acc.quota.claude_5h || acc.quota.gemini_weekly || acc.quota.claude_weekly) ? (
+                                {acc.quota && (acc.quota.gemini_5h || acc.quota.claude_5h || acc.quota.gemini_weekly || acc.quota.claude_weekly || acc.quota.argon_weekly) ? (
                                   <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 2 }}>
                                     {acc.quota.gemini_5h && (
                                       <span>
@@ -2134,6 +2196,16 @@ export const ProvidersTab: React.FC<ProvidersTabProps> = ({
                                         {formatResetTime(acc.quota.gemini_weekly.reset_time) && (
                                           <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.gemini_weekly.reset_time })}>
                                             ({formatResetTime(acc.quota.gemini_weekly.reset_time)})
+                                          </span>
+                                        )}
+                                      </span>
+                                    )}
+                                    {acc.quota.argon_weekly && (
+                                      <span>
+                                        {t('providers.quotaArgonWeekly')}: <strong>{acc.quota.argon_weekly.remaining_percent}%</strong>
+                                        {formatResetTime(acc.quota.argon_weekly.reset_time) && (
+                                          <span style={{ color: 'var(--text-muted)', fontSize: 10, marginLeft: 4 }} title={t('providers.resetAt', { time: acc.quota.argon_weekly.reset_time })}>
+                                            ({formatResetTime(acc.quota.argon_weekly.reset_time)})
                                           </span>
                                         )}
                                       </span>

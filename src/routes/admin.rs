@@ -604,6 +604,86 @@ pub async fn delete_provider_root(
     delete_provider(auth, state, Path(target_id)).await
 }
 
+fn extract_model_names_from_json(body: &serde_json::Value) -> Vec<String> {
+    if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
+        data.iter()
+            .filter_map(|m| {
+                m.get("id")
+                    .and_then(|id| id.as_str())
+                    .map(|s| s.to_string())
+            })
+            .filter(|s| !s.trim().is_empty())
+            .collect()
+    } else if let Some(arr) = body.as_array() {
+        arr.iter()
+            .filter_map(|m| {
+                m.as_str().map(|s| s.to_string()).or_else(|| {
+                    m.get("id")
+                        .and_then(|id| id.as_str())
+                        .map(|s| s.to_string())
+                })
+            })
+            .filter(|s| !s.trim().is_empty())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+async fn fetch_upstream_models(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    is_openrouter: bool,
+) -> Result<Vec<String>, AppError> {
+    let trimmed_base = base_url.trim().trim_end_matches('/');
+    let url = format!("{trimmed_base}/models");
+    let mut req = client.get(&url);
+    if !api_key.trim().is_empty() {
+        req = req.bearer_auth(api_key);
+    }
+
+    let res = req
+        .send()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("Failed to fetch models from {url}: {e}")))?;
+
+    if !res.status().is_success() {
+        return Err(AppError::BadGateway(format!(
+            "Upstream returned HTTP {}",
+            res.status()
+        )));
+    }
+
+    let body: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| AppError::BadGateway(format!("Invalid JSON from upstream: {e}")))?;
+
+    let mut model_names = extract_model_names_from_json(&body);
+
+    if is_openrouter {
+        let img_url = crate::provider::resolve_image_models_url(base_url);
+        let mut img_req = client.get(&img_url);
+        if !api_key.trim().is_empty() {
+            img_req = img_req.bearer_auth(api_key);
+        }
+        if let Ok(img_res) = img_req.send().await {
+            if img_res.status().is_success() {
+                if let Ok(img_body) = img_res.json::<serde_json::Value>().await {
+                    for m in extract_model_names_from_json(&img_body) {
+                        if !model_names.contains(&m) {
+                            model_names.push(m);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(model_names)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct FetchModelsRequest {
     pub provider_id: Option<String>,
@@ -642,68 +722,32 @@ pub async fn fetch_models(
     validate_base_url(&base_url)?;
     validate_provider_type(&ptype)?;
 
+    let is_openrouter = ptype == "openrouter" || base_url.contains("openrouter.ai");
+
     if state.config.use_mock_provider {
+        let mut models = vec![
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "claude-3-5-sonnet".to_string(),
+            "gemini-2.0-flash".to_string(),
+            "deepseek-chat".to_string(),
+        ];
+        if is_openrouter {
+            models.push("recraft/recraft-v4.1-flash".to_string());
+            models.push("black-forest-labs/flux.2-klein-4b".to_string());
+        }
         return Ok(Json(serde_json::json!({
             "status": "ok",
-            "models": [
-                "gpt-4o",
-                "gpt-4o-mini",
-                "claude-3-5-sonnet",
-                "gemini-2.0-flash",
-                "deepseek-chat"
-            ]
+            "models": models,
         })));
     }
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| AppError::Internal(format!("Failed to build HTTP client: {e}")))?;
 
-    let url = format!("{}/models", base_url.trim_end_matches('/'));
-    let mut req = client.get(&url);
-    if !api_key.trim().is_empty() {
-        req = req.bearer_auth(&api_key);
-    }
-
-    let res = req
-        .send()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("Failed to fetch models from {url}: {e}")))?;
-
-    if !res.status().is_success() {
-        return Err(AppError::BadGateway(format!(
-            "Upstream returned HTTP {}",
-            res.status()
-        )));
-    }
-
-    let body: serde_json::Value = res
-        .json()
-        .await
-        .map_err(|e| AppError::BadGateway(format!("Invalid JSON from upstream: {e}")))?;
-
-    let model_names: Vec<String> = if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
-        data.iter()
-            .filter_map(|m| {
-                m.get("id")
-                    .and_then(|id| id.as_str())
-                    .map(|s| s.to_string())
-            })
-            .collect()
-    } else if let Some(arr) = body.as_array() {
-        arr.iter()
-            .filter_map(|m| {
-                m.as_str().map(|s| s.to_string()).or_else(|| {
-                    m.get("id")
-                        .and_then(|id| id.as_str())
-                        .map(|s| s.to_string())
-                })
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let model_names = fetch_upstream_models(&client, &base_url, &api_key, is_openrouter).await?;
 
     Ok(Json(serde_json::json!({
         "status": "ok",
@@ -787,58 +831,37 @@ pub async fn sync_models(
         .get_provider_by_id(&id)?
         .ok_or_else(|| AppError::NotFound(format!("Provider '{id}' not found")))?;
 
+    let is_openrouter = provider.provider_type == "openrouter"
+        || provider.prefix == "openrouter"
+        || provider.base_url.contains("openrouter.ai");
+
     let models_val: serde_json::Value = if state.config.use_mock_provider {
-        serde_json::json!([
-            "gpt-4o",
-            "gpt-4o-mini",
-            "claude-3-5-sonnet",
-            "gemini-2.0-flash",
-            "deepseek-chat"
-        ])
+        let mut models = vec![
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "claude-3-5-sonnet".to_string(),
+            "gemini-2.0-flash".to_string(),
+            "deepseek-chat".to_string(),
+        ];
+        if is_openrouter {
+            models.push("recraft/recraft-v4.1-flash".to_string());
+            models.push("black-forest-labs/flux.2-klein-4b".to_string());
+        }
+        serde_json::json!(models)
     } else {
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| AppError::Internal(format!("Failed to build HTTP client: {e}")))?;
 
-        let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
-        let mut req = client.get(&url);
-        if !provider.api_key.trim().is_empty() {
-            req = req.bearer_auth(&provider.api_key);
-        }
+        let model_names = fetch_upstream_models(
+            &client,
+            &provider.base_url,
+            &provider.api_key,
+            is_openrouter,
+        )
+        .await?;
 
-        let res = req
-            .send()
-            .await
-            .map_err(|e| AppError::BadGateway(format!("Failed to fetch models from {url}: {e}")))?;
-
-        let body: serde_json::Value = res
-            .json()
-            .await
-            .map_err(|e| AppError::BadGateway(format!("Invalid JSON from upstream: {e}")))?;
-
-        let model_names: Vec<String> =
-            if let Some(data) = body.get("data").and_then(|d| d.as_array()) {
-                data.iter()
-                    .filter_map(|m| {
-                        m.get("id")
-                            .and_then(|id| id.as_str())
-                            .map(|s| s.to_string())
-                    })
-                    .collect()
-            } else if let Some(arr) = body.as_array() {
-                arr.iter()
-                    .filter_map(|m| {
-                        m.as_str().map(|s| s.to_string()).or_else(|| {
-                            m.get("id")
-                                .and_then(|id| id.as_str())
-                                .map(|s| s.to_string())
-                        })
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
         serde_json::json!(model_names)
     };
 

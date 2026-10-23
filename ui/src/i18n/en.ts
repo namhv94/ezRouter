@@ -405,6 +405,7 @@ export const en: TranslationSchema = {
     quotaAvgLabel: "Avg Quota",
     quotaGemini5h: "Gemini 5h",
     quotaGeminiWeekly: "Gemini Weekly",
+    quotaArgonWeekly: "Argon Weekly",
     quotaClaude5h: "Claude 5h",
     quotaClaudeWeekly: "Claude Weekly",
     refreshGooglePoolQuota: "Refresh Google pool quota",
