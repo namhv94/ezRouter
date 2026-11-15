@@ -152,6 +152,46 @@ cargo build --release
 ./target/release/ezrouter
 ```
 
+### Option D: Run on Android (Termux)
+
+ezRouter runs great directly on an Android phone via [Termux](https://termux.dev). Prebuilt release binaries are Linux **x86_64** only, so on an aarch64 device you build from source with the Termux Rust toolchain.
+
+**Prerequisites** — install the toolchain inside Termux:
+
+```bash
+pkg update
+pkg install git rust binutils
+```
+
+**Build and run:**
+
+```bash
+git clone https://github.com/dhhieu113pro/ezRouter.git
+cd ezRouter
+
+# Copy example environment configuration
+cp .env.example .env
+
+# Build optimized release binary (10–40 min on a phone, device may get warm)
+cargo build --release
+
+# Run ezRouter — run from the repo root so the embedded web UI (ui/dist) is found
+./target/release/ezrouter
+```
+
+**Optional: make the command available everywhere**
+
+```bash
+cp target/release/ezrouter $PREFIX/bin/ezrouter
+```
+
+**Termux tips:**
+
+- Use `termux-wake-lock` to keep the service running reliably when the screen turns off.
+- `pkg install termux-services` or run inside `tmux` / `screen` if you want it to keep running after closing the session.
+- To reach the server from other devices on the same network, set `AG_HOST=0.0.0.0` in `.env` and allow the port in Android settings.
+- The bundled SQLite and rustls TLS stack compile cleanly on Termux — no OpenSSL or system libraries needed.
+
 Once running, verify health:
 
 ```bash
