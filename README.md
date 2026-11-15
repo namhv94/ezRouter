@@ -20,9 +20,6 @@ git clone https://github.com/dhhieu113pro/ezRouter.git
 cd ezRouter
 cp .env.example .env
 cargo build --release   # 10–40 min on a phone
-```
-
-Verify: `curl http://127.0.0.1:20229/health` · Console: `http://127.0.0.1:20229/`
 
 # 3. Install as a global command + env file
 ./scripts/install-termux.sh
@@ -94,6 +91,37 @@ Still possible from the repo root so the web UI in `ui/dist` is found:
 AG_HOST=0.0.0.0 AG_PORT=20229 AG_API_KEY=123456 AG_DATA_DIR=$HOME/.ezrouter/data \
   ./target/release/ezrouter
 ```
+
+## Use ezRouter as ZeroClaw's model provider
+
+Point [ZeroClaw](https://github.com/zero-claw) at the ezRouter OpenAI-compatible
+gateway so all of ZeroClaw's agent traffic flows through ezRouter:
+
+```bash
+./scripts/setup-zeroclaw.sh     # idempotent; safe to re-run
+zeroclaw self-test              # verify the wiring
+```
+
+This adds a `zerorouter.9router` provider profile
+(`http://127.0.0.1:20229/v1`, api key `123456`) and routes the `main` agent to it
+with the default risk profile:
+
+```toml
+[providers.models.zerorouter.9router]
+uri = "http://127.0.0.1:20229/v1"
+api_key = "123456"
+model = "ag/gemini-4-argon"
+
+[agents.main]
+model_provider = "zerorouter.9router"
+risk_profile = "default"
+```
+
+> 💡 **"Model: all"** — ZeroClaw sends one `model` per profile. ezRouter is a router,
+> so it accepts any model id and forwards it to whichever upstream you configure.
+> To fan ZeroClaw across ezRouter's whole catalog, configure ezRouter's upstream
+> (`AG_UPSTREAM_BASE_URL` / `AG_UPSTREAM_API_KEY` in `~/.ezrouter/env`), then set
+> the ZeroClaw profile `model` to any model ezRouter exposes (`/v1/models`).
 
 ## Credits
 
