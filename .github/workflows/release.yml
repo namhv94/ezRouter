@@ -13,16 +13,8 @@ env:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-          - target: aarch64-unknown-linux-musl
-            runner: ubuntu-24.04-arm
+    name: Build aarch64
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -32,29 +24,26 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: aarch64-unknown-linux-musl
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target aarch64-unknown-linux-musl
 
       - name: Package
         run: |
-          ARCH_CASE=$( [ "${{ matrix.target }}" = x86_64-unknown-linux-musl ] && echo x86_64 || echo aarch64 )
-          NAME="ezrouter-${{ github.ref_name }}-linux-${ARCH_CASE}"
+          NAME="ezrouter-${{ github.ref_name }}-linux-aarch64"
           mkdir -p package
-          cp "target/${{ matrix.target }}/release/ezrouter" package/
+          cp target/aarch64-unknown-linux-musl/release/ezrouter package/
           tar -czf "${NAME}.tar.gz" -C package ezrouter
           sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ matrix.target }}
+          name: binaries-aarch64
           path: |
             *.tar.gz
             *.tar.gz.sha256
