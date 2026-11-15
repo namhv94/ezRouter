@@ -51,9 +51,13 @@ The binary reads plain env vars (`AG_HOST`, `AG_PORT`, `AG_DATA_DIR`, `AG_API_KE
 ```sh
 AG_HOST=0.0.0.0
 AG_PORT=20229
+AG_API_KEY=123456
 AG_DATA_DIR=/data/data/com.termux/files/home/.ezrouter/data
 RUST_LOG=ezrouter=info,tower_http=info
 ```
+
+`AG_API_KEY` doubles as the admin/console key (default: `123456` — change it before
+sharing the service outside your home network).
 
 After rebuilding (`cargo build --release`), refresh the installed binary with
 `./scripts/install-termux.sh`.

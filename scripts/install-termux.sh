@@ -33,11 +33,12 @@ if [ -f "$EZROUTER_ENV" ]; then
     . "$EZROUTER_ENV"
 fi
 
-# Termux-safe defaults
+# Termux-safe defaults (0.0.0.0 = listen on all interfaces, serves LAN access)
 AG_HOST="${AG_HOST:-0.0.0.0}"
 AG_PORT="${AG_PORT:-20229}"
+AG_API_KEY="${AG_API_KEY:-123456}"
 AG_DATA_DIR="${AG_DATA_DIR:-$HOME/.ezrouter/data}"
-export AG_HOST AG_PORT AG_DATA_DIR
+export AG_HOST AG_PORT AG_API_KEY AG_DATA_DIR
 
 exec "$PREFIX/lib/ezrouter" "$@"
 LAUNCHER
@@ -50,10 +51,54 @@ if [ ! -f "$HOME/.ezrouter/env" ]; then
 # ezRouter runtime environment (loaded by the ezrouter launcher)
 AG_HOST=0.0.0.0
 AG_PORT=20229
+AG_API_KEY=123456
 AG_DATA_DIR=/data/data/com.termux/files/home/.ezrouter/data
 RUST_LOG=ezrouter=info,tower_http=info
 EOF
     echo "==> Created $HOME/.ezrouter/env (edit it to change port, data dir, API keys, etc.)"
+fi
+
+# 5. Supervised termux-services unit (if termux-services is installed)
+if [ -d "$PREFIX/var/service" ]; then
+    mkdir -p "$PREFIX/var/service/ezrouter/log"
+    cat > "$PREFIX/var/service/ezrouter/run" <<'RUN'
+#!/data/data/com.termux/files/usr/bin/sh
+# ezRouter service (runsv supervised)
+
+# runsv provides a minimal environment; make sure HOME and PREFIX are set
+export HOME="${HOME:-/data/data/com.termux/files/home}"
+export PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+
+# Rebuild path since runsv strips the inherited PATH
+PATH="/data/data/com.termux/files/usr/bin"
+export PATH
+
+# Load runtime configuration (AG_HOST, AG_PORT, AG_DATA_DIR, keys, ...)
+EZROUTER_ENV="${EZROUTER_ENV:-$HOME/.ezrouter/env}"
+if [ -f "$EZROUTER_ENV" ]; then
+    . "$EZROUTER_ENV"
+fi
+
+# Termux-safe defaults (0.0.0.0 = listen on all interfaces, serves LAN access)
+AG_HOST="${AG_HOST:-0.0.0.0}"
+AG_PORT="${AG_PORT:-20229}"
+AG_API_KEY="${AG_API_KEY:-123456}"
+AG_DATA_DIR="${AG_DATA_DIR:-$HOME/.ezrouter/data}"
+export AG_HOST AG_PORT AG_API_KEY AG_DATA_DIR
+
+mkdir -p "$AG_DATA_DIR"
+
+exec 2>&1
+exec ezrouter
+RUN
+    cat > "$PREFIX/var/service/ezrouter/log/run" <<'LOGRUN'
+#!/data/data/com.termux/files/usr/bin/sh
+# ezRouter service logging (svlogd)
+mkdir -p "$HOME/log/ezrouter"
+exec svlogd "$HOME/log/ezrouter"
+LOGRUN
+    chmod +x "$PREFIX/var/service/ezrouter/run" "$PREFIX/var/service/ezrouter/log/run"
+    echo "==> Created service unit $PREFIX/var/service/ezrouter (enable with: sv-enable ezrouter)"
 fi
 
 echo "==> Installed: $PREFIX/bin/ezrouter"
