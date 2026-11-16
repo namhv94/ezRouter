@@ -123,6 +123,30 @@ risk_profile = "default"
 > (`AG_UPSTREAM_BASE_URL` / `AG_UPSTREAM_API_KEY` in `~/.ezrouter/env`), then set
 > the ZeroClaw profile `model` to any model ezRouter exposes (`/v1/models`).
 
+### Telegram channel
+
+Have ZeroClaw answer in a Telegram chat — get a bot token from @BotFather
+(`/newbot`), then:
+
+```bash
+# one-shot: create the channel, set the token, and route the main agent to it
+ZEROCLAW_TELEGRAM_TOKEN=8618519189:AA... ./scripts/setup-zeroclaw.sh
+
+# or set the fields directly
+zeroclaw channels create telegram main
+# edit ~/.zeroclaw/config.toml: set bot_token, enabled = true under [channels.telegram.main]
+zeroclaw config set agents.main.channels '["telegram.main"]'
+```
+
+Start the ZeroClaw daemon so it polls Telegram and routes messages to ezRouter:
+
+```bash
+zeroclaw daemon        # or: zeroclaw agent
+```
+
+Messages you send your bot are answered by the `main` agent through
+`zerorouter.9router` → ezRouter → upstream.
+
 ## Credits
 
 All credit for ezRouter goes to [NamHV](https://github.com/namhv94) and the [EzLabs](https://ezlabs.tech) team, released under the [MIT license](LICENSE). This fork only adds Termux documentation.
