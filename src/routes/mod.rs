@@ -7,4 +7,5 @@ pub mod images;
 pub mod messages;
 pub mod models;
 pub mod responses;
+pub mod responses_compat;
 pub mod ui;

@@ -6,18 +6,24 @@ use std::time::Instant;
 use axum::{
     body::Body,
     extract::{rejection::JsonRejection, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use bytes::Bytes;
 use futures_util::stream::Stream;
+use futures_util::StreamExt;
 use tracing::warn;
 
 use crate::auth::AuthenticatedUser;
 use crate::codex::CodexLease;
 use crate::error::AppError;
+use crate::provider::ChatCompletionRequest;
 use crate::state::AppState;
+
+use super::responses_compat::{
+    chat_json_to_responses, responses_payload_to_chat, ChatSseToResponsesStream,
+};
 
 pub fn extract_responses_usage(val: &serde_json::Value) -> Option<(Option<i64>, Option<i64>)> {
     let usage = val
@@ -280,10 +286,47 @@ pub async fn post_responses(
         return Err(AppError::BadRequest("model cannot be empty".to_string()));
     }
 
-    if trimmed_model.starts_with("ag/") {
-        return Err(AppError::BadRequest(format!(
-            "Model '{trimmed_model}' uses Google Antigravity and is not compatible with OpenAI Responses API (/v1/responses). Please use /v1/chat/completions or select a Codex model (e.g. cx/gpt-5.6-sol)."
-        )));
+    // ------------------------------------------------------------------
+    // Route decision. Mirrors `chat::resolve_model_provider`:
+    //   - a named combo -> chat translation path (e.g. `all`)
+    //   - an active external provider prefix -> chat translation path
+    //   - a genuine Codex model -> raw Codex passthrough (unchanged below)
+    //   - anything else -> chat translation path (Antigravity pool /
+    //     canonical models); unknown models surface the chat pipeline's
+    //     "model not found" error.
+    // ------------------------------------------------------------------
+    let prefix = if trimmed_model.contains('/') {
+        trimmed_model.split('/').next().unwrap_or("")
+    } else {
+        ""
+    };
+    let external_active = if prefix.is_empty() {
+        None
+    } else {
+        state
+            .db
+            .get_provider_by_prefix(prefix)
+            .ok()
+            .flatten()
+            .filter(|p| p.is_active)
+    };
+    let is_combo = state
+        .db
+        .get_combo_by_name(trimmed_model)
+        .ok()
+        .flatten()
+        .is_some();
+    let owned_by_codex = state
+        .models
+        .get_model(trimmed_model)
+        .map(|m| m.owned_by == "openai-codex")
+        .unwrap_or(false);
+    let codex_route = !is_combo
+        && external_active.is_none()
+        && (crate::models::is_known_codex_model(trimmed_model) || owned_by_codex);
+
+    if !codex_route {
+        return post_responses_via_chat(auth, state, &payload, trimmed_model).await;
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -459,5 +502,49 @@ pub async fn post_responses(
             .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
             .body(Body::from(bytes))
             .unwrap())
+    }
+}
+
+/// `/v1/responses` entry for chat-completion upstreams (combos such as `all`,
+/// external providers, and the Antigravity pool): translate the Responses
+/// request into a chat request, run the shared chat pipeline, then translate
+/// the reply (JSON or SSE) back into Responses format.
+async fn post_responses_via_chat(
+    auth: AuthenticatedUser,
+    state: AppState,
+    payload: &serde_json::Value,
+    requested_model: &str,
+) -> Result<Response, AppError> {
+    let chat_req: ChatCompletionRequest = responses_payload_to_chat(payload, requested_model)?;
+    let headers = HeaderMap::new();
+    let chat_res = super::chat::execute_chat_completions(auth, state, headers, chat_req).await?;
+
+    let is_stream = chat_res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/event-stream"));
+
+    if is_stream {
+        let data_stream = chat_res.into_body().into_data_stream();
+        let mapped =
+            data_stream.map(|item| item.map_err(|e| AppError::Internal(e.to_string())));
+        let translated =
+            ChatSseToResponsesStream::new(Box::pin(mapped), requested_model.to_string());
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
+            .header(header::CACHE_CONTROL, "no-cache")
+            .header(header::CONNECTION, "keep-alive")
+            .body(Body::from_stream(translated))
+            .unwrap())
+    } else {
+        let bytes = axum::body::to_bytes(chat_res.into_body(), 64 * 1024 * 1024)
+            .await
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        let chat_json = serde_json::from_slice::<serde_json::Value>(&bytes)
+            .unwrap_or_else(|_| serde_json::json!({ "choices": [] }));
+        let resp = chat_json_to_responses(&chat_json, requested_model);
+        Ok(Json(resp).into_response())
     }
 }

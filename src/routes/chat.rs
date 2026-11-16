@@ -566,8 +566,23 @@ pub async fn chat_completions(
     headers: axum::http::HeaderMap,
     payload_result: Result<Json<ChatCompletionRequest>, JsonRejection>,
 ) -> Result<Response, AppError> {
-    let Json(mut payload) = payload_result.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let Json(payload) = payload_result.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    execute_chat_completions(auth, state, headers, payload).await
+}
 
+/// Core chat-completions pipeline shared by the public handler and the
+/// `/v1/responses` translation path (see `routes::responses_compat`).
+///
+/// Handles combo resolution, provider selection, candidate failover,
+/// token saver, logging and live-monitor bookkeeping. Returns either a
+/// `application/json` chat completion or a `text/event-stream` of chat
+/// chunks, exactly like the public endpoint.
+pub async fn execute_chat_completions(
+    auth: AuthenticatedUser,
+    state: AppState,
+    headers: axum::http::HeaderMap,
+    mut payload: ChatCompletionRequest,
+) -> Result<Response, AppError> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let client_label = if !auth.name.trim().is_empty() {
         auth.name.clone()
