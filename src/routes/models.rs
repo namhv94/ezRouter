@@ -24,11 +24,14 @@ pub async fn list_models(
             if let Some(models) = prov.models.as_array() {
                 for m in models {
                     if let Some(m_str) = m.as_str() {
-                        let id = if m_str.starts_with(&format!("{}/", prov.prefix)) {
-                            m_str.to_string()
-                        } else {
-                            format!("{}/{}", prov.prefix, m_str)
-                        };
+                        // Always namespace with the provider prefix: routing resolves
+                        // `X/rest` to the provider with prefix X and dispatch strips
+                        // `X/` before sending upstream. The listed id must therefore
+                        // be exactly `{prefix}/{upstream_id}` so it round-trips.
+                        // (Keeping `m_str` when it already starts with `{prefix}/`
+                        // produced ids like `nvidia/nemotron-...` that 404'd after
+                        // the dispatch strip — "wrong name in route" for combos.)
+                        let id = format!("{}/{}", prov.prefix, m_str);
                         if !resp.data.iter().any(|existing| existing.id == id) {
                             resp.data.push(ModelEntry {
                                 id,
