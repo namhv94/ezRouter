@@ -10,6 +10,14 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+/// Shared test data dir under the system temp dir (Termux has no `/tmp`).
+fn test_data_dir() -> String {
+    format!(
+        "{}/ag-proxy-rust-test",
+        std::env::temp_dir().display()
+    )
+}
 use tower::ServiceExt;
 
 use ezrouter::error::AppError;
@@ -28,7 +36,7 @@ fn test_state() -> AppState {
     let mut config = Config::parse(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("test-secret-key".to_string()),
     )
     .unwrap();
@@ -40,7 +48,7 @@ fn test_state_with_provider(provider: Arc<dyn Provider>) -> AppState {
     let config = Config::parse(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("test-secret-key".to_string()),
     )
     .unwrap();
@@ -67,7 +75,7 @@ async fn test_health_endpoint_unauthenticated_and_no_secrets() {
     assert_eq!(body["service"], "ag-proxy-rust");
     assert_eq!(body["mode"], "staging");
     assert_eq!(body["port"], 20229);
-    assert_eq!(body["data_dir"], "/tmp/ag-proxy-rust-test");
+    assert_eq!(body["data_dir"], test_data_dir());
     assert!(body.get("api_key").is_none());
     assert!(!body_bytes
         .iter()
@@ -883,7 +891,7 @@ async fn test_http_upstream_success_and_auth_header() {
     let config = Config::parse_with_upstream(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-api-key".to_string()),
         Some(upstream_url),
         Some("secret-upstream-token-xyz".to_string()),
@@ -974,7 +982,7 @@ async fn test_http_upstream_path_avoid_duplicate_v1() {
         let config = Config::parse_with_upstream(
             Some("127.0.0.1".to_string()),
             Some("20229".to_string()),
-            Some("/tmp/ag-proxy-rust-test".to_string()),
+            Some(test_data_dir()),
             Some("client-key".to_string()),
             Some(base_url),
             Some("test-key".to_string()),
@@ -1050,7 +1058,7 @@ async fn test_http_upstream_tool_payload_passthrough() {
     let config = Config::parse_with_upstream(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-key".to_string()),
         Some(upstream_url),
         Some("upstream-key".to_string()),
@@ -1162,7 +1170,7 @@ async fn test_http_upstream_error_mappings() {
         let config = Config::parse_with_upstream(
             Some("127.0.0.1".to_string()),
             Some("20229".to_string()),
-            Some("/tmp/ag-proxy-rust-test".to_string()),
+            Some(test_data_dir()),
             Some("client-key".to_string()),
             Some(upstream_url.clone()),
             Some("upstream-key".to_string()),
@@ -1217,7 +1225,7 @@ async fn test_http_upstream_timeout_mapping() {
     let mut config = Config::parse_with_upstream(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-key".to_string()),
         Some(upstream_url),
         Some("upstream-key".to_string()),
@@ -1269,6 +1277,7 @@ async fn test_http_upstream_bounded_response_size() {
         HttpUpstreamProvider::new(
             Some(upstream_url),
             Some("upstream-key".to_string()),
+            None,
             5,
             5,
             5,
@@ -1279,7 +1288,7 @@ async fn test_http_upstream_bounded_response_size() {
     let config = Config::parse(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-key".to_string()),
     )
     .unwrap();
@@ -1316,8 +1325,7 @@ async fn test_http_upstream_bounded_response_size() {
 async fn test_production_mode_does_not_fabricate_mock_results() {
     // When use_mock_provider is false and no upstream URL is configured,
     // requests must return 500 error instead of fabricating mock responses.
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-prod-mode-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-prod-mode-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -1374,7 +1382,7 @@ async fn test_http_upstream_streaming_passthrough() {
     let config = Config::parse_with_upstream(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-api-key".to_string()),
         Some(upstream_url),
         Some("secret-upstream-token-xyz".to_string()),
@@ -1443,7 +1451,7 @@ async fn test_http_upstream_streaming_client_disconnect_cancellation() {
     let config = Config::parse_with_upstream(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
-        Some("/tmp/ag-proxy-rust-test".to_string()),
+        Some(test_data_dir()),
         Some("client-api-key".to_string()),
         Some(upstream_url),
         Some("secret-upstream-token-xyz".to_string()),
@@ -1489,8 +1497,7 @@ async fn test_http_upstream_streaming_client_disconnect_cancellation() {
 
 #[tokio::test]
 async fn test_phase3a_dynamic_api_key_lifecycle_and_total_requests() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-dyn-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-dyn-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -1652,8 +1659,7 @@ async fn test_phase3a_dynamic_api_key_lifecycle_and_total_requests() {
 
 #[tokio::test]
 async fn test_phase3a_failed_requests_do_not_increment_counter() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-counter-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-counter-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -1710,8 +1716,7 @@ async fn test_phase3a_failed_requests_do_not_increment_counter() {
 
 #[tokio::test]
 async fn test_phase3a_file_db_init_schema_and_fallback() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-file-init-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-file-init-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let data_dir_path = PathBuf::from(&test_dir);
@@ -1850,8 +1855,7 @@ async fn test_phase3b_admin_endpoints_auth_protection() {
 
 #[tokio::test]
 async fn test_phase3b_request_logging_lifecycle_success_and_stats() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3b-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3b-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2012,8 +2016,7 @@ async fn test_phase3b_request_logging_lifecycle_success_and_stats() {
 
 #[tokio::test]
 async fn test_phase3b_logging_on_error() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3b-err-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3b-err-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -2104,8 +2107,7 @@ async fn test_phase3b_logging_on_error() {
 
 #[tokio::test]
 async fn test_phase3b_streaming_cancellation_logging() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3b-cancel-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3b-cancel-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2178,8 +2180,7 @@ impl Provider for SlowCancellingProvider {
 
 #[tokio::test]
 async fn test_phase3b_non_streaming_cancellation_logging() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3b-nonstream-cancel-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3b-nonstream-cancel-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -2237,8 +2238,7 @@ async fn test_phase3b_non_streaming_cancellation_logging() {
 
 #[tokio::test]
 async fn test_phase3b_schema_parity_table_info() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3b-schema-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3b-schema-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let data_dir_path = PathBuf::from(&test_dir);
@@ -2337,8 +2337,7 @@ async fn test_phase3c_admin_auth_protection() {
 
 #[tokio::test]
 async fn test_phase3c_provider_crud_and_masking() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-crud-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-crud-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2481,8 +2480,7 @@ async fn test_phase3c_provider_crud_and_masking() {
 
 #[tokio::test]
 async fn test_phase3c_provider_validation() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-val-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-val-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2618,8 +2616,7 @@ async fn test_phase3c_provider_validation() {
 
 #[tokio::test]
 async fn test_phase3c_combo_crud_and_strategy_validation() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-combo-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-combo-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2812,8 +2809,7 @@ async fn test_phase3c_combo_crud_and_strategy_validation() {
 
 #[tokio::test]
 async fn test_phase3c_provider_fetch_test_sync_endpoints() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-sync-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-sync-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -2944,8 +2940,7 @@ async fn test_phase3c_provider_fetch_test_sync_endpoints() {
 
 #[tokio::test]
 async fn test_openrouter_provider_sync_models_includes_image_models() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-or-img-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-or-img-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3040,8 +3035,7 @@ async fn test_openrouter_provider_sync_models_includes_image_models() {
 
 #[tokio::test]
 async fn test_phase3c_persistence_and_restart() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-persist-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-persist-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
 
@@ -3146,8 +3140,7 @@ async fn test_phase3c_persistence_and_restart() {
 
 #[tokio::test]
 async fn test_phase3c_schema_parity_table_info() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p3c-schema-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p3c-schema-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let data_dir_path = PathBuf::from(&test_dir);
@@ -3216,8 +3209,7 @@ async fn test_phase3c_schema_parity_table_info() {
 
 #[tokio::test]
 async fn test_phase4a_schema_parity_table_info() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-schema-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-schema-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let data_dir_path = PathBuf::from(&test_dir);
@@ -3288,8 +3280,7 @@ async fn test_phase4a_schema_parity_table_info() {
 
 #[tokio::test]
 async fn test_phase4a_secret_masking_tokens_never_exposed() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-secrets-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-secrets-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3373,8 +3364,7 @@ async fn test_phase4a_secret_masking_tokens_never_exposed() {
 
 #[tokio::test]
 async fn test_phase4a_rotation_fairness_and_lru() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-rotation-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-rotation-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3434,8 +3424,7 @@ async fn test_phase4a_rotation_fairness_and_lru() {
 
 #[tokio::test]
 async fn test_phase4a_cooldown_exclusion_and_reset() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-cooldown-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-cooldown-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3499,8 +3488,7 @@ async fn test_phase4a_cooldown_exclusion_and_reset() {
 
 #[tokio::test]
 async fn test_phase4a_account_persistence_and_restart() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-persist-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-persist-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
 
@@ -3599,8 +3587,7 @@ async fn test_phase4a_admin_auth_protection() {
 
 #[tokio::test]
 async fn test_phase4a_admin_crud_validation() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-crud-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-crud-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3724,8 +3711,7 @@ async fn test_phase4a_admin_crud_validation() {
 
 #[tokio::test]
 async fn test_phase4a_admin_delete_root_and_account_test() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-del-test-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-del-test-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -3798,8 +3784,7 @@ async fn test_phase4a_admin_delete_root_and_account_test() {
 
 #[tokio::test]
 async fn test_phase4a_import_9router() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-9router-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-9router-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let test_dir_path = PathBuf::from(&test_dir);
@@ -3879,8 +3864,7 @@ async fn test_phase4a_import_9router() {
 
 #[tokio::test]
 async fn test_phase4a_stats_and_health_reflection() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4a-stats-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4a-stats-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -4381,8 +4365,7 @@ async fn test_phase4b_appstate_antigravity_router_e2e() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4b-router-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4b-router-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -4943,8 +4926,7 @@ async fn test_phase4b_antigravity_streaming_cancellation() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4b-cancel-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4b-cancel-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -5016,8 +4998,7 @@ async fn test_phase4b_antigravity_streaming_cancellation() {
 
 #[tokio::test]
 async fn test_phase4c_schema_parity_table_info() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-schema-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-schema-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db = Database::open_or_create(&PathBuf::from(&test_dir), Some("p4c-key")).unwrap();
@@ -5065,8 +5046,7 @@ async fn test_phase4c_schema_parity_table_info() {
 
 #[tokio::test]
 async fn test_phase4c_codex_account_persistence_and_restart() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-persist-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-persist-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let path = PathBuf::from(&test_dir);
@@ -5105,8 +5085,7 @@ async fn test_phase4c_codex_account_persistence_and_restart() {
 
 #[tokio::test]
 async fn test_phase4c_codex_admin_endpoints_auth_protection() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-auth-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-auth-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -5152,8 +5131,7 @@ async fn test_phase4c_codex_admin_endpoints_auth_protection() {
 
 #[tokio::test]
 async fn test_phase4c_codex_admin_crud_and_toggle() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-admin-crud-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-admin-crud-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -5394,8 +5372,7 @@ async fn test_phase4c_codex_transport_mock_http_non_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-nonstream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-nonstream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -5486,8 +5463,7 @@ async fn test_phase4c_codex_transport_mock_http_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-stream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-stream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -5573,8 +5549,7 @@ async fn test_phase4c_codex_transport_auto_token_refresh_mock_http() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-refresh-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-refresh-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -5660,8 +5635,7 @@ async fn test_phase4c_codex_transport_cooldown_and_failover_mock_http() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-failover-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-failover-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -5729,8 +5703,7 @@ async fn test_phase4c_codex_transport_cooldown_and_failover_mock_http() {
 
 #[tokio::test]
 async fn test_phase4c_codex_account_selection_fairness() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-fairness-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-fairness-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -5780,8 +5753,7 @@ async fn test_phase4c_codex_account_selection_fairness() {
 
 #[tokio::test]
 async fn test_phase4c_codex_oauth_flow_mock_http() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-oauth-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-oauth-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -5859,8 +5831,7 @@ async fn test_phase4c_appstate_codex_router_e2e() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-e2e-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-e2e-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -5973,8 +5944,7 @@ async fn test_phase4c_codex_tool_payload_mock_http_non_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-tool-nonstream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-tool-nonstream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6082,8 +6052,7 @@ async fn test_phase4c_codex_tool_payload_mock_http_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-tool-stream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-tool-stream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6186,8 +6155,7 @@ async fn test_phase4c_codex_vision_payload_mock_http_non_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-vis-nonstream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-vis-nonstream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6347,8 +6315,7 @@ async fn test_phase4c_codex_vision_payload_mock_http_streaming() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-vis-stream-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-vis-stream-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6454,8 +6421,7 @@ async fn test_phase4c_codex_vision_text_part_fidelity_content_and_input_text_var
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-vis-variants-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-vis-variants-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6601,8 +6567,7 @@ async fn test_phase4c_codex_tool_payload_image_parts_mock_http() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-tool-img-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-tool-img-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let db =
@@ -6768,8 +6733,7 @@ async fn test_phase4c_codex_oauth_exchange_mock_http() {
         axum::serve(listener, mock_auth_server).await.unwrap();
     });
 
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-oauth-exchange-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-oauth-exchange-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -6909,8 +6873,7 @@ async fn test_phase4c_codex_oauth_exchange_mock_http() {
 
 #[tokio::test]
 async fn test_phase4c_codex_admin_secret_safety() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-sec-safe-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-sec-safe-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -6989,8 +6952,7 @@ async fn test_phase4c_codex_admin_secret_safety() {
 
 #[tokio::test]
 async fn test_phase4c_codex_quota_filtering_and_refresh_quota_admin() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4c-quota-admin-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-p4c-quota-admin-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(
@@ -7584,7 +7546,7 @@ async fn test_google_oauth_mock_redirect_state_and_manual_exchange() {
 #[tokio::test]
 async fn test_hermes_api_compatibility_and_tool_calling() {
     let mock = Arc::new(MockProvider::new());
-    let temp_dir = format!("/tmp/ag-proxy-rust-test-hermes-{}", uuid::Uuid::new_v4());
+    let temp_dir = format!("{}/ag-proxy-rust-test-hermes-{}", std::env::temp_dir().display(), uuid::Uuid::new_v4());
     let mut config = Config::parse(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
@@ -7687,8 +7649,7 @@ async fn test_hermes_api_compatibility_and_tool_calling() {
 
 #[tokio::test]
 async fn test_regression_gemini_pro_absence_and_dynamic_provider_exposure() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-gemini-pro-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-gemini-pro-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -7850,8 +7811,7 @@ async fn test_regression_gemini_pro_absence_and_dynamic_provider_exposure() {
 
 #[tokio::test]
 async fn test_quota_refresh_admin_endpoints() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-quota-admin-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-quota-admin-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -7935,8 +7895,7 @@ async fn test_quota_refresh_admin_endpoints() {
 
 #[tokio::test]
 async fn test_regression_gemini_pro_model_list_canonical_and_aliases() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-gemini-pro-list-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-gemini-pro-list-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -8082,8 +8041,7 @@ async fn test_regression_gemini_pro_model_list_canonical_and_aliases() {
 
 #[tokio::test]
 async fn test_regression_gemini_pro_alias_routing_and_compatibility() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-gemini-pro-routing-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-gemini-pro-routing-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -8287,8 +8245,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
     );
 
     // 2. 400 safety: invalid requests correctly reject with 400 Bad Request
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-gemini-400-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-gemini-400-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -8362,8 +8319,7 @@ async fn test_regression_gemini_pro_upstream_payload_names_and_400_safety() {
 
 #[tokio::test]
 async fn test_active_requests_admin_endpoint_and_stream() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-active-reqs-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-active-reqs-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -8442,8 +8398,7 @@ async fn test_active_requests_admin_endpoint_and_stream() {
 
 #[tokio::test]
 async fn test_phase4d_schema_parity_table_info() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4d-schema-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-p4d-schema-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let config = Config::parse(
@@ -8491,8 +8446,7 @@ async fn test_phase4d_schema_parity_table_info() {
 
 #[tokio::test]
 async fn test_phase4d_admin_settings_lifecycle_and_validation() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-p4d-settings-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-p4d-settings-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -8603,7 +8557,7 @@ async fn test_phase4d_admin_settings_lifecycle_and_validation() {
 #[tokio::test]
 async fn test_phase4d_chat_completions_token_saver_integration() {
     let mock = Arc::new(MockProvider::new());
-    let temp_dir = format!("/tmp/ag-proxy-rust-test-p4d-chat-{}", uuid::Uuid::new_v4());
+    let temp_dir = format!("{}/ag-proxy-rust-test-p4d-chat-{}", std::env::temp_dir().display(), uuid::Uuid::new_v4());
     let mut config = Config::parse(
         Some("127.0.0.1".to_string()),
         Some("20229".to_string()),
@@ -8851,8 +8805,7 @@ async fn test_phase4d_chat_completions_token_saver_integration() {
 
 #[tokio::test]
 async fn test_google_quota_correctness_and_admin_accounts() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-quota-correctness-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-quota-correctness-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4()
     );
     let mut config = Config::parse(
@@ -9012,8 +8965,7 @@ async fn test_batch_retry_classification_400_no_cooldown() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-400-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-400-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -9080,8 +9032,7 @@ async fn test_batch_stream_memory_safety_guardrail() {
         axum::serve(listener, mock_app).await.unwrap();
     });
 
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-mem-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-mem-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let mut config = Config::parse(
@@ -9227,8 +9178,7 @@ async fn test_admin_system_logs_endpoint_lifecycle() {
 
 #[tokio::test]
 async fn test_codex_latency_endpoint_returns_json() {
-    let test_dir = format!(
-        "/tmp/ag-proxy-rust-test-codex-latency-{}",
+    let test_dir = format!("{}/ag-proxy-rust-test-codex-latency-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let config = Config::parse(

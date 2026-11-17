@@ -4078,8 +4078,7 @@ mod tests {
 
     #[test]
     fn test_db_persistence_across_reopen() {
-        let dir = format!(
-            "/tmp/ag-proxy-rust-db-test-persistence-{}",
+        let dir = format!("{}/ag-proxy-rust-db-test-persistence-{}", std::env::temp_dir().display(),
             Uuid::new_v4().simple()
         );
         let path = std::path::Path::new(&dir);

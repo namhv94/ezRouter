@@ -5629,8 +5629,7 @@ mod tests {
             axum::serve(listener, mock_app).await.unwrap();
         });
 
-        let test_dir = format!(
-            "/tmp/ag-proxy-test-codex-flag-off-{}",
+        let test_dir = format!("{}/ag-proxy-test-codex-flag-off-{}", std::env::temp_dir().display(),
             uuid::Uuid::new_v4().simple()
         );
         let db = Arc::new(
@@ -5754,8 +5753,7 @@ mod tests {
             axum::serve(listener, mock_app).await.unwrap();
         });
 
-        let test_dir = format!(
-            "/tmp/ag-proxy-test-codex-flag-on-{}",
+        let test_dir = format!("{}/ag-proxy-test-codex-flag-on-{}", std::env::temp_dir().display(),
             uuid::Uuid::new_v4().simple()
         );
         let db = Arc::new(
@@ -5873,8 +5871,7 @@ mod tests {
             axum::serve(listener, mock_app).await.unwrap();
         });
 
-        let test_dir = format!(
-            "/tmp/ag-proxy-test-codex-429-{}",
+        let test_dir = format!("{}/ag-proxy-test-codex-429-{}", std::env::temp_dir().display(),
             uuid::Uuid::new_v4().simple()
         );
         let db = Arc::new(
@@ -5965,8 +5962,7 @@ mod tests {
             axum::serve(listener, mock_app).await.unwrap();
         });
 
-        let test_dir = format!(
-            "/tmp/ag-proxy-test-codex-400-{}",
+        let test_dir = format!("{}/ag-proxy-test-codex-400-{}", std::env::temp_dir().display(),
             uuid::Uuid::new_v4().simple()
         );
         let db = Arc::new(

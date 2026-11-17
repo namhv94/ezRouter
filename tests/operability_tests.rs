@@ -27,8 +27,7 @@ fn test_state(temp_dir: &str) -> AppState {
 
 #[tokio::test]
 async fn test_operability_health_endpoint_metrics_and_no_secret_leak() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-op-health-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-op-health-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let state = test_state(&temp_dir);
@@ -77,8 +76,7 @@ async fn test_operability_health_endpoint_metrics_and_no_secret_leak() {
 
 #[tokio::test]
 async fn test_admin_accounts_list_uses_cache_without_unbounded_fan_out() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-op-list-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-op-list-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let state = test_state(&temp_dir);
@@ -147,8 +145,7 @@ async fn test_admin_accounts_list_uses_cache_without_unbounded_fan_out() {
 
 #[tokio::test]
 async fn test_admin_refresh_all_accounts_quota_bounded_concurrency() {
-    let temp_dir = format!(
-        "/tmp/ag-proxy-rust-test-op-refresh-{}",
+    let temp_dir = format!("{}/ag-proxy-rust-test-op-refresh-{}", std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let state = test_state(&temp_dir);

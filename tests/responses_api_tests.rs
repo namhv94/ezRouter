@@ -72,7 +72,7 @@ async fn test_post_responses_requires_auth() {
 }
 
 #[tokio::test]
-async fn test_post_responses_rejects_antigravity_model() {
+async fn test_post_responses_accepts_antigravity_model() {
     let (state, dir) = test_state(true);
     let app = app_router(state);
 
@@ -87,11 +87,14 @@ async fn test_post_responses_rejects_antigravity_model() {
         .unwrap();
 
     let resp = app.oneshot(req).await.unwrap();
+    // ag/ models are no longer rejected as incompatible with /v1/responses:
+    // they route through the chat translation path. Empty input is rejected
+    // there instead of the model being refused.
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let body_str = String::from_utf8_lossy(&bytes);
-    assert!(body_str.contains("not compatible with OpenAI Responses API"));
+    assert!(body_str.contains("input cannot be empty"));
 
     let _ = std::fs::remove_dir_all(dir);
 }
