@@ -478,6 +478,31 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
     }
 }
 
+/// Strips the provider's own routing prefix from a model id before dispatching upstream.
+///
+/// Only the prefix matching THIS provider's configured `prefix` is removed, e.g. provider
+/// `amd` turns `amd/DeepSeek-V4-Flash` into `DeepSeek-V4-Flash`, while provider `nvidia2`
+/// turns `nvidia2/nvidia/nemotron-...` into `nvidia/nemotron-...` — preserving the model's
+/// own `nvidia/` namespace, which upstreams like NVIDIA require. (The old logic blindly
+/// stripped the first `/` segment, which mangled namespaced ids and caused upstream 404s.)
+///
+/// Models that don't start with the provider prefix, reserved `ag/`/`cx/` ids, missing or
+/// empty prefixes, and empty remainders are all returned unchanged.
+fn strip_provider_prefix(model: &str, prefix: Option<&str>) -> String {
+    if model.starts_with("ag/") || model.starts_with("cx/") {
+        return model.to_string();
+    }
+    let prefix = match prefix {
+        Some(p) if !p.is_empty() => p,
+        _ => return model.to_string(),
+    };
+    let prefixed = format!("{prefix}/");
+    match model.strip_prefix(&prefixed) {
+        Some(stripped) if !stripped.is_empty() => stripped.to_string(),
+        _ => model.to_string(),
+    }
+}
+
 /// Resolves the upstream endpoint for chat completions, avoiding duplicate `/v1`.
 pub fn resolve_chat_completions_url(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
@@ -536,6 +561,7 @@ pub fn format_reqwest_stream_error(err: &reqwest::Error) -> AppError {
 pub struct HttpUpstreamProvider {
     base_url: Option<String>,
     api_key: Option<String>,
+    prefix: Option<String>,
     client: Client,
     max_response_bytes: usize,
 }
@@ -545,6 +571,7 @@ impl std::fmt::Debug for HttpUpstreamProvider {
         f.debug_struct("HttpUpstreamProvider")
             .field("base_url", &self.base_url)
             .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("prefix", &self.prefix)
             .field("max_response_bytes", &self.max_response_bytes)
             .finish()
     }
@@ -554,6 +581,7 @@ impl HttpUpstreamProvider {
     pub fn new(
         base_url: Option<String>,
         api_key: Option<String>,
+        prefix: Option<String>,
         connect_timeout_secs: u64,
         read_timeout_secs: u64,
         request_timeout_secs: u64,
@@ -568,15 +596,17 @@ impl HttpUpstreamProvider {
         Self {
             base_url,
             api_key,
+            prefix,
             client,
             max_response_bytes: MAX_RESPONSE_BYTES,
         }
     }
 
-    pub fn with_client(base_url: Option<String>, api_key: Option<String>, client: Client) -> Self {
+    pub fn with_client(base_url: Option<String>, api_key: Option<String>, prefix: Option<String>, client: Client) -> Self {
         Self {
             base_url,
             api_key,
+            prefix,
             client,
             max_response_bytes: MAX_RESPONSE_BYTES,
         }
@@ -709,17 +739,8 @@ impl Provider for HttpUpstreamProvider {
         let url = resolve_chat_completions_url(base_url);
 
         let mut req_to_send = request.clone();
-        // Strip provider prefix (e.g. "groq/llama-3.3-70b" -> "llama-3.3-70b") for external
-        // upstream providers. Do NOT strip ag/ or cx/ prefixes — those are routed by dedicated
-        // providers (AntigravityProvider, CodexProvider) and never reach HttpUpstreamProvider.
-        {
-            let m = &req_to_send.model;
-            if !m.starts_with("ag/") && !m.starts_with("cx/") {
-                if let Some(pos) = m.find('/') {
-                    req_to_send.model = m[pos + 1..].to_string();
-                }
-            }
-        }
+        req_to_send.model =
+            strip_provider_prefix(&request.model, self.prefix.as_deref());
 
         tracing::info!(
             upstream_url = %url,
@@ -842,15 +863,8 @@ impl Provider for HttpUpstreamProvider {
         let url = resolve_chat_completions_url(base_url);
 
         let mut upstream_req = request.clone();
-        // Strip provider prefix for external upstreams only (not ag/ or cx/).
-        {
-            let m = &upstream_req.model;
-            if !m.starts_with("ag/") && !m.starts_with("cx/") {
-                if let Some(pos) = m.find('/') {
-                    upstream_req.model = m[pos + 1..].to_string();
-                }
-            }
-        }
+        upstream_req.model =
+            strip_provider_prefix(&request.model, self.prefix.as_deref());
         upstream_req.stream = Some(true);
 
         tracing::info!(
@@ -960,15 +974,8 @@ impl Provider for HttpUpstreamProvider {
         let url = resolve_embeddings_url(base_url);
 
         let mut req_to_send = request.clone();
-        // Strip provider prefix for external upstreams only (not ag/ or cx/).
-        {
-            let m = &req_to_send.model;
-            if !m.starts_with("ag/") && !m.starts_with("cx/") {
-                if let Some(pos) = m.find('/') {
-                    req_to_send.model = m[pos + 1..].to_string();
-                }
-            }
-        }
+        req_to_send.model =
+            strip_provider_prefix(&request.model, self.prefix.as_deref());
 
         tracing::info!(
             upstream_url = %url,
@@ -3554,6 +3561,7 @@ mod tests {
         let provider = HttpUpstreamProvider::new(
             Some("https://api.example.com".to_string()),
             Some("super-secret-key-12345".to_string()),
+            None,
             5,
             10,
             15,
@@ -3564,9 +3572,68 @@ mod tests {
         assert!(debug_str.contains("https://api.example.com"));
     }
 
+    #[test]
+    fn test_strip_provider_prefix_strips_own_prefix() {
+        // Provider `amd`: bare model id is what tokenlab expects upstream.
+        assert_eq!(
+            strip_provider_prefix("amd/DeepSeek-V4-Flash", Some("amd")),
+            "DeepSeek-V4-Flash"
+        );
+        // Provider `groq`: Groq's model id keeps its `qwen/` namespace.
+        assert_eq!(
+            strip_provider_prefix("groq/qwen/qwen3.8-27b", Some("groq")),
+            "qwen/qwen3.8-27b"
+        );
+    }
+
+    #[test]
+    fn test_strip_provider_prefix_preserves_model_namespace() {
+        // REGRESSION: the old logic blindly stripped the first `/` segment, turning
+        // `nvidia2/nvidia/nemotron-...` into `nemotron-...` for the `nvidia` provider
+        // (upstream 404). The new logic must only strip the provider's OWN prefix.
+        assert_eq!(
+            strip_provider_prefix(
+                "nvidia2/nvidia/nemotron-3-ultra-550b-a55b",
+                Some("nvidia2")
+            ),
+            "nvidia/nemotron-3-ultra-550b-a55b"
+        );
+    }
+
+    #[test]
+    fn test_strip_provider_prefix_leaves_unrelated_models_unchanged() {
+        // Model does not start with this provider's prefix -> untouched.
+        assert_eq!(strip_provider_prefix("foo/bar", Some("amd")), "foo/bar");
+        assert_eq!(strip_provider_prefix("bare-model", Some("amd")), "bare-model");
+        // Similar-but-different prefix must NOT be stripped (no partial matches).
+        assert_eq!(strip_provider_prefix("amd2/model", Some("amd")), "amd2/model");
+    }
+
+    #[test]
+    fn test_strip_provider_prefix_no_prefix_configured() {
+        assert_eq!(strip_provider_prefix("amd/model", None), "amd/model");
+        assert_eq!(strip_provider_prefix("amd/model", Some("")), "amd/model");
+    }
+
+    #[test]
+    fn test_strip_provider_prefix_reserved_prefixes_untouched() {
+        // ag/ and cx/ are routed by dedicated providers and must never be stripped.
+        assert_eq!(
+            strip_provider_prefix("ag/gemini-3.8-flash-high", Some("ag")),
+            "ag/gemini-3.8-flash-high"
+        );
+        assert_eq!(strip_provider_prefix("cx/gpt-5", Some("cx")), "cx/gpt-5");
+    }
+
+    #[test]
+    fn test_strip_provider_prefix_empty_remainder_unchanged() {
+        // `<prefix>/` alone would strip to an empty model id -> keep original.
+        assert_eq!(strip_provider_prefix("amd/", Some("amd")), "amd/");
+    }
+
     #[tokio::test]
     async fn test_http_provider_missing_base_url() {
-        let provider = HttpUpstreamProvider::new(None, None, 5, 10, 15);
+        let provider = HttpUpstreamProvider::new(None, None, None, 5, 10, 15);
         let req = ChatCompletionRequest {
             model: "ag/gemini-3.8-flash-high".to_string(),
             messages: vec![ChatMessage::new("user", "test")],
@@ -3637,7 +3704,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_http_provider_missing_base_url_streaming() {
-        let provider = HttpUpstreamProvider::new(None, None, 5, 10, 15);
+        let provider = HttpUpstreamProvider::new(None, None, None, 5, 10, 15);
         let req = ChatCompletionRequest {
             model: "ag/gemini-3.8-flash-high".to_string(),
             messages: vec![ChatMessage::new("user", "test")],

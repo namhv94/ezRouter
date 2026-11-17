@@ -102,6 +102,7 @@ pub async fn embeddings(
             let upstream = Arc::new(HttpUpstreamProvider::new(
                 Some(prov.base_url),
                 Some(prov.api_key),
+                Some(prov.prefix.clone()),
                 state.config.upstream_connect_timeout_secs,
                 state.config.upstream_read_timeout_secs,
                 state.config.upstream_request_timeout_secs,

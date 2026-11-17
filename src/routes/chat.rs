@@ -174,6 +174,7 @@ fn resolve_model_provider(
                 let upstream_provider = Arc::new(crate::provider::HttpUpstreamProvider::new(
                     Some(prov.base_url.clone()),
                     Some(prov.api_key.clone()),
+                    Some(prov.prefix.clone()),
                     state.config.upstream_connect_timeout_secs,
                     state.config.upstream_read_timeout_secs,
                     state.config.upstream_request_timeout_secs,

@@ -95,6 +95,7 @@ impl AppState {
             Arc::new(HttpUpstreamProvider::new(
                 config.upstream_base_url.clone(),
                 config.upstream_api_key.clone(),
+                None,
                 config.upstream_connect_timeout_secs,
                 config.upstream_read_timeout_secs,
                 config.upstream_request_timeout_secs,

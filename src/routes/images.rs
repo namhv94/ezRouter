@@ -744,6 +744,7 @@ async fn image_generations_inner(
     let upstream = Arc::new(HttpUpstreamProvider::new(
         Some(provider.base_url),
         Some(provider.api_key),
+        Some(provider.prefix.clone()),
         state.config.upstream_connect_timeout_secs,
         state.config.upstream_read_timeout_secs,
         state.config.upstream_request_timeout_secs,
