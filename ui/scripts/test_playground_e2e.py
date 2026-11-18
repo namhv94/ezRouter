@@ -41,10 +41,12 @@ def test_playground(url: str, admin_key: str):
         options = model_select.locator('option').all_inner_texts()
         print(f"   Available model options count: {len(options)}")
         print(f"   Sample options: {options[:4]}")
-        has_ag = any(o.startswith("ag/") for o in options)
-        has_cx = any(o.startswith("cx/") for o in options)
-        assert has_ag, "Models dropdown missing ag/* models"
-        assert has_cx, "Models dropdown missing cx/* models"
+        # Models are loaded dynamically from the backend /admin/providers API. When
+        # no provider is configured the list may legitimately be empty, so we only
+        # assert that no baked-in Antigravity / Codex namespaces leak through.
+        assert not any(o.startswith("ag/") for o in options), "Models dropdown must not expose ag/* models"
+        assert not any(o.startswith("cx/") for o in options), "Models dropdown must not expose cx/* models"
+        print("   -> Models dropdown is API-driven with no ag/ or cx/ namespaces")
 
         # 6. Check Auth Key input
         print("6. Checking Auth Key input...")
@@ -89,8 +91,11 @@ def test_playground(url: str, admin_key: str):
         # 10. Test custom model input toggle
         print("10. Testing custom model toggle...")
         page.click('text=+ Nhập model tùy chỉnh')
-        custom_input = page.locator('input[placeholder*="ag/gemini"]')
+        # Placeholder now advertises the generic OpenAI-compatible models instead of
+        # the removed ag/gemini namespace.
+        custom_input = page.locator('input[placeholder*="gpt-4o-mini"]')
         assert custom_input.is_visible()
+        custom_input.fill("openrouter/anthropic/claude-sonnet-4")
         page.click('text=← Chọn từ danh sách')
         assert model_select.is_visible()
 
@@ -107,5 +112,5 @@ def test_playground(url: str, admin_key: str):
 
 if __name__ == "__main__":
     url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:20229"
-    key = sys.argv[2] if len(sys.argv) > 2 else "ag-proxy-key"
+    key = sys.argv[2] if len(sys.argv) > 2 else "ezrouter-key"
     test_playground(url, key)

@@ -1,16 +1,16 @@
 //! Translation between the OpenAI **Responses API** (`/v1/responses`) and the
 //! internal **Chat Completions** pipeline (`/v1/chat/completions`).
 //!
-//! Codex CLI only speaks the Responses API, but ezRouter's own upstreams
-//! (combos such as `all`, external providers and the Google Antigravity pool)
+//! OpenAI's Responses API clients only speak the Responses API, but ezRouter's
+//! own upstreams (combos such as `all` and external providers)
 //! are chat-completion based. This module converts in both directions:
 //!
 //! - `responses_payload_to_chat`: Responses request  -> chat request
 //! - `chat_json_to_responses`:      chat response    -> Responses response
 //! - `ChatSseToResponsesStream`:    chat SSE chunks  -> Responses SSE events
 //!
-//! Codex models (`cx/...`) keep using the raw Codex passthrough in
-//! `routes::responses` and never go through this module.
+//! The raw `/v1/responses` passthrough in `routes::responses` never goes
+//! through this module.
 
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -267,12 +267,26 @@ pub fn responses_payload_to_chat(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    // Only forward `tool_choice` when the converted tool list is non-empty.
+    // Clients commonly send `tool_choice: "auto"`, and several chat upstreams
+    // reject it with HTTP 200 + an SSE error when no tools are present.
+    let tools = convert_tools(payload);
+    let has_tools = tools
+        .as_ref()
+        .and_then(|t| t.as_array())
+        .is_some_and(|t| !t.is_empty());
+    let tool_choice = if has_tools {
+        convert_tool_choice(payload)
+    } else {
+        None
+    };
+
     Ok(ChatCompletionRequest {
         model: requested_model.to_string(),
         messages,
         stream: Some(stream),
-        tools: convert_tools(payload),
-        tool_choice: convert_tool_choice(payload),
+        tools,
+        tool_choice,
         temperature: payload
             .get("temperature")
             .and_then(|t| t.as_f64())
@@ -287,15 +301,40 @@ pub fn responses_payload_to_chat(
             .map(|t| t as u32),
         max_completion_tokens: None,
         stream_options: None,
-        response_format: payload
-            .get("text")
-            .and_then(|t| t.get("format"))
-            .filter(|f| f.get("type").and_then(|v| v.as_str()) == Some("json_schema"))
-            .cloned(),
+        response_format: convert_response_format(payload),
         stop: None,
         user: None,
         reasoning_effort: None,
     })
+}
+
+/// Convert the Responses `text.format` block into a Chat Completions
+/// `response_format`.
+///
+/// The two APIs use different shapes:
+/// - Responses: `{"type":"json_schema","name":..,"schema":..,"strict":..}`
+/// - Chat:      `{"type":"json_schema","json_schema":{"name":..,"schema":..,"strict":..}}`
+///
+/// Passing the Responses shape through verbatim makes chat upstreams reject the
+/// request (`missing field json_schema`), which breaks structured-output extraction.
+fn convert_response_format(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    let format = payload.get("text")?.get("format")?;
+    match format.get("type").and_then(|v| v.as_str())? {
+        "json_schema" => {
+            let mut schema = serde_json::Map::new();
+            for key in ["name", "schema", "strict", "description"] {
+                if let Some(value) = format.get(key) {
+                    schema.insert(key.to_string(), value.clone());
+                }
+            }
+            Some(serde_json::json!({
+                "type": "json_schema",
+                "json_schema": schema,
+            }))
+        }
+        "json_object" => Some(serde_json::json!({ "type": "json_object" })),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +477,7 @@ struct OpenToolCall {
 }
 
 /// Stream transformer that converts an upstream chat-completions SSE stream
-/// into the Responses API event stream expected by Codex and the OpenAI SDK.
+/// into the Responses API event stream expected by Responses API clients.
 pub struct ChatSseToResponsesStream {
     inner: Pin<Box<dyn Stream<Item = Result<Bytes, AppError>> + Send>>,
     buffer: Vec<u8>,
@@ -885,6 +924,55 @@ mod tests {
         assert_eq!(tools[0]["function"]["name"], "get_weather");
         assert_eq!(req.tool_choice.unwrap()["function"]["name"], "get_weather");
         assert_eq!(req.max_tokens, Some(256));
+    }
+
+    #[test]
+    fn test_json_schema_text_format_is_nested_for_chat() {
+        let payload = serde_json::json!({
+            "model": "all",
+            "input": "extract",
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "memory",
+                    "schema": { "type": "object", "properties": { "a": { "type": "string" } } },
+                    "strict": true
+                }
+            }
+        });
+        let req = responses_payload_to_chat(&payload, "all").unwrap();
+        let rf = req.response_format.expect("response_format");
+        assert_eq!(rf["type"], "json_schema");
+        assert_eq!(rf["json_schema"]["name"], "memory");
+        assert_eq!(rf["json_schema"]["strict"], true);
+        assert_eq!(rf["json_schema"]["schema"]["type"], "object");
+        assert!(rf.get("name").is_none(), "must not be flattened");
+    }
+
+    #[test]
+    fn test_plain_text_format_has_no_response_format() {
+        let payload = serde_json::json!({
+            "model": "all",
+            "input": "hi",
+            "text": { "format": { "type": "text" } }
+        });
+        let req = responses_payload_to_chat(&payload, "all").unwrap();
+        assert!(req.response_format.is_none());
+    }
+
+    #[test]
+    fn test_tool_choice_dropped_when_no_tools() {
+        let payload = serde_json::json!({
+            "model": "all",
+            "input": "hi",
+            "tool_choice": "auto"
+        });
+        let req = responses_payload_to_chat(&payload, "all").unwrap();
+        assert!(req.tools.is_none());
+        assert!(
+            req.tool_choice.is_none(),
+            "tool_choice must be dropped when tools are absent"
+        );
     }
 
     #[test]

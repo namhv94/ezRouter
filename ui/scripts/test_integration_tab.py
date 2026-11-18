@@ -46,12 +46,17 @@ def test_integration_tab(url: str, admin_key: str):
             print("  PASS: Base URL https://router.namhv.vip/v1 verified")
 
             # Check Model Names
-            assert "ag/gemini-3.8-flash-high" in page.content()
-            assert "cx/gpt-5.6-sol" in page.content()
-            print("  PASS: Model examples ag/gemini-3.8-flash-high and cx/gpt-5.6-sol present")
+            assert "gpt-4o-mini" in page.content()
+            assert "openrouter/anthropic/claude-sonnet-4" in page.content()
+            print("  PASS: Model examples gpt-4o-mini and openrouter/anthropic/claude-sonnet-4 present")
 
-            # Check Code tabs: Hermes, Codex CLI, OpenAI SDK Python, cURL, Node.js
-            tab_labels = ["Hermes Agent", "Codex CLI", "OpenAI SDK Python", "cURL / Bash", "Node.js / TS"]
+            # Legacy Antigravity/Codex namespaces must be gone
+            assert "ag/gemini" not in page.content()
+            assert "cx/gpt" not in page.content()
+            print("  PASS: Legacy ag/* and cx/* model examples are absent")
+
+            # Check Code tabs: Hermes, Claude Code CLI, VS Code & Copilot, OpenAI SDK Python, cURL, Node.js
+            tab_labels = ["Hermes Agent", "Claude Code CLI", "VS Code & Copilot", "OpenAI SDK Python", "cURL / Bash", "Node.js / TS"]
             for label in tab_labels:
                 tab_btn = page.locator(f'.integration-tab-btn:has-text("{label}")')
                 assert tab_btn.count() > 0, f"Tab button '{label}' not found"
@@ -96,5 +101,5 @@ def test_integration_tab(url: str, admin_key: str):
 
 if __name__ == "__main__":
     url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:20229"
-    key = sys.argv[2] if len(sys.argv) > 2 else "ag-proxy-key"
+    key = sys.argv[2] if len(sys.argv) > 2 else "ezrouter-key"
     test_integration_tab(url, key)

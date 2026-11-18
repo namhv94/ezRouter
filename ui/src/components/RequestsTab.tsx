@@ -34,22 +34,6 @@ const estimateRequestCost = (model: string, promptTokens: number, completionToke
   return ((promptTokens || 0) * 0.50 + (completionTokens || 0) * 1.50) / 1_000_000;
 };
 
-export const isCodexImageModel = (model: string = '', provider: string = ''): boolean => {
-  const m = (model || '').toLowerCase().trim();
-  const p = (provider || '').toLowerCase().trim();
-  if (p === 'codex image' || p === 'cx/image-gen' || p === 'image-gen') return true;
-  return (
-    m === 'cx/image-gen' ||
-    m === 'image-gen' ||
-    m === 'cx/gpt-image' ||
-    m === 'cx/gpt-image-2' ||
-    m === 'gpt-image-2' ||
-    m === 'codex-image' ||
-    m.startsWith('cx/image') ||
-    m.startsWith('cx/gpt-image')
-  );
-};
-
 export const RequestsTab: React.FC = () => {
   const { locale, t } = useI18n();
   const [data, setData] = useState<RequestsResponse | null>(null);
@@ -236,8 +220,6 @@ export const RequestsTab: React.FC = () => {
   };
 
   const getModelFamily = (model: string) => {
-    if (model.startsWith('ag/')) return { label: 'AG', className: 'family-tag family-tag-ag' };
-    if (model.startsWith('cx/')) return { label: 'CX', className: 'family-tag family-tag-cx' };
     if (model.startsWith('openrouter/')) return { label: 'OR', className: 'family-tag family-tag-or' };
     return { label: 'UP', className: 'family-tag family-tag-custom' };
   };
@@ -264,17 +246,8 @@ export const RequestsTab: React.FC = () => {
     return `${(ms / 1000).toFixed(1)}s`;
   };
 
-  const cxImageActive = activeRequests.find(
-    (r) => isCodexImageModel(r.model, r.provider)
-  );
-  const agActive = activeRequests.find(
-    (r) => r !== cxImageActive && (r.provider === 'Google Antigravity' || r.model.startsWith('ag/'))
-  );
-  const cxActive = activeRequests.find(
-    (r) => r !== cxImageActive && (r.provider === 'Codex' || r.model.startsWith('cx/'))
-  );
   const extActive = activeRequests.find(
-    (r) => r !== agActive && r !== cxActive && r !== cxImageActive && r.provider !== 'Router'
+    (r) => r.provider !== 'Router'
   );
 
   return (
@@ -416,47 +389,11 @@ export const RequestsTab: React.FC = () => {
               aria-hidden="true"
             >
               <defs>
-                <linearGradient id="pfGradAg" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#818cf8" />
-                  <stop offset="60%" stopColor="#a855f7" />
-                  <stop offset="100%" stopColor="#d8b4fe" />
-                </linearGradient>
-                <linearGradient id="pfGradCx" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#818cf8" />
-                  <stop offset="60%" stopColor="#0ea5e9" />
-                  <stop offset="100%" stopColor="#7dd3fc" />
-                </linearGradient>
-                <linearGradient id="pfGradCxImg" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#818cf8" />
-                  <stop offset="60%" stopColor="#f43f5e" />
-                  <stop offset="100%" stopColor="#fda4af" />
-                </linearGradient>
                 <linearGradient id="pfGradExt" x1="0%" y1="0%" x2="100%" y2="0%">
                   <stop offset="0%" stopColor="#818cf8" />
                   <stop offset="60%" stopColor="#10b981" />
                   <stop offset="100%" stopColor="#6ee7b7" />
                 </linearGradient>
-                <filter id="pfGlowAg" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-                <filter id="pfGlowCx" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
-                <filter id="pfGlowCxImg" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2.5" result="blur" />
-                  <feMerge>
-                    <feMergeNode in="blur" />
-                    <feMergeNode in="SourceGraphic" />
-                  </feMerge>
-                </filter>
                 <filter id="pfGlowExt" x="-20%" y="-20%" width="140%" height="140%">
                   <feGaussianBlur stdDeviation="2.5" result="blur" />
                   <feMerge>
@@ -466,22 +403,7 @@ export const RequestsTab: React.FC = () => {
                 </filter>
               </defs>
 
-              {/* Idle dim continuous fan-out paths (4 branches: AG, CX, CX Image, Ext) */}
-              <path
-                d="M 0,50 C 45,50 55,12.5 100,12.5"
-                className="pf-path-base"
-                vectorEffect="non-scaling-stroke"
-              />
-              <path
-                d="M 0,50 C 45,50 55,37.5 100,37.5"
-                className="pf-path-base"
-                vectorEffect="non-scaling-stroke"
-              />
-              <path
-                d="M 0,50 C 45,50 55,62.5 100,62.5"
-                className="pf-path-base"
-                vectorEffect="non-scaling-stroke"
-              />
+              {/* Idle dim continuous fan-out path (Ext) */}
               <path
                 d="M 0,50 C 45,50 55,87.5 100,87.5"
                 className="pf-path-base"
@@ -495,69 +417,6 @@ export const RequestsTab: React.FC = () => {
                 r="3.5"
                 className={`pf-junction-node ${activeRequests.length > 0 ? 'active' : ''}`}
               />
-
-              {/* Active Path & Flowing Dot: Google Antigravity */}
-              {agActive && (
-                <>
-                  <path
-                    d="M 0,50 C 45,50 55,12.5 100,12.5"
-                    className="pf-path-active pf-path-ag"
-                    stroke="url(#pfGradAg)"
-                    filter="url(#pfGlowAg)"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle className="pf-flowing-dot pf-dot-ag" r="3.5" fill="#f3e8ff">
-                    <animateMotion
-                      dur="1.4s"
-                      repeatCount="indefinite"
-                      path="M 0,50 C 45,50 55,12.5 100,12.5"
-                    />
-                  </circle>
-                  <circle cx="100" cy="12.5" r="3.5" className="pf-terminal-node active-ag" />
-                </>
-              )}
-
-              {/* Active Path & Flowing Dot: OpenAI Codex */}
-              {cxActive && (
-                <>
-                  <path
-                    d="M 0,50 C 45,50 55,37.5 100,37.5"
-                    className="pf-path-active pf-path-cx"
-                    stroke="url(#pfGradCx)"
-                    filter="url(#pfGlowCx)"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle className="pf-flowing-dot pf-dot-cx" r="3.5" fill="#e0f2fe">
-                    <animateMotion
-                      dur="1.4s"
-                      repeatCount="indefinite"
-                      path="M 0,50 C 45,50 55,37.5 100,37.5"
-                    />
-                  </circle>
-                  <circle cx="100" cy="37.5" r="3.5" className="pf-terminal-node active-cx" />
-                </>
-              )}
-
-              {/* Active Path & Flowing Dot: Codex Image Gen */}
-              {cxImageActive && (
-                <>
-                  <path
-                    d="M 0,50 C 45,50 55,62.5 100,62.5"
-                    className="pf-path-active pf-path-cx-img"
-                    stroke="url(#pfGradCxImg)"
-                    filter="url(#pfGlowCxImg)"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <circle className="pf-flowing-dot pf-dot-cx-img" r="3.5" fill="#ffe4e6">
-                    <animateMotion
-                      dur="1.4s"
-                      repeatCount="indefinite"
-                      path="M 0,50 C 45,50 55,62.5 100,62.5"
-                    />
-                  </circle>
-                  <circle cx="100" cy="62.5" r="3.5" className="pf-terminal-node active-cx-img" />
-                </>
-              )}
 
               {/* Active Path & Flowing Dot: External */}
               {extActive && (
@@ -616,267 +475,6 @@ export const RequestsTab: React.FC = () => {
 
           {/* Providers Branch */}
           <div className="pf-branch">
-            {/* Google Antigravity Node */}
-            <div className="pf-branch-row">
-              <div className={`pf-conn pf-conn-sub ${agActive ? 'active' : ''}`}>
-                <svg
-                  className="pf-svg-curve pf-svg-mobile-sub"
-                  viewBox="0 0 28 50"
-                  preserveAspectRatio="none"
-                  aria-hidden="true"
-                >
-                  {/* Left continuous trunk spanning through gap */}
-                  <path
-                    d="M 14,0 L 14,60"
-                    className="pf-path-base pf-path-trunk"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {/* Organic curve into card */}
-                  <path
-                    d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                    className="pf-path-base"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {agActive && (
-                    <>
-                      <path
-                        d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        className="pf-path-active"
-                        stroke="#a855f7"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <circle className="pf-flowing-dot" r="3" fill="#f3e8ff">
-                        <animateMotion
-                          dur="1.2s"
-                          repeatCount="indefinite"
-                          path="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        />
-                      </circle>
-                    </>
-                  )}
-                </svg>
-              </div>
-              <div
-                className={`pf-node pf-provider ${
-                  agActive
-                    ? `active ${
-                        agActive.status === 'success'
-                          ? 'state-success'
-                          : agActive.status === 'error'
-                          ? 'state-error'
-                          : agActive.status === 'cancelled'
-                          ? 'state-cancelled'
-                          : ''
-                      }`
-                    : 'idle'
-                }`}
-                onClick={() => agActive && setSelectedActiveReq(agActive)}
-                title={agActive ? t('requests.inspectRequestTitle') : 'Google Antigravity'}
-              >
-                <div className="pf-icon pf-icon-ag">G</div>
-                <div className="pf-provider-info">
-                  <div className="pf-label">Google Antigravity</div>
-                  <div className="pf-detail">
-                    {agActive
-                      ? `${agActive.model} · ${agActive.account} · ${
-                          agActive.status === 'generating'
-                            ? `Stream ${formatDuration(agActive.elapsed_ms)}`
-                            : formatDuration(agActive.elapsed_ms)
-                        }`
-                      : t('requests.readyWaiting')}
-                  </div>
-                  </div>
-                  <span className="pf-provider-state">
-                  {agActive
-                    ? agActive.status === 'success'
-                      ? t('requests.statusSuccess')
-                      : agActive.status === 'error'
-                      ? t('requests.statusError')
-                      : agActive.status === 'cancelled'
-                      ? t('requests.statusCancelled')
-                      : agActive.status === 'generating'
-                      ? '⚡ Đang sinh...'
-                      : t('requests.statusActive')
-                    : t('requests.statusReady')}
-                  </span>
-              </div>
-            </div>
-
-            {/* OpenAI Codex Node */}
-            <div className="pf-branch-row">
-              <div className={`pf-conn pf-conn-sub ${cxActive ? 'active' : ''}`}>
-                <svg
-                  className="pf-svg-curve pf-svg-mobile-sub"
-                  viewBox="0 0 28 50"
-                  preserveAspectRatio="none"
-                  aria-hidden="true"
-                >
-                  {/* Left continuous trunk spanning through gap */}
-                  <path
-                    d="M 14,0 L 14,60"
-                    className="pf-path-base pf-path-trunk"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {/* Organic curve into card */}
-                  <path
-                    d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                    className="pf-path-base"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {cxActive && (
-                    <>
-                      <path
-                        d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        className="pf-path-active"
-                        stroke="#0ea5e9"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <circle className="pf-flowing-dot" r="3" fill="#e0f2fe">
-                        <animateMotion
-                          dur="1.2s"
-                          repeatCount="indefinite"
-                          path="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        />
-                      </circle>
-                    </>
-                  )}
-                </svg>
-              </div>
-              <div
-                className={`pf-node pf-provider ${
-                  cxActive
-                    ? `active ${
-                        cxActive.status === 'success'
-                          ? 'state-success'
-                          : cxActive.status === 'error'
-                          ? 'state-error'
-                          : cxActive.status === 'cancelled'
-                          ? 'state-cancelled'
-                          : ''
-                      }`
-                    : 'idle'
-                }`}
-                onClick={() => cxActive && setSelectedActiveReq(cxActive)}
-                title={cxActive ? t('requests.inspectRequestTitle') : 'OpenAI Codex'}
-              >
-                <div className="pf-icon pf-icon-cx">CX</div>
-                <div className="pf-provider-info">
-                  <div className="pf-label">OpenAI Codex</div>
-                  <div className="pf-detail">
-                    {cxActive
-                      ? `${cxActive.model} · ${cxActive.account} · ${
-                          cxActive.status === 'generating'
-                            ? `Stream ${formatDuration(cxActive.elapsed_ms)}`
-                            : formatDuration(cxActive.elapsed_ms)
-                        }`
-                      : t('requests.readyWaiting')}
-                  </div>
-                  </div>
-                  <span className="pf-provider-state">
-                  {cxActive
-                    ? cxActive.status === 'success'
-                      ? t('requests.statusSuccess')
-                      : cxActive.status === 'error'
-                      ? t('requests.statusError')
-                      : cxActive.status === 'cancelled'
-                      ? t('requests.statusCancelled')
-                      : cxActive.status === 'generating'
-                      ? '⚡ Đang sinh...'
-                      : t('requests.statusActive')
-                    : t('requests.statusReady')}
-                  </span>
-              </div>
-            </div>
-
-            {/* Codex Image Gen Node */}
-            <div className="pf-branch-row">
-              <div className={`pf-conn pf-conn-sub ${cxImageActive ? 'active' : ''}`}>
-                <svg
-                  className="pf-svg-curve pf-svg-mobile-sub"
-                  viewBox="0 0 28 50"
-                  preserveAspectRatio="none"
-                  aria-hidden="true"
-                >
-                  {/* Left continuous trunk spanning through gap */}
-                  <path
-                    d="M 14,0 L 14,60"
-                    className="pf-path-base pf-path-trunk"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {/* Organic curve into card */}
-                  <path
-                    d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                    className="pf-path-base"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {cxImageActive && (
-                    <>
-                      <path
-                        d="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        className="pf-path-active"
-                        stroke="#f43f5e"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                      <circle className="pf-flowing-dot" r="3" fill="#ffe4e6">
-                        <animateMotion
-                          dur="1.2s"
-                          repeatCount="indefinite"
-                          path="M 14,0 L 14,12 C 14,22 18,25 28,25"
-                        />
-                      </circle>
-                    </>
-                  )}
-                </svg>
-              </div>
-              <div
-                className={`pf-node pf-provider ${
-                  cxImageActive
-                    ? `active ${
-                        cxImageActive.status === 'success'
-                          ? 'state-success'
-                          : cxImageActive.status === 'error'
-                          ? 'state-error'
-                          : cxImageActive.status === 'cancelled'
-                          ? 'state-cancelled'
-                          : ''
-                      }`
-                    : 'idle'
-                }`}
-                onClick={() => cxImageActive && setSelectedActiveReq(cxImageActive)}
-                title={cxImageActive ? t('requests.inspectRequestTitle') : 'Codex Image Gen'}
-              >
-                <div className="pf-icon pf-icon-cx-img">IMG</div>
-                <div className="pf-provider-info">
-                  <div className="pf-label">
-                    Codex Image Gen
-                    <span className="pf-badge-image">IMAGE</span>
-                  </div>
-                  <div className="pf-detail">
-                    {cxImageActive
-                      ? `${cxImageActive.model} · ${cxImageActive.account || 'default'} · ${
-                          cxImageActive.status === 'generating'
-                            ? `Stream ${formatDuration(cxImageActive.elapsed_ms)}`
-                            : formatDuration(cxImageActive.elapsed_ms)
-                        }`
-                      : t('requests.readyWaiting')}
-                  </div>
-                </div>
-                <span className="pf-provider-state">
-                  {cxImageActive
-                    ? cxImageActive.status === 'success'
-                      ? t('requests.statusSuccess')
-                      : cxImageActive.status === 'error'
-                      ? t('requests.statusError')
-                      : cxImageActive.status === 'cancelled'
-                      ? t('requests.statusCancelled')
-                      : cxImageActive.status === 'generating'
-                      ? '⚡ Đang sinh...'
-                      : t('requests.statusActive')
-                    : t('requests.statusReady')}
-                </span>
-              </div>
-            </div>
-
             {/* External Upstream Node */}
             <div className="pf-branch-row">
               <div className={`pf-conn pf-conn-sub ${extActive ? 'active' : ''}`}>
@@ -1148,20 +746,6 @@ export const RequestsTab: React.FC = () => {
             onClick={() => setModelPreset('')}
           >
             {t('requests.quickFilterAll')}
-          </button>
-          <button
-            type="button"
-            className={`preset-chip ${modelFilter === 'ag/' ? 'active' : ''}`}
-            onClick={() => setModelPreset('ag/')}
-          >
-            Google Antigravity (ag/*)
-          </button>
-          <button
-            type="button"
-            className={`preset-chip ${modelFilter === 'cx/' ? 'active' : ''}`}
-            onClick={() => setModelPreset('cx/')}
-          >
-            OpenAI Codex (cx/*)
           </button>
           <button
             type="button"

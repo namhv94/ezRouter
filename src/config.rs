@@ -27,11 +27,6 @@ pub struct Config {
     pub upstream_read_timeout_secs: u64,
     pub upstream_request_timeout_secs: u64,
     pub oauth_redirect_uri: String,
-    pub codex_latency_telemetry_enabled: bool,
-    pub codex_native_non_stream_enabled: bool,
-    pub codex_context_optimizer_enabled: bool,
-    pub codex_context_max_messages: usize,
-    pub codex_context_max_bytes: usize,
     pub request_log_retention_days: u32,
     pub allow_production_port: bool,
     pub compat_port: Option<u16>,
@@ -63,23 +58,6 @@ impl fmt::Debug for Config {
                 &self.upstream_request_timeout_secs,
             )
             .field("oauth_redirect_uri", &self.oauth_redirect_uri)
-            .field(
-                "codex_latency_telemetry_enabled",
-                &self.codex_latency_telemetry_enabled,
-            )
-            .field(
-                "codex_native_non_stream_enabled",
-                &self.codex_native_non_stream_enabled,
-            )
-            .field(
-                "codex_context_optimizer_enabled",
-                &self.codex_context_optimizer_enabled,
-            )
-            .field(
-                "codex_context_max_messages",
-                &self.codex_context_max_messages,
-            )
-            .field("codex_context_max_bytes", &self.codex_context_max_bytes)
             .finish()
     }
 }
@@ -174,11 +152,6 @@ impl Config {
             upstream_read_timeout_secs: DEFAULT_UPSTREAM_READ_TIMEOUT_SECS,
             upstream_request_timeout_secs: DEFAULT_UPSTREAM_REQUEST_TIMEOUT_SECS,
             oauth_redirect_uri,
-            codex_latency_telemetry_enabled: true,
-            codex_native_non_stream_enabled: false,
-            codex_context_optimizer_enabled: false,
-            codex_context_max_messages: 0,
-            codex_context_max_bytes: 0,
             request_log_retention_days,
             allow_production_port,
             compat_port,
@@ -236,33 +209,6 @@ impl Config {
             }
         }
 
-        if let Ok(val) = env::var("CODEX_LATENCY_TELEMETRY_ENABLED") {
-            cfg.codex_latency_telemetry_enabled =
-                val != "0" && !val.eq_ignore_ascii_case("false") && !val.eq_ignore_ascii_case("no");
-        }
-
-        if let Ok(val) = env::var("CODEX_NATIVE_NON_STREAM_ENABLED") {
-            cfg.codex_native_non_stream_enabled =
-                val == "1" || val.eq_ignore_ascii_case("true") || val.eq_ignore_ascii_case("yes");
-        }
-
-        if let Ok(val) = env::var("CODEX_CONTEXT_OPTIMIZER_ENABLED") {
-            cfg.codex_context_optimizer_enabled =
-                val == "1" || val.eq_ignore_ascii_case("true") || val.eq_ignore_ascii_case("yes");
-        }
-
-        if let Ok(val) = env::var("CODEX_CONTEXT_MAX_MESSAGES") {
-            if let Ok(num) = val.parse::<usize>() {
-                cfg.codex_context_max_messages = num;
-            }
-        }
-
-        if let Ok(val) = env::var("CODEX_CONTEXT_MAX_BYTES") {
-            if let Ok(num) = val.parse::<usize>() {
-                cfg.codex_context_max_bytes = num;
-            }
-        }
-
         Ok(cfg)
     }
 
@@ -299,11 +245,6 @@ mod tests {
                 || cfg.oauth_redirect_uri == "http://localhost:20229/auth/callback"
                 || cfg.oauth_redirect_uri == "http://127.0.0.1:20229/auth/callback"
         );
-        assert!(cfg.codex_latency_telemetry_enabled);
-        assert!(!cfg.codex_native_non_stream_enabled);
-        assert!(!cfg.codex_context_optimizer_enabled);
-        assert_eq!(cfg.codex_context_max_messages, 0);
-        assert_eq!(cfg.codex_context_max_bytes, 0);
     }
 
     #[test]

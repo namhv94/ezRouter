@@ -3,15 +3,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use serde_json::Value;
-use std::sync::Arc;
 use tower::ServiceExt;
 
-use ezrouter::{
-    account::{AccountPool, MockGoogleQuotaFetcher, MockTokenRefresher},
-    app_router,
-    state::AppState,
-    Config,
-};
+use ezrouter::{app_router, state::AppState, Config};
 
 fn test_state(temp_dir: &str) -> AppState {
     let mut config = Config::parse(
@@ -27,14 +21,12 @@ fn test_state(temp_dir: &str) -> AppState {
 
 #[tokio::test]
 async fn test_operability_health_endpoint_metrics_and_no_secret_leak() {
-    let temp_dir = format!("{}/ag-proxy-rust-test-op-health-{}", std::env::temp_dir().display(),
+    let temp_dir = format!(
+        "{}/ag-proxy-rust-test-op-health-{}",
+        std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let state = test_state(&temp_dir);
-    let _acc = state
-        .account_pool
-        .add_account("op-user@example.com", "rt-op-secret-12345")
-        .unwrap();
 
     let app = app_router(state.clone());
 
@@ -53,15 +45,9 @@ async fn test_operability_health_endpoint_metrics_and_no_secret_leak() {
     let body: Value = serde_json::from_slice(&body_bytes).unwrap();
 
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["service"], "ag-proxy-rust");
+    assert_eq!(body["service"], "ezrouter");
     assert_eq!(body["mode"], "staging");
     assert_eq!(body["port"], 20229);
-    assert_eq!(body["total_accounts"], 1);
-    assert_eq!(body["active_accounts"], 1);
-    assert_eq!(body["cooldown_accounts"], 0);
-    assert!(body.get("live_rpm").is_some());
-    assert!(body.get("active_rate").is_some());
-    assert!(body.get("codex_accounts").is_some());
 
     // Strict security: zero secrets or tokens in health response
     assert!(body.get("api_key").is_none());
@@ -75,108 +61,41 @@ async fn test_operability_health_endpoint_metrics_and_no_secret_leak() {
 }
 
 #[tokio::test]
-async fn test_admin_accounts_list_uses_cache_without_unbounded_fan_out() {
-    let temp_dir = format!("{}/ag-proxy-rust-test-op-list-{}", std::env::temp_dir().display(),
+async fn test_admin_providers_list_requires_auth() {
+    let temp_dir = format!(
+        "{}/ag-proxy-rust-test-op-providers-{}",
+        std::env::temp_dir().display(),
         uuid::Uuid::new_v4().simple()
     );
     let state = test_state(&temp_dir);
-    let db = state.db.clone();
-    let refresher = Arc::new(MockTokenRefresher::with_token("test-tok"));
-    let quota_fetcher = Arc::new(MockGoogleQuotaFetcher::default());
-    let pool = Arc::new(AccountPool::with_components(
-        db,
-        refresher,
-        quota_fetcher,
-        0.0,
-        60,
-    ));
+    let app = app_router(state);
 
-    let _acc1 = pool.add_account("fan1@example.com", "rt-1").unwrap();
-    let _acc2 = pool.add_account("fan2@example.com", "rt-2").unwrap();
-
-    let custom_state = AppState {
-        config: state.config,
-        models: state.models,
-        db: state.db,
-        account_pool: pool.clone(),
-        codex_pool: state.codex_pool,
-        provider: state.provider,
-        codex_provider: state.codex_provider,
-        codex_raw_provider: state.codex_raw_provider,
-        live_registry: state.live_registry,
-        quota_worker: state.quota_worker,
-        system_logs: state.system_logs,
-        latency_store: state.latency_store,
-    };
-    let app = app_router(custom_state);
-
-    // Initial GET populates missing quota
+    // Missing auth is rejected
     let req = Request::builder()
-        .uri("/admin/accounts")
+        .uri("/admin/providers")
         .method("GET")
-        .header("authorization", "Bearer test-operability-secret")
         .body(Body::empty())
         .unwrap();
-
     let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
-    let body: Value = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), usize::MAX)
-            .await
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(body["total"], 2);
-
-    // Subsequent GET reads from cache without redundant upstream refresh
+    // With auth, the empty provider list is returned
     let req2 = Request::builder()
-        .uri("/admin/accounts")
+        .uri("/admin/providers")
         .method("GET")
         .header("authorization", "Bearer test-operability-secret")
         .body(Body::empty())
         .unwrap();
-
     let res2 = app.oneshot(req2).await.unwrap();
     assert_eq!(res2.status(), StatusCode::OK);
 
-    let _ = std::fs::remove_dir_all(&temp_dir);
-}
-
-#[tokio::test]
-async fn test_admin_refresh_all_accounts_quota_bounded_concurrency() {
-    let temp_dir = format!("{}/ag-proxy-rust-test-op-refresh-{}", std::env::temp_dir().display(),
-        uuid::Uuid::new_v4().simple()
-    );
-    let state = test_state(&temp_dir);
-    for i in 1..=4 {
-        let _ = state
-            .account_pool
-            .add_account(&format!("batch{}@example.com", i), &format!("rt-{}", i))
-            .unwrap();
-    }
-
-    let app = app_router(state);
-
-    let req = Request::builder()
-        .uri("/admin/accounts/refresh-quota")
-        .method("POST")
-        .header("authorization", "Bearer test-operability-secret")
-        .body(Body::empty())
-        .unwrap();
-
-    let res = app.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-
     let body: Value = serde_json::from_slice(
-        &axum::body::to_bytes(res.into_body(), usize::MAX)
+        &axum::body::to_bytes(res2.into_body(), usize::MAX)
             .await
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(body["ok"], true);
-    assert_eq!(body["total"], 4);
-    assert_eq!(body["refreshed"], 4);
+    assert_eq!(body.as_array().unwrap().len(), 0);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

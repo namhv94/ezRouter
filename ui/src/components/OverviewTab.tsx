@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  AccountResponse,
   AdminStats,
-  CodexAccountRecord,
   DailyTokenStat,
   HealthInfo,
   ModelRequestSummary,
@@ -11,7 +9,6 @@ import {
 import { TabType } from './Sidebar';
 import {
   IconAlertCircle,
-  IconRefresh,
   IconZap,
   IconServer,
   IconChevronDown,
@@ -23,12 +20,9 @@ import { api } from '../api';
 interface OverviewTabProps {
   stats: AdminStats | null;
   summaries: ModelRequestSummary[];
-  accounts: AccountResponse[];
-  codexAccounts?: CodexAccountRecord[];
   health: HealthInfo | null;
   loading: boolean;
   refreshing?: boolean;
-  onRefresh?: () => void;
   error: string | null;
   onSelectTab?: (tab: TabType) => void;
 }
@@ -36,23 +30,18 @@ interface OverviewTabProps {
 export const OverviewTab: React.FC<OverviewTabProps> = ({
   stats,
   summaries,
-  accounts,
-  codexAccounts = [],
   health,
   loading,
   refreshing = false,
-  onRefresh,
   error,
   onSelectTab,
 }) => {
   const { locale, t } = useI18n();
-  const [quotaTab, setQuotaTab] = useState<'all' | 'google' | 'codex'>('all');
   const [analyticsPeriod, setAnalyticsPeriod] = useState<string>('30d');
   const [chartMode, setChartMode] = useState<'total' | 'stacked'>('total');
   const [analytics, setAnalytics] = useState<TokenAnalyticsResponse | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState<boolean>(false);
   const [hoveredDay, setHoveredDay] = useState<DailyTokenStat | null>(null);
-  const [showDetailedAccounts, setShowDetailedAccounts] = useState<boolean>(false);
   const [showFullModelsTable, setShowFullModelsTable] = useState<boolean>(false);
 
   const loadTokenAnalytics = useCallback(async (p: string) => {
@@ -70,44 +59,6 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   useEffect(() => {
     loadTokenAnalytics(analyticsPeriod);
   }, [analyticsPeriod, loadTokenAnalytics, refreshing]);
-
-  const googleAccounts = useMemo(() => accounts.filter((a) => a.is_active), [accounts]);
-  const activeCodexAccounts = useMemo(
-    () => codexAccounts.filter((a) => a.is_active ?? a.active ?? true),
-    [codexAccounts]
-  );
-  const totalQuotaAccounts = googleAccounts.length + activeCodexAccounts.length;
-
-  // Aggregate Quota Pool Capacities
-  const poolCapacities = useMemo(() => {
-    const geminiVals = googleAccounts
-      .map((a) => a.quota?.gemini_5h?.remaining_percent)
-      .filter((v): v is number => typeof v === 'number');
-    const claudeVals = googleAccounts
-      .map((a) => a.quota?.claude_5h?.remaining_percent)
-      .filter((v): v is number => typeof v === 'number');
-    const codexPrimaryVals = activeCodexAccounts
-      .map((a) => {
-        const pWin = a.quota?.primary_window;
-        const used = pWin?.used_percent ?? (a.quota?.primary_percent !== undefined ? 100 - a.quota.primary_percent : null);
-        return used !== null ? Math.max(0, Math.min(100, Math.round(100 - used))) : null;
-      })
-      .filter((v): v is number => typeof v === 'number');
-
-    const avg = (arr: number[]) => (arr.length > 0 ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null);
-
-    return {
-      geminiPoolAvg: avg(geminiVals),
-      claudePoolAvg: avg(claudeVals),
-      codexPrimaryPoolAvg: avg(codexPrimaryVals),
-      googleActive: accounts.filter((a) => a.is_active && (a.cooldown_remaining ?? 0) <= 0).length,
-      googleTotal: accounts.length,
-      googleCooling: accounts.filter((a) => a.is_active && (a.cooldown_remaining ?? 0) > 0).length,
-      codexActive: codexAccounts.filter((a) => (a.is_active ?? a.active ?? true) && (a.cooldown_remaining ?? 0) <= 0).length,
-      codexTotal: codexAccounts.length,
-      codexCooling: codexAccounts.filter((a) => (a.cooldown_remaining ?? 0) > 0).length,
-    };
-  }, [accounts, googleAccounts, codexAccounts, activeCodexAccounts]);
 
   // Zero-filled daily series to avoid distorted wide bars
   const filledDailySeries = useMemo(() => {
@@ -207,58 +158,15 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   };
 
   const errorRate = stats?.error_rate ?? 0;
-  const activeRateNum = stats?.active_rate ?? 0;
-  const activeRateStr = stats?.active_rate != null ? stats.active_rate.toFixed(1) : '100.0';
+  const successRateNum = Math.max(0, Math.min(100, 100 - errorRate));
+  const successRateStr = successRateNum.toFixed(1);
   const isHealthy = !error && health?.status === 'ok';
-  const isPoolHealthy = (stats?.total_accounts ?? 0) > 0 && activeRateNum >= 80;
   const latencyTone =
     (stats?.avg_duration_ms ?? 0) <= 3000
       ? 'good'
       : (stats?.avg_duration_ms ?? 0) <= 8000
       ? 'warn'
       : 'bad';
-
-  // Format ISO time or timestamp to relative countdown string
-  const formatResetTime = (input?: string | number) => {
-    if (input == null || input === '') return null;
-    try {
-      let d: Date;
-      if (typeof input === 'number') {
-        d = new Date(input < 1e11 ? input * 1000 : input);
-      } else if (!isNaN(Number(input))) {
-        const num = Number(input);
-        d = new Date(num < 1e11 ? num * 1000 : num);
-      } else {
-        d = new Date(input);
-      }
-      if (isNaN(d.getTime())) return null;
-      const diffSec = Math.max(0, Math.floor((d.getTime() - Date.now()) / 1000));
-      if (diffSec <= 0) return t('overview.resetSoon');
-      if (diffSec < 60) return `${diffSec}s`;
-      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
-      if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.floor((diffSec % 3600) / 60)}m`;
-      const days = Math.floor(diffSec / 86400);
-      const hours = Math.floor((diffSec % 86400) / 3600);
-      return `${days}d ${hours}h`;
-    } catch {
-      return null;
-    }
-  };
-
-  const formatCooldown = (sec?: number | null) => {
-    if (sec == null || sec <= 0) return null;
-    const s = Math.ceil(sec);
-    if (s <= 60) return `${s}s`;
-    const m = Math.ceil(s / 60);
-    return `${m}m`;
-  };
-
-  const getRemainingTone = (remainingPercent?: number | null) => {
-    if (remainingPercent == null) return 'neutral';
-    if (remainingPercent >= 50) return 'good';
-    if (remainingPercent >= 20) return 'warn';
-    return 'bad';
-  };
 
   return (
     <div className="overview-container">
@@ -278,9 +186,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </div>
             <div className="health-meta">
               <span>{t('overview.healthPort')}: {health.port}</span>
-              <span>{t('overview.healthUpstream')}: <strong>Antigravity + Codex</strong></span>
+              <span>{t('overview.healthUpstream')}: <strong>Upstream Providers</strong></span>
               <span>
-                {t('overview.healthPool')}: <strong>{stats?.active_accounts ?? 0}/{stats?.total_accounts ?? 0} {t('overview.healthAvailable')}</strong>
+                {t('overview.errorRate')}: <strong>{errorRate.toFixed(1)}%</strong>
               </span>
             </div>
           </div>
@@ -342,70 +250,48 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </div>
           </div>
 
-          {/* Bento Vitals: Sức Khỏe & Quota Pools */}
+          {/* Bento Vitals: Sức Khỏe & Lỗi */}
           <div className="card bento-vitals-card">
             <div className="bento-card-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="bento-icon-badge" style={{ padding: 6, borderRadius: 6, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981' }}>
                   <IconServer size={18} />
                 </span>
-                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>Sức Khỏe Pool & Lỗi</span>
+                <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{t('overview.statusVitalsTitle')}</span>
               </div>
               {onSelectTab && (
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm font-mono bento-nav-btn"
                   onClick={() => onSelectTab('providers')}
-                  title="Đi đến Quản lý Nhà cung cấp"
+                  title={t('overview.goToProviders')}
                 >
-                  Nhà cung cấp →
+                  {t('overview.providersLink')} →
                 </button>
               )}
             </div>
 
             <div className="bento-vitals-subgrid">
-              {/* Pool State */}
+              {/* Success Rate */}
               <div className="bento-vital-box">
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pool Sẵn Sàng</div>
-                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: isPoolHealthy ? '#10b981' : '#f59e0b', margin: '3px 0' }}>
-                  {stats?.active_accounts || 0}/{stats?.total_accounts || 0}
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('overview.successRate')}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: successRateNum >= 99 ? '#10b981' : '#f59e0b', margin: '3px 0' }}>
+                  {successRateStr}%
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                  {activeRateStr}% khả dụng
+                  {t('overview.successRateSub')}
                 </div>
               </div>
 
               {/* Error Rate */}
               <div className="bento-vital-box">
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Tỷ Lệ Lỗi</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('overview.errorRate')}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'var(--font-mono)', color: errorRate <= 1.0 ? '#10b981' : '#ef4444', margin: '3px 0' }}>
                   {errorRate.toFixed(1)}%
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
-                  {stats?.error_count ?? 0} lỗi • {stats?.quota_count ?? 0} hết quota
+                  {stats?.error_count ?? 0} {t('overview.errorCountUnit')} • {stats?.quota_count ?? 0} {t('overview.quotaExhaustedUnit')}
                 </div>
-              </div>
-            </div>
-
-            {/* Quick Pool Capacity Meters */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11, paddingTop: 4, borderTop: '1px solid var(--border-subtle)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Gemini Pool:</span>
-                <strong style={{ color: poolCapacities.geminiPoolAvg !== null && poolCapacities.geminiPoolAvg < 20 ? '#ef4444' : '#10b981', fontFamily: 'var(--font-mono)' }}>
-                  {poolCapacities.geminiPoolAvg !== null ? `${poolCapacities.geminiPoolAvg}%` : '—'}
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Claude Pool:</span>
-                <strong style={{ color: poolCapacities.claudePoolAvg !== null && poolCapacities.claudePoolAvg < 20 ? '#ef4444' : '#10b981', fontFamily: 'var(--font-mono)' }}>
-                  {poolCapacities.claudePoolAvg !== null ? `${poolCapacities.claudePoolAvg}%` : '—'}
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Codex Primary:</span>
-                <strong style={{ color: poolCapacities.codexPrimaryPoolAvg !== null && poolCapacities.codexPrimaryPoolAvg < 20 ? '#ef4444' : '#10b981', fontFamily: 'var(--font-mono)' }}>
-                  {poolCapacities.codexPrimaryPoolAvg !== null ? `${poolCapacities.codexPrimaryPoolAvg}%` : '—'}
-                </strong>
               </div>
             </div>
           </div>
@@ -425,11 +311,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           <div className="card kpi-card kpi-vital-card kpi-card-errors">
             <div className="kpi-value">{errorRate.toFixed(1)}%</div>
           </div>
-          <div className="card kpi-card kpi-vital-card kpi-card-pool">
-            <div className="kpi-value">{stats?.active_accounts}</div>
-          </div>
           <div className="card kpi-card kpi-card-ready">
-            <div className="kpi-value">{activeRateStr}%</div>
+            <div className="kpi-value">{successRateStr}%</div>
           </div>
         </div>
       </section>
@@ -744,267 +627,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
         </div>
       </section>
 
-      {/* 3. Quota Overview Section (Compact Pool Cards with Accordion Inspection) */}
-      <section className="overview-section overview-quota-section" aria-label={t('overview.quotaTitle')}>
-        <div className="card overview-quota-card" style={{ padding: 18 }}>
-          <div className="section-header" style={{ marginBottom: 12 }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <h2 className="section-title" style={{ margin: 0 }}>{t('overview.quotaTitle')}</h2>
-                <span className="badge badge-success" style={{ fontSize: 11 }}>{t('overview.liveBadge')}</span>
-              </div>
-              <p className="overview-section-subtitle">
-                {t('overview.quotaSubtitle')}
-              </p>
-            </div>
-            <div className="overview-quota-actions">
-              <div className="overview-tab-pills">
-                <button
-                  type="button"
-                  className={`pill-btn ${quotaTab === 'all' ? 'active' : ''}`}
-                  onClick={() => setQuotaTab('all')}
-                >
-                  {t('overview.quotaTabAll')} ({totalQuotaAccounts})
-                </button>
-                <button
-                  type="button"
-                  className={`pill-btn ${quotaTab === 'google' ? 'active' : ''}`}
-                  onClick={() => setQuotaTab('google')}
-                >
-                  {t('overview.quotaTabGoogle')} ({googleAccounts.length})
-                </button>
-                <button
-                  type="button"
-                  className={`pill-btn ${quotaTab === 'codex' ? 'active' : ''}`}
-                  onClick={() => setQuotaTab('codex')}
-                >
-                  {t('overview.quotaTabCodex')} ({activeCodexAccounts.length})
-                </button>
-              </div>
-
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setShowDetailedAccounts(!showDetailedAccounts)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11 }}
-                title={showDetailedAccounts ? 'Thu gọn danh sách tài khoản' : 'Xem chi tiết tất cả tài khoản'}
-              >
-                {showDetailedAccounts ? <IconChevronUp size={14} /> : <IconChevronDown size={14} />}
-                <span>{showDetailedAccounts ? 'Thu gọn' : `Chi tiết (${totalQuotaAccounts})`}</span>
-              </button>
-
-              {onRefresh && (
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={onRefresh}
-                  disabled={refreshing}
-                  title={t('overview.refreshQuotaTitle')}
-                  aria-label={t('overview.refreshQuotaTitle')}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                >
-                  <IconRefresh size={14} className={refreshing ? 'spinning' : ''} />
-                  <span>{t('actions.refresh')}</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Compact Pool Capacity Summaries (Always Visible) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: showDetailedAccounts ? 16 : 0 }}>
-            {/* Google Pool Summary */}
-            <div style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 14, borderRadius: 6, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>Google Antigravity Pool</span>
-                <span className="badge badge-success font-mono" style={{ fontSize: 11 }}>
-                  {poolCapacities.googleActive}/{poolCapacities.googleTotal} Ready
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span>Gemini 5h Quota</span>
-                    <strong style={{ color: getRemainingTone(poolCapacities.geminiPoolAvg) === 'good' ? '#10b981' : '#f59e0b' }}>
-                      {poolCapacities.geminiPoolAvg !== null ? `${poolCapacities.geminiPoolAvg}%` : '—'}
-                    </strong>
-                  </div>
-                  <div className="quota-track" style={{ height: 6, borderRadius: 3 }}>
-                    <span className={`quota-fill quota-${getRemainingTone(poolCapacities.geminiPoolAvg)}`} style={{ width: `${poolCapacities.geminiPoolAvg ?? 0}%` }} />
-                  </div>
-                </div>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span>Claude 5h Quota</span>
-                    <strong style={{ color: getRemainingTone(poolCapacities.claudePoolAvg) === 'good' ? '#10b981' : '#f59e0b' }}>
-                      {poolCapacities.claudePoolAvg !== null ? `${poolCapacities.claudePoolAvg}%` : '—'}
-                    </strong>
-                  </div>
-                  <div className="quota-track" style={{ height: 6, borderRadius: 3 }}>
-                    <span className={`quota-fill quota-${getRemainingTone(poolCapacities.claudePoolAvg)}`} style={{ width: `${poolCapacities.claudePoolAvg ?? 0}%` }} />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Codex Pool Summary */}
-            <div style={{ background: 'var(--bg-card-hover, rgba(255,255,255,0.03))', padding: 14, borderRadius: 6, border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>OpenAI Codex Pool</span>
-                <span className="badge badge-success font-mono" style={{ fontSize: 11 }}>
-                  {poolCapacities.codexActive}/{poolCapacities.codexTotal} Ready
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span>Primary Window (5h)</span>
-                    <strong style={{ color: getRemainingTone(poolCapacities.codexPrimaryPoolAvg) === 'good' ? '#10b981' : '#f59e0b' }}>
-                      {poolCapacities.codexPrimaryPoolAvg !== null ? `${poolCapacities.codexPrimaryPoolAvg}%` : '—'}
-                    </strong>
-                  </div>
-                  <div className="quota-track" style={{ height: 6, borderRadius: 3 }}>
-                    <span className={`quota-fill quota-${getRemainingTone(poolCapacities.codexPrimaryPoolAvg)}`} style={{ width: `${poolCapacities.codexPrimaryPoolAvg ?? 0}%` }} />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Cooldown:</span>
-                  <span className={`badge ${poolCapacities.codexCooling > 0 ? 'badge-warning' : 'badge-neutral'} font-mono`}>
-                    {poolCapacities.codexCooling} cooling
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Collapsible Full Accounts Grid (Revealed on Click) */}
-          {showDetailedAccounts && (
-            <div className="overview-quota-container" style={{ marginTop: 14, borderTop: '1px solid var(--border-subtle)', paddingTop: 14 }}>
-              {/* Google Antigravity Accounts */}
-              {(quotaTab === 'all' || quotaTab === 'google') && googleAccounts.length > 0 && (
-                <div className="quota-provider-group" style={{ marginBottom: 16 }}>
-                  <div className="quota-group-header" style={{ marginBottom: 10 }}>
-                    <span className="badge badge-neutral">Google Antigravity ({googleAccounts.length})</span>
-                  </div>
-                  <div className="overview-quota-grid">
-                    {googleAccounts.map((acc) => {
-                      const q = acc.quota || {};
-                      const g5h = q.gemini_5h?.remaining_percent ?? null;
-                      const g5hReset = formatResetTime(q.gemini_5h?.reset_time);
-                      const c5h = q.claude_5h?.remaining_percent ?? null;
-                      const c5hReset = formatResetTime(q.claude_5h?.reset_time);
-
-                      return (
-                        <div className="overview-quota-card-item" key={acc.id}>
-                          <div className="overview-quota-account">
-                            <span className={`status-dot ${acc.cooldown_remaining > 0 ? 'error' : ''}`} />
-                            <span className="account-email" title={acc.email}>{acc.email}</span>
-                            {acc.cooldown_remaining > 0 && (
-                              <span
-                                className="badge badge-warning"
-                                style={{ marginLeft: 'auto', fontSize: 10 }}
-                                title={acc.cooldown_remaining > 60 ? `${Math.ceil(acc.cooldown_remaining)}s` : undefined}
-                              >
-                                CD {formatCooldown(acc.cooldown_remaining)}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="quota-metrics-stack">
-                            <div className="overview-quota-metric">
-                              <div className="overview-quota-label">
-                                <span>Gemini 5h</span>
-                                <strong className={`quota-${getRemainingTone(g5h)}`}>
-                                  {g5h != null ? `${g5h}%` : '—'}
-                                </strong>
-                              </div>
-                              <div className="quota-track">
-                                <span className={`quota-fill quota-${getRemainingTone(g5h)}`} style={{ width: `${Math.max(0, Math.min(100, g5h ?? 0))}%` }} />
-                              </div>
-                              <div className="quota-reset-text">
-                                {g5hReset ? t('overview.resetAfter', { time: g5hReset }) : t('overview.noResetInfo')}
-                              </div>
-                            </div>
-                            <div className="overview-quota-metric">
-                              <div className="overview-quota-label">
-                                <span>Claude 5h</span>
-                                <strong className={`quota-${getRemainingTone(c5h)}`}>
-                                  {c5h != null ? `${c5h}%` : '—'}
-                                </strong>
-                              </div>
-                              <div className="quota-track">
-                                <span className={`quota-fill quota-${getRemainingTone(c5h)}`} style={{ width: `${Math.max(0, Math.min(100, c5h ?? 0))}%` }} />
-                              </div>
-                              <div className="quota-reset-text">
-                                {c5hReset ? t('overview.resetAfter', { time: c5hReset }) : t('overview.noResetInfo')}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Codex Accounts */}
-              {(quotaTab === 'all' || quotaTab === 'codex') && activeCodexAccounts.length > 0 && (
-                <div className="quota-provider-group">
-                  <div className="quota-group-header" style={{ marginBottom: 10 }}>
-                    <span className="badge badge-neutral">OpenAI Codex ({activeCodexAccounts.length})</span>
-                  </div>
-                  <div className="overview-quota-grid">
-                    {activeCodexAccounts.map((acc) => {
-                      const q = acc.quota || {};
-                      const pWin = q.primary_window;
-                      const pUsed = pWin?.used_percent ?? (q.primary_percent !== undefined ? 100 - q.primary_percent : null);
-                      const pRem = pUsed !== null ? Math.max(0, Math.min(100, Math.round(100 - pUsed))) : null;
-                      const pReset = formatResetTime(pWin?.reset_time || pWin?.reset_at);
-
-                      return (
-                        <div className="overview-quota-card-item" key={acc.id}>
-                          <div className="overview-quota-account">
-                            <span className={`status-dot ${(acc.cooldown_remaining ?? 0) > 0 ? 'error' : ''}`} />
-                            <span className="account-email" title={acc.email || acc.id}>
-                              {acc.email || acc.id.slice(0, 8)}
-                            </span>
-                            {(acc.cooldown_remaining ?? 0) > 0 && (
-                              <span
-                                className="badge badge-warning"
-                                style={{ marginLeft: 'auto', fontSize: 10 }}
-                                title={(acc.cooldown_remaining ?? 0) > 60 ? `${Math.ceil(acc.cooldown_remaining || 0)}s` : undefined}
-                              >
-                                CD {formatCooldown(acc.cooldown_remaining)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="quota-metrics-stack">
-                            <div className="overview-quota-metric">
-                              <div className="overview-quota-label">
-                                <span>Primary (5h)</span>
-                                <strong className={`quota-${getRemainingTone(pRem)}`}>
-                                  {pRem != null ? `${pRem}%` : '—'}
-                                </strong>
-                              </div>
-                              <div className="quota-track">
-                                <span className={`quota-fill quota-${getRemainingTone(pRem)}`} style={{ width: `${Math.max(0, Math.min(100, pRem ?? 0))}%` }} />
-                              </div>
-                              <div className="quota-reset-text">
-                                {pReset ? t('overview.resetAfter', { time: pReset }) : t('overview.noResetInfo')}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* 4. Model Request Distribution (Top Models Card + Expandable Table) */}
+      {/* 3. Model Request Distribution (Top Models Card + Expandable Table) */}
       <section className="overview-section overview-models-section" aria-label={t('overview.modelDistributionTitle')}>
         <div className="card overview-models-card" style={{ padding: 18 }}>
           <div className="section-header" style={{ marginBottom: 14 }}>

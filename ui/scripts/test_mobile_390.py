@@ -268,14 +268,16 @@ def run_checks(url: str, admin_key: str):
         
         # 4. Test tabs
         tabs = [
-            ("monitoring", "Monitoring"),
-            ("playground", "Playground"),
-            ("providers", "Nhà Cung Cấp"),
+            ("overview", "Tổng quan"),
+            ("requests", "Lưu lượng"),
+            ("playground", "Thử nghiệm"),
+            ("images", "Tạo ảnh AI"),
+            ("providers", "Nhà cung cấp"),
             ("combos", "Combo"),
             ("token_saver", "Token Saver"),
             ("api_keys", "Khóa API"),
-            ("logs", "Console Log"),
-            ("integration", "Tích hợp API"),
+            ("logs", "Nhật ký"),
+            ("integration", "Tích hợp"),
         ]
         
         for tab_id, tab_label in tabs:
@@ -291,11 +293,11 @@ def run_checks(url: str, admin_key: str):
             # Check modals in this tab if applicable
             if tab_id == "providers":
                 print("   Opening Add Upstream Provider modal...")
-                upstream_tab = page.query_selector('button[data-segment="upstream"], button:has-text("Upstream")')
-                if upstream_tab:
-                    upstream_tab.click()
-                    page.wait_for_timeout(300)
-                page.click('button:has-text("Thêm Upstream")')
+                # Both provider panels are rendered in the DOM; the Upstream panel
+                # exposes the consolidated action bar with the Add Upstream button.
+                add_upstream = page.locator('#provider-upstream button:has-text("Thêm Upstream")').first
+                assert add_upstream.count() > 0, "Add Upstream button missing from Upstream panel"
+                add_upstream.click()
                 page.wait_for_timeout(300)
                 check_overflow("Modal: Add Provider")
                 # Close modal
@@ -325,5 +327,5 @@ if __name__ == "__main__":
         sys.exit(0)
 
     url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:20229"
-    key = sys.argv[2] if len(sys.argv) > 2 else "ag-proxy-key"
+    key = sys.argv[2] if len(sys.argv) > 2 else "ezrouter-key"
     run_checks(url, key)

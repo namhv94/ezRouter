@@ -39,7 +39,7 @@ def audit_auth_protection():
     # Missing auth
     req = urllib.request.Request(
         f"{BASE_URL}/v1/chat/completions",
-        data=json.dumps({"model": "ag/gemini-3.8-flash-high", "messages": [{"role": "user", "content": "hi"}]}).encode(),
+        data=json.dumps({"model": "gemini/gemini-2.5-flash", "messages": [{"role": "user", "content": "hi"}]}).encode(),
         headers={"Content-Type": "application/json"}
     )
     try:
@@ -52,7 +52,7 @@ def audit_auth_protection():
     # Invalid token
     req = urllib.request.Request(
         f"{BASE_URL}/v1/chat/completions",
-        data=json.dumps({"model": "ag/gemini-3.8-flash-high", "messages": [{"role": "user", "content": "hi"}]}).encode(),
+        data=json.dumps({"model": "gemini/gemini-2.5-flash", "messages": [{"role": "user", "content": "hi"}]}).encode(),
         headers={"Authorization": "Bearer invalid-key", "Content-Type": "application/json"}
     )
     try:
@@ -221,21 +221,21 @@ def main():
     audit_get_models()
     audit_auth_protection()
 
-    # Audit all 3 upstream families:
-    # 1. Antigravity Gemini
-    audit_non_streaming("ag/gemini-3.8-flash-high")
-    audit_streaming("ag/gemini-3.8-flash-high")
-    audit_tool_calling_multiturn("ag/gemini-3.8-flash-high")
+    # Audit external provider families:
+    # 1. Gemini
+    audit_non_streaming("gemini/gemini-2.5-flash")
+    audit_streaming("gemini/gemini-2.5-flash")
+    audit_tool_calling_multiturn("gemini/gemini-2.5-flash")
 
-    # 2. Antigravity Claude
-    audit_non_streaming("ag/claude-sonnet-4-6")
-    audit_streaming("ag/claude-sonnet-4-6")
-    audit_tool_calling_multiturn("ag/claude-sonnet-4-6")
+    # 2. Claude
+    audit_non_streaming("anthropic/claude-3-5-sonnet")
+    audit_streaming("anthropic/claude-3-5-sonnet")
+    audit_tool_calling_multiturn("anthropic/claude-3-5-sonnet")
 
-    # 3. OpenAI Codex
-    audit_non_streaming("cx/gpt-5.6-sol")
-    audit_streaming("cx/gpt-5.6-sol")
-    audit_tool_calling_multiturn("cx/gpt-5.6-sol")
+    # 3. GPT
+    audit_non_streaming("openai/gpt-4o")
+    audit_streaming("openai/gpt-4o")
+    audit_tool_calling_multiturn("openai/gpt-4o")
 
     print("\n=======================================================")
     print("AUDIT RESULT: 100% HERMES API COMPATIBILITY VERIFIED!")

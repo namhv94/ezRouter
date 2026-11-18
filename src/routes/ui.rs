@@ -183,30 +183,6 @@ pub async fn serve_scripts(Path(path): Path<String>) -> Response {
     }
 }
 
-pub async fn serve_setup_codex_sh() -> Response {
-    serve_scripts(Path("setup-codex.sh".to_string())).await
-}
-
-pub async fn serve_setup_codex_bat() -> Response {
-    serve_scripts(Path("setup-codex.bat".to_string())).await
-}
-
-pub async fn serve_setup_codex_ps1() -> Response {
-    serve_scripts(Path("setup-codex.ps1".to_string())).await
-}
-
-pub async fn serve_uninstall_codex_sh() -> Response {
-    serve_scripts(Path("uninstall-codex.sh".to_string())).await
-}
-
-pub async fn serve_uninstall_codex_bat() -> Response {
-    serve_scripts(Path("uninstall-codex.bat".to_string())).await
-}
-
-pub async fn serve_uninstall_codex_ps1() -> Response {
-    serve_scripts(Path("uninstall-codex.ps1".to_string())).await
-}
-
 pub async fn serve_setup_claude_code_sh() -> Response {
     serve_scripts(Path("setup-claude-code.sh".to_string())).await
 }

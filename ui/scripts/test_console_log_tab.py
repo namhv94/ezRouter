@@ -40,8 +40,9 @@ def test_console_log_tab(url: str, admin_key: str):
             print("  PASS: Level filter buttons verified")
 
             # 4. Verify Terminal Output Window
-            terminal_hdr = page.locator('text=Router Rust System Output')
+            terminal_hdr = page.locator('.console-header-title')
             assert terminal_hdr.count() > 0, "Terminal output header not found"
+            assert "ezRouter System Output" in terminal_hdr.first.inner_text()
             print("  PASS: Terminal output header present")
 
             # 5. Verify Copy button exists
@@ -49,10 +50,10 @@ def test_console_log_tab(url: str, admin_key: str):
             assert copy_btn.count() > 0, "Copy button not found"
             print("  PASS: Copy button present")
 
-            # 6. Verify Search Box
+            # 6. Verify Search Box (placeholder now covers keyword / module filtering)
             search_input = page.locator('input[placeholder*="Lọc từ khóa"]')
             assert search_input.count() > 0, "Search input not found"
-            search_input.fill("quota")
+            search_input.fill("router")
             page.wait_for_timeout(400)
             print("  PASS: Search input filter working")
 
@@ -63,5 +64,5 @@ def test_console_log_tab(url: str, admin_key: str):
 
 if __name__ == "__main__":
     target_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:20229"
-    target_key = sys.argv[2] if len(sys.argv) > 2 else "namhv94"
+    target_key = sys.argv[2] if len(sys.argv) > 2 else "ezrouter-key"
     test_console_log_tab(target_url, target_key)

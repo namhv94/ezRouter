@@ -99,7 +99,7 @@ def main():
     print("\n6. Verifying header override validation...")
     try:
         chat_payload = json.dumps({
-            "model": "ag/gemini-3.8-flash-high",
+            "model": "gemini/gemini-2.5-flash",
             "messages": [{"role": "user", "content": "hi"}]
         }).encode()
         req = urllib.request.Request(
@@ -120,7 +120,7 @@ def main():
     # 7. Chat completion with x-token-saver: off
     print("\n7. Verifying x-token-saver: off override...")
     chat_payload = json.dumps({
-        "model": "ag/gemini-3.8-flash-high",
+        "model": "gemini/gemini-2.5-flash",
         "messages": [{"role": "user", "content": "Ping test"}]
     }).encode()
     req = urllib.request.Request(

@@ -25,8 +25,6 @@ export type TabType =
   | 'images'
   | 'requests'
   | 'providers'
-  | 'accounts'
-  | 'codex'
   | 'combos'
   | 'api_keys'
   | 'token_saver'
@@ -38,7 +36,6 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   health: HealthInfo | null;
-  activeAccountsCount?: number;
   totalProvidersCount?: number;
   totalKeysCount?: number;
   theme?: ThemeMode;
@@ -51,7 +48,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
   health,
-  activeAccountsCount,
   totalProvidersCount,
   totalKeysCount,
   theme,
@@ -85,8 +81,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: t('nav.providers'),
       icon: <IconServer size={18} />,
       badge:
-        totalProvidersCount !== undefined || activeAccountsCount !== undefined
-          ? String((totalProvidersCount || 0) + (activeAccountsCount || 0))
+        totalProvidersCount !== undefined
+          ? String(totalProvidersCount)
           : undefined,
     },
     {

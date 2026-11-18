@@ -150,14 +150,15 @@ fn resolve_model_provider(
         None
     };
 
-    let is_codex_model = crate::models::is_known_codex_model(target_model)
-        || state
-            .models
-            .get_model(target_model)
-            .map(|m| m.owned_by == "openai-codex")
-            .unwrap_or(false);
+    // A globally configured upstream (AG_UPSTREAM_BASE_URL) is a passthrough
+    // proxy: it accepts any model id, so it does not need a catalog entry or a
+    // DB provider match. Otherwise the model must belong to some active
+    // provider (or be a combo, which is resolved before this call).
+    let has_global_upstream = state.config.upstream_base_url.is_some();
 
-    if external_prov.is_none() && !is_codex_model && state.models.get_model(target_model).is_none()
+    if external_prov.is_none()
+        && !has_global_upstream
+        && state.models.get_model(target_model).is_none()
     {
         return Err(AppError::NotFound(format!(
             "Model '{target_model}' not found"
@@ -186,31 +187,12 @@ fn resolve_model_provider(
                     acc,
                 )
             }
-        } else if is_codex_model {
-            let acc_candidate = state
-                .codex_pool
-                .pick_account()
-                .map(|a| a.email.read().unwrap().clone())
-                .unwrap_or_else(|| "Codex Pool".to_string());
-            let masked = crate::live_monitor::mask_account_email(&acc_candidate);
-            (
-                state.codex_provider.clone(),
-                format!("codex:{}", auth_key_id),
-                "Codex".to_string(),
-                masked,
-            )
         } else {
-            let acc_candidate = state
-                .account_pool
-                .peek_account(Some(target_model))
-                .map(|a| a.email)
-                .unwrap_or_else(|| "Google Pool".to_string());
-            let masked = crate::live_monitor::mask_account_email(&acc_candidate);
             (
                 state.provider.clone(),
                 auth_key_id.to_string(),
-                "Google Antigravity".to_string(),
-                masked,
+                "default".to_string(),
+                "".to_string(),
             )
         };
 
@@ -286,6 +268,13 @@ fn spawn_log_completion(
     }
 }
 
+/// Upper bound for the SSE line-assembly buffer in `ModelRewriteChatStream`.
+///
+/// A chunk with no newline would otherwise grow the buffer without limit,
+/// so a misbehaving (or hostile) upstream could exhaust memory before the
+/// first event is emitted.
+pub const MAX_SSE_BUFFER_BYTES: usize = 2 * 1024 * 1024;
+
 pub struct ModelRewriteChatStream {
     inner: BoxChatStream,
     requested_model: String,
@@ -313,6 +302,12 @@ impl Stream for ModelRewriteChatStream {
         loop {
             match Pin::new(&mut this.inner).poll_next(cx) {
                 std::task::Poll::Ready(Some(Ok(bytes))) => {
+                    if this.buffer.len() + bytes.len() > MAX_SSE_BUFFER_BYTES {
+                        this.buffer.clear();
+                        return std::task::Poll::Ready(Some(Err(AppError::BadGateway(
+                            "SSE stream buffer limit exceeded 2MB".to_string(),
+                        ))));
+                    }
                     this.buffer.extend_from_slice(&bytes);
                     if let Some(last_nl_idx) = this.buffer.iter().rposition(|&b| b == b'\n') {
                         let remainder = this.buffer.split_off(last_nl_idx + 1);
@@ -704,25 +699,6 @@ pub async fn execute_chat_completions(
         let mut req_payload = payload.clone();
         req_payload.model = cand_model.clone();
 
-        if state.config.codex_context_optimizer_enabled && cand_model.starts_with("cx/") {
-            let opt_config = crate::context_optimizer::ContextOptimizerConfig {
-                enabled: true,
-                max_messages: state.config.codex_context_max_messages,
-                max_bytes: state.config.codex_context_max_bytes,
-                ..Default::default()
-            };
-            let (new_messages, metrics) =
-                crate::context_optimizer::compact_messages(req_payload.messages, &opt_config);
-            info!(
-                model = %cand_model,
-                total_messages = metrics.total_messages,
-                total_bytes = metrics.total_bytes,
-                compacted_messages = metrics.estimated_compacted,
-                "Applied codex context optimizer"
-            );
-            req_payload.messages = new_messages;
-        }
-
         if payload.stream == Some(true) {
             info!(
                 model = %trimmed_model,
@@ -966,13 +942,13 @@ mod tests {
 
     #[test]
     fn test_rewrite_sse_chunk_model() {
-        let raw = Bytes::from("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"cx/gpt-5-codex\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n");
+        let raw = Bytes::from("data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"model\":\"gemini/gemini-2.5-flash\",\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n");
         let rewritten = rewrite_sse_chunk(&raw, "my-super-combo");
         let s = std::str::from_utf8(&rewritten).unwrap();
         assert!(s.starts_with("data: "));
         assert!(s.ends_with("\n\n"));
         assert!(s.contains("\"model\":\"my-super-combo\""));
-        assert!(!s.contains("cx/gpt-5-codex"));
+        assert!(!s.contains("gemini/gemini-2.5-flash"));
         assert!(s.contains("\"content\":\"Hello\""));
     }
 

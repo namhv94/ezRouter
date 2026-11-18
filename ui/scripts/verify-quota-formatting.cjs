@@ -1,183 +1,155 @@
 /**
- * Verification check for Google Quota formatting and calculations in ProvidersTab.
- * Invariants tested:
- * 1. formatResetTime calculates human-readable relative time (seconds, minutes, hours, days, upcoming).
- * 2. ProvidersTab parses and averages gemini_5h, gemini_weekly, claude_5h, and claude_weekly.
- * 3. Accounts filtering: inactive accounts are excluded from quota averages and stopped counts.
- * 4. Google stop state correctly triggers on exhaustion.
+ * Verification of the remaining quota / balance formatting surfaces in the UI.
+ *
+ * The Google-Antigravity and Codex account-pool quota panels (gemini_5h,
+ * gemini_weekly, claude_5h, claude_weekly, per-account cooldowns) were removed
+ * together with the account tables, so this verifier now pins what survives:
+ *
+ * 1. OpenRouter credit balance rendering in ProvidersTab (net balance, warn tone).
+ * 2. Model request-share quota bars in OverviewTab (percent math + tone classes).
+ * 3. The shared .quota-track / .quota-fill CSS contract.
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const providersPath = path.resolve(__dirname, '../src/components/ProvidersTab.tsx');
-const content = fs.readFileSync(providersPath, 'utf8');
+const overviewPath = path.resolve(__dirname, '../src/components/OverviewTab.tsx');
+const stylesPath = path.resolve(__dirname, '../src/styles.css');
 
-// 1. Invariant: ProvidersTab source code checks
+const providersContent = fs.readFileSync(providersPath, 'utf8');
+const overviewContent = fs.readFileSync(overviewPath, 'utf8');
+const stylesContent = fs.readFileSync(stylesPath, 'utf8');
+
 const sourceChecks = [
   {
-    name: 'ProvidersTab defines formatResetTime helper',
-    test: () => content.includes('const formatResetTime ='),
+    name: 'ProvidersTab derives net OpenRouter balance from credits minus usage',
+    test: () =>
+      /openrouterCredits\.total_credits\s*-\s*\(?\s*openrouterCredits\.total_usage\s*\|\|\s*0\s*\)?/.test(
+        providersContent
+      ),
+    detail: 'Balance must be total_credits - total_usage',
   },
   {
-    name: 'ProvidersTab filters active accounts for claude5hAccs',
-    test: () => /claude5hAccs\s*=\s*accounts\.filter\(\s*\(a\)\s*=>\s*a\.is_active/.test(content),
+    name: 'ProvidersTab clamps the balance at zero and formats 2 decimals',
+    test: () => /Math\.max\(\s*0,\s*openrouterCredits\.total_credits\s*-/.test(providersContent) &&
+      /\.toFixed\(2\)/.test(providersContent),
+    detail: 'Balance must never render negative and must use 2 decimal places',
   },
   {
-    name: 'ProvidersTab filters active accounts for gemini5hAccs',
-    test: () => /gemini5hAccs\s*=\s*accounts\.filter\(\s*\(a\)\s*=>\s*a\.is_active/.test(content),
+    name: 'ProvidersTab applies the balance-warn tone when the balance is nearly exhausted',
+    test: () => /balance-warn/.test(providersContent) && /balance-good/.test(providersContent),
+    detail: 'Balance display must switch between balance-good and balance-warn tones',
   },
   {
-    name: 'ProvidersTab calculates geminiWeeklyAvg',
-    test: () => content.includes('geminiWeeklyAvg'),
+    name: 'ProvidersTab surfaces a low-balance warning badge',
+    test: () => providersContent.includes('openrouter-low-balance-badge'),
+    detail: 'A low-balance advisory badge must be rendered when credits are exhausted',
   },
   {
-    name: 'ProvidersTab displays both Gemini 5h and Gemini Tuần (weekly)',
-    test: () => content.includes('Gemini 5h:') && content.includes('Gemini Tuần:'),
+    name: 'ProvidersTab renders the OpenRouter balance card',
+    test: () => providersContent.includes('openrouter-balance-card'),
+    detail: 'The OpenRouter balance card must be present',
   },
   {
-    name: 'ProvidersTab renders reset time relative display',
-    test: () => content.includes('formatResetTime(acc.quota.gemini_5h.reset_time)'),
+    name: 'OverviewTab renders a model-share quota bar per model',
+    test: () =>
+      overviewContent.includes('quota-track') &&
+      overviewContent.includes('quota-fill') &&
+      /width:\s*`\$\{pct\}%`/.test(overviewContent),
+    detail: 'Each model row must render a quota-track/quota-fill bar sized by percentage',
   },
   {
-    name: 'ProvidersTab defines formatCooldown helper',
-    test: () => content.includes('const formatCooldown ='),
-  },
-  {
-    name: 'ProvidersTab uses formatCooldown in account tables',
-    test: () => content.includes('formatCooldown(acc.cooldown_remaining)'),
+    name: 'OverviewTab no longer renders per-account Google/Codex quota rows',
+    test: () =>
+      !/gemini_5h|gemini_weekly|claude_5h|claude_weekly|remaining_percent/.test(overviewContent),
+    detail: 'Account-pool quota fields must be fully removed from the Overview',
   },
 ];
 
-// 2. Pure logic unit tests replicating formatResetTime
-const formatResetTime = (isoString, nowMs = Date.now()) => {
-  if (!isoString) return null;
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return null;
-    const diffSec = Math.round((d.getTime() - nowMs) / 1000);
-    if (diffSec <= 0) return 'sắp reset';
-    if (diffSec < 60) return `${diffSec}s`;
-    if (diffSec < 3600) return `${Math.round(diffSec / 60)}m`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ${Math.round((diffSec % 3600) / 60)}m`;
-    const days = Math.floor(diffSec / 86400);
-    const hours = Math.round((diffSec % 86400) / 3600);
-    return `${days}d ${hours}h`;
-  } catch {
-    return null;
-  }
+// Pure logic: net balance formatting, mirrored from ProvidersTab.
+const formatBalance = (credits) => {
+  if (!credits || typeof credits.total_credits !== 'number') return null;
+  const net = credits.total_credits - (credits.total_usage || 0);
+  return `$${Math.max(0, net).toFixed(2)}`;
 };
 
-const fixedNow = new Date('2026-09-23T02:00:00Z').getTime();
+const isLowBalance = (credits) => {
+  if (!credits || typeof credits.total_credits !== 'number') return false;
+  return credits.total_credits - (credits.total_usage || 0) <= 0.05;
+};
 
 const logicChecks = [
   {
-    name: 'formatResetTime returns null for empty or invalid string',
-    test: () => formatResetTime(undefined) === null && formatResetTime('invalid-date') === null,
+    name: 'formatBalance returns null when credits are unknown',
+    test: () => formatBalance(null) === null && formatBalance({}) === null,
   },
   {
-    name: 'formatResetTime returns "sắp reset" for past time',
-    test: () => formatResetTime('2026-09-23T01:59:00Z', fixedNow) === 'sắp reset',
+    name: 'formatBalance subtracts usage from credits',
+    test: () =>
+      formatBalance({ total_credits: 20, total_usage: 7.5 }) === '$12.50' &&
+      formatBalance({ total_credits: 20 }) === '$20.00',
   },
   {
-    name: 'formatResetTime formats seconds (<60s)',
-    test: () => formatResetTime('2026-09-23T02:00:45Z', fixedNow) === '45s',
+    name: 'formatBalance never renders a negative amount',
+    test: () =>
+      formatBalance({ total_credits: 5, total_usage: 12 }) === '$0.00' &&
+      !formatBalance({ total_credits: 5, total_usage: 12 }).includes('-'),
   },
   {
-    name: 'formatResetTime formats minutes (<1h)',
-    test: () => formatResetTime('2026-09-23T02:34:00Z', fixedNow) === '34m',
+    name: 'isLowBalance triggers at or below the 0.05 threshold',
+    test: () =>
+      isLowBalance({ total_credits: 10, total_usage: 9.9 }) === false &&
+      isLowBalance({ total_credits: 10, total_usage: 9.97 }) === true &&
+      isLowBalance({ total_credits: 10, total_usage: 10 }) === true &&
+      isLowBalance({ total_credits: 10, total_usage: 15 }) === true &&
+      isLowBalance(null) === false,
   },
   {
-    name: 'formatResetTime formats hours (<24h)',
-    test: () => formatResetTime('2026-09-23T04:14:53Z', fixedNow) === '2h 15m',
-  },
-  {
-    name: 'formatResetTime formats days (>=24h)',
-    test: () => formatResetTime('2026-09-27T15:16:05Z', fixedNow) === '4d 13h',
-  },
-  {
-    name: 'formatCooldown helper handles <= 60s as seconds and > 60s as minutes without days',
+    name: 'Model share percentage never exceeds 100 or goes negative',
     test: () => {
-      const formatCooldown = (sec) => {
-        if (!sec || sec <= 0) return null;
-        const s = Math.ceil(sec);
-        if (s <= 60) return `${s}s`;
-        const m = Math.ceil(s / 60);
-        return `${m}m`;
-      };
+      const pct = (requests, total) => (total > 0 ? Math.round((requests / total) * 100) : 0);
       return (
-        formatCooldown(undefined) === null &&
-        formatCooldown(0) === null &&
-        formatCooldown(-5) === null &&
-        formatCooldown(15) === '15s' &&
-        formatCooldown(60) === '60s' &&
-        formatCooldown(61) === '2m' &&
-        formatCooldown(120) === '2m' &&
-        formatCooldown(300) === '5m' &&
-        formatCooldown(3600) === '60m' &&
-        formatCooldown(86400) === '1440m' && // Never shows days (1d) or counts seconds
-        !formatCooldown(86400).includes('d') &&
-        !formatCooldown(86400).includes('ngày')
+        pct(50, 100) === 50 &&
+        pct(0, 0) === 0 &&
+        pct(100, 100) === 100 &&
+        pct(1, 3) === 33 &&
+        pct(0, 100) === 0
       );
     },
   },
 ];
 
-// 3. Multi-account aggregation simulation with realistic fixtures
-const sampleAccounts = [
+const styleChecks = [
   {
-    id: 'acc1',
-    is_active: true,
-    cooldown_remaining: 0,
-    quota: {
-      gemini_5h: { remaining_percent: 41.0, reset_time: '2026-09-23T04:14:53Z' },
-      gemini_weekly: { remaining_percent: 15.2, reset_time: '2026-09-23T02:34:07Z' },
-      claude_5h: { remaining_percent: 100.0, reset_time: '2026-09-23T07:01:53Z' },
-      claude_weekly: { remaining_percent: 53.9, reset_time: '2026-09-27T15:16:05Z' },
-    },
+    name: 'CSS defines .quota-track as the bar container',
+    test: () => /\.quota-track\s*\{[^}]*overflow:\s*hidden/s.test(stylesContent),
   },
   {
-    id: 'acc2',
-    is_active: true,
-    cooldown_remaining: 0,
-    quota: {
-      gemini_5h: { remaining_percent: 44.0, reset_time: '2026-09-23T04:21:28Z' },
-      gemini_weekly: { remaining_percent: 98.6, reset_time: '2026-09-30T02:24:33Z' },
-      claude_5h: { remaining_percent: 99.9, reset_time: '2026-09-23T07:10:47Z' },
-      claude_weekly: { remaining_percent: 63.2, reset_time: '2026-09-27T15:16:10Z' },
-    },
+    name: 'CSS defines .quota-fill as the bar body',
+    test: () => /\.quota-fill\s*\{[^}]*height:\s*100%/s.test(stylesContent),
   },
   {
-    id: 'acc3_inactive',
-    is_active: false,
-    cooldown_remaining: 0,
-    quota: {
-      gemini_5h: { remaining_percent: 0.0, reset_time: '' },
-      gemini_weekly: { remaining_percent: 0.0, reset_time: '' },
-      claude_5h: { remaining_percent: 0.0, reset_time: '' },
-    },
+    name: 'CSS keeps the quota tone variants',
+    test: () =>
+      /\.quota-fill\.quota-good\s*\{/.test(stylesContent) &&
+      /\.quota-fill\.quota-warn\s*\{/.test(stylesContent) &&
+      /\.quota-fill\.quota-bad\s*\{/.test(stylesContent),
   },
-];
-
-const activeAccs = sampleAccounts.filter((a) => a.is_active);
-const gem5hList = activeAccs.filter((a) => typeof a.quota?.gemini_5h?.remaining_percent === 'number');
-const gem5hAvg = Math.round(gem5hList.reduce((s, a) => s + a.quota.gemini_5h.remaining_percent, 0) / gem5hList.length);
-
-const aggregationChecks = [
   {
-    name: 'Gemini 5h average excludes inactive accounts',
-    test: () => gem5hAvg === 43, // (41.0 + 44.0) / 2 = 42.5 -> 43
+    name: 'CSS no longer carries Google account quota panel rules',
+    test: () => !/\.overview-quota-card\s*\{/.test(stylesContent) && !/\.auto-quota-compact-strip\s*\{/.test(stylesContent),
   },
 ];
 
 let failed = 0;
-console.log('--- Google Quota UI Formatting & Logic Verification ---');
-for (const check of [...sourceChecks, ...logicChecks, ...aggregationChecks]) {
+console.log('--- ezRouter UI Quota & Balance Formatting Verification ---');
+for (const check of [...sourceChecks, ...logicChecks, ...styleChecks]) {
   try {
     if (check.test()) {
       console.log(`PASS: ${check.name}`);
     } else {
-      console.error(`FAIL: ${check.name}`);
+      console.error(`FAIL: ${check.name}${check.detail ? ` (${check.detail})` : ''}`);
       failed++;
     }
   } catch (err) {
@@ -189,4 +161,4 @@ for (const check of [...sourceChecks, ...logicChecks, ...aggregationChecks]) {
 if (failed > 0) {
   process.exit(1);
 }
-console.log('\nAll quota formatting invariants passed.');
+console.log('\nAll quota & balance formatting invariants passed.');

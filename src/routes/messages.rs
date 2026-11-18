@@ -19,26 +19,12 @@ use crate::provider::{ChatCompletionRequest, ChatCompletionResponse, ChatMessage
 use crate::state::AppState;
 
 /// Normalizes model names sent by Anthropic SDKs / Claude Code CLI to internal router model identifiers.
+///
+/// Model ids are passed through unchanged: every routable model is
+/// `{provider_prefix}/{upstream_model}` (or a combo name), so rewriting an
+/// Anthropic SDK alias would point it at a provider that no longer exists.
 pub fn normalize_anthropic_model(model: &str) -> String {
-    let trimmed = model.trim();
-    if trimmed.starts_with("ag/")
-        || trimmed.starts_with("cx/")
-        || trimmed.starts_with("openrouter/")
-    {
-        return trimmed.to_string();
-    }
-    let lower = trimmed.to_lowercase();
-    if lower.contains("opus") {
-        "ag/claude-opus-5-5-high".to_string()
-    } else if lower.contains("haiku") {
-        "ag/gemini-3.8-flash-high".to_string()
-    } else if lower.contains("sonnet") || lower.contains("claude") {
-        "ag/claude-sonnet-5-5-high".to_string()
-    } else if lower.contains("gpt-6") || lower.contains("codex") {
-        "cx/gpt-6.1-sol".to_string()
-    } else {
-        format!("ag/{trimmed}")
-    }
+    model.trim().to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]

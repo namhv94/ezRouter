@@ -556,153 +556,6 @@ async fn images_generations_accepts_raw_base64_jpeg_with_leading_and_internal_sl
 }
 
 #[tokio::test]
-async fn images_generations_codex_endpoint_fails_closed_503_and_records_live_registry() {
-    let (state, dir) = test_state(false);
-    let app = app_router(state.clone());
-
-    let codex_models = [
-        "cx/image-gen",
-        "image-gen",
-        "cx/gpt-image",
-        "cx/gpt-image-2",
-        "gpt-image-2",
-        "codex-image",
-        "cx/image/v1",
-    ];
-
-    for model in codex_models {
-        let request = Request::builder()
-            .method("POST")
-            .uri("/v1/images/generations")
-            .header(header::AUTHORIZATION, "Bearer test-secret-key")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(
-                json!({
-                    "model": model,
-                    "prompt": "generate a cat",
-                })
-                .to_string(),
-            ))
-            .unwrap();
-
-        let response = app.clone().oneshot(request).await.unwrap();
-        // Since Codex CLI execution is unsafe without an isolated OS sandbox restricted to image_gen,
-        // it must fail closed with 503 SERVICE_UNAVAILABLE
-        assert_eq!(
-            response.status(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Model {model} must fail closed with 503 Service Unavailable"
-        );
-        let body = response_json(response).await;
-        let msg = body["error"]["message"].as_str().unwrap_or("");
-        assert!(
-            msg.contains("disabled") || msg.contains("sandbox"),
-            "Expected disabled/sandbox security message, got: {msg}"
-        );
-        assert_eq!(body["error"]["code"], "service_unavailable");
-    }
-
-    // Verify live_registry recorded the requests and tracked them to Codex with error status
-    let active = state.live_registry.get_active();
-    assert!(
-        !active.items.is_empty(),
-        "Live registry should have recorded the Codex requests"
-    );
-    let codex_items: Vec<_> = active
-        .items
-        .iter()
-        .filter(|i| i.provider == "Codex")
-        .collect();
-    assert!(
-        !codex_items.is_empty(),
-        "Live registry must have routed items to provider 'Codex'"
-    );
-    for item in codex_items {
-        assert_eq!(item.status, "error");
-        assert!(item.completed_at.is_some());
-    }
-
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[tokio::test]
-async fn images_generations_codex_endpoint_validates_reference_image_before_pool_dispatch() {
-    let (state, dir) = test_state(false);
-    let app = app_router(state);
-
-    // Malicious host path sent to Codex model must return 400 Bad Request (NOT 502 Bad Gateway)
-    let bad_req = Request::builder()
-        .method("POST")
-        .uri("/v1/images/generations")
-        .header(header::AUTHORIZATION, "Bearer test-secret-key")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "model": "cx/image-gen",
-                "prompt": "generate a mountain",
-                "reference_image": "/etc/shadow",
-            })
-            .to_string(),
-        ))
-        .unwrap();
-
-    let resp = app.clone().oneshot(bad_req).await.unwrap();
-    assert_eq!(
-        resp.status(),
-        StatusCode::BAD_REQUEST,
-        "Codex endpoint must reject invalid reference image with 400 Bad Request"
-    );
-
-    // Empty string reference_image must not be silently accepted
-    let empty_ref = Request::builder()
-        .method("POST")
-        .uri("/v1/images/generations")
-        .header(header::AUTHORIZATION, "Bearer test-secret-key")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "model": "cx/image-gen",
-                "prompt": "generate a mountain",
-                "reference_image": "",
-            })
-            .to_string(),
-        ))
-        .unwrap();
-
-    let resp_empty = app.clone().oneshot(empty_ref).await.unwrap();
-    assert_eq!(
-        resp_empty.status(),
-        StatusCode::BAD_REQUEST,
-        "Codex endpoint must reject empty reference_image with 400 Bad Request"
-    );
-
-    // Integer reference_image must not be silently accepted
-    let num_ref = Request::builder()
-        .method("POST")
-        .uri("/v1/images/generations")
-        .header(header::AUTHORIZATION, "Bearer test-secret-key")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "model": "cx/image-gen",
-                "prompt": "generate a mountain",
-                "reference_image": 12345,
-            })
-            .to_string(),
-        ))
-        .unwrap();
-
-    let resp_num = app.oneshot(num_ref).await.unwrap();
-    assert_eq!(
-        resp_num.status(),
-        StatusCode::BAD_REQUEST,
-        "Codex endpoint must reject non-string reference_image with 400 Bad Request"
-    );
-
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[tokio::test]
 async fn images_generations_mock_rejects_empty_and_non_string_reference_image() {
     let (state, dir) = test_state(true);
     let app = app_router(state);
@@ -770,96 +623,6 @@ async fn test_image_format_magic_bytes_detection_and_mime() {
         None
     );
     assert_eq!(ImageFormat::from_magic_bytes(&[]), None);
-}
-
-#[tokio::test]
-async fn test_find_generated_image_deterministic_precedence_and_no_25kb_threshold() {
-    use ezrouter::routes::images::find_generated_image;
-
-    let test_dir =
-        std::env::temp_dir().join(format!("ezrouter-imgfinder-{}", uuid::Uuid::new_v4()));
-    tokio::fs::create_dir_all(&test_dir).await.unwrap();
-
-    let out_file = test_dir.join("output.png");
-    // Write 68-byte PNG (far below previous 25,000-byte threshold)
-    tokio::fs::write(&out_file, SAMPLE_PNG).await.unwrap();
-
-    // 1. Designated output file is found even though < 25KB!
-    let found = find_generated_image(&test_dir, &out_file).await;
-    assert_eq!(found, Some(out_file.clone()));
-
-    // 2. Write a large non-image file (50KB text) - must NOT be picked as image
-    let fake_img = test_dir.join("output.jpg");
-    tokio::fs::write(&fake_img, vec![b'a'; 50_000])
-        .await
-        .unwrap();
-    let found2 = find_generated_image(&test_dir, &fake_img).await;
-    // Should still pick output.png, not the 50KB fake output.jpg
-    assert_eq!(found2, Some(out_file.clone()));
-
-    // Remove output.png to test generated_images directory fallback
-    tokio::fs::remove_file(&out_file).await.unwrap();
-    let gen_dir = test_dir.join("generated_images");
-    tokio::fs::create_dir_all(&gen_dir).await.unwrap();
-    let gen_file = gen_dir.join("codex_gen.png");
-    tokio::fs::write(&gen_file, SAMPLE_PNG).await.unwrap();
-
-    let found_in_gen = find_generated_image(&test_dir, &out_file).await;
-    assert_eq!(found_in_gen, Some(gen_file));
-
-    let _ = tokio::fs::remove_dir_all(&test_dir).await;
-}
-
-#[test]
-fn test_codex_prompt_is_neutral_and_unbiased() {
-    use ezrouter::routes::images::build_codex_prompt;
-    use std::path::Path;
-
-    let out_path = Path::new("/tmp/test/output.png");
-
-    let prompt_no_ref = build_codex_prompt("a sunset over mountains", out_path, false);
-    assert!(prompt_no_ref.contains("a sunset over mountains"));
-    assert!(prompt_no_ref.contains("/tmp/test/output.png"));
-    assert!(!prompt_no_ref.contains("cô gái"));
-    assert!(!prompt_no_ref.contains("chân dung"));
-    assert!(!prompt_no_ref.contains("candid smartphone photography"));
-
-    let prompt_with_ref = build_codex_prompt("a sleek electric sports car", out_path, true);
-    assert!(prompt_with_ref.contains("a sleek electric sports car"));
-    assert!(prompt_with_ref.contains("-i"));
-    assert!(prompt_with_ref.contains("/tmp/test/output.png"));
-    assert!(!prompt_with_ref.contains("cô gái"));
-    assert!(!prompt_with_ref.contains("chân dung"));
-    assert!(!prompt_with_ref.contains("candid smartphone photography"));
-}
-
-#[tokio::test]
-async fn test_run_dir_guard_cleans_up_on_drop() {
-    use ezrouter::routes::images::RunDirGuard;
-
-    let test_dir =
-        std::env::temp_dir().join(format!("ezrouter-guard-test-{}", uuid::Uuid::new_v4()));
-    tokio::fs::create_dir_all(&test_dir).await.unwrap();
-    let auth_path = test_dir.join("auth.json");
-    tokio::fs::write(&auth_path, b"{\"secret_token\": \"xyz\"}")
-        .await
-        .unwrap();
-
-    assert!(auth_path.exists());
-
-    {
-        let _guard = RunDirGuard::new(test_dir.clone());
-        assert!(_guard.path().exists());
-    }
-
-    assert!(
-        !auth_path.exists(),
-        "auth.json should be wiped on guard drop"
-    );
-    assert!(
-        !test_dir.exists(),
-        "run_dir should be removed on guard drop"
-    );
 }
 
 #[tokio::test]
@@ -1171,52 +934,6 @@ async fn test_validate_reference_image_rejects_magic_mime_mismatch() {
 }
 
 #[tokio::test]
-async fn test_find_generated_image_and_verify_image_file_skip_symlinks() {
-    use ezrouter::routes::images::{find_generated_image, verify_image_file};
-
-    let test_dir = std::env::temp_dir().join(format!("ezrouter-symtest-{}", uuid::Uuid::new_v4()));
-    tokio::fs::create_dir_all(&test_dir).await.unwrap();
-
-    // Create real target image
-    let real_png = test_dir.join("real_target.png");
-    tokio::fs::write(&real_png, SAMPLE_PNG).await.unwrap();
-
-    // Create symlink to that image
-    let symlink_path = test_dir.join("symlink.png");
-    #[cfg(unix)]
-    tokio::fs::symlink(&real_png, &symlink_path).await.unwrap();
-
-    // verify_image_file must reject the symlink
-    let verified = verify_image_file(&symlink_path).await;
-    assert_eq!(
-        verified, None,
-        "Symlink must not be verified as a valid image file"
-    );
-
-    // find_generated_image when designated output is a symlink must ignore it
-    let designated_sym = test_dir.join("output.png");
-    #[cfg(unix)]
-    tokio::fs::symlink(&real_png, &designated_sym)
-        .await
-        .unwrap();
-
-    let found = find_generated_image(&test_dir, &designated_sym).await;
-    // real_target.png should be found via dir scan, NOT the designated symlink
-    assert_eq!(found, Some(real_png));
-
-    let _ = tokio::fs::remove_dir_all(&test_dir).await;
-}
-
-#[test]
-fn test_codex_image_execution_is_not_safe() {
-    use ezrouter::routes::images::is_codex_image_execution_safe;
-    assert!(
-        !is_codex_image_execution_safe(),
-        "Codex image execution must report false until a secure OS sandbox restricted to image_gen is present"
-    );
-}
-
-#[tokio::test]
 async fn test_no_bypass_flag_in_images_route() {
     let images_rs = tokio::fs::read_to_string("src/routes/images.rs")
         .await
@@ -1232,9 +949,12 @@ async fn test_no_bypass_flag_in_images_route() {
     );
 }
 
+/// Image generation never shells out any more, so shell metacharacters in a
+/// prompt must stay plain data: they are echoed verbatim to the provider and
+/// can never execute or touch the filesystem.
 #[tokio::test]
-async fn test_command_injection_prompts_fail_closed_and_do_not_execute() {
-    let (state, dir) = test_state(false);
+async fn test_command_injection_prompts_are_inert_data() {
+    let (state, dir) = test_state(true);
     let app = app_router(state);
 
     let probe_dir =
@@ -1259,7 +979,7 @@ async fn test_command_injection_prompts_fail_closed_and_do_not_execute() {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
                 json!({
-                    "model": "cx/image-gen",
+                    "model": "mock/gpt-image-1",
                     "prompt": payload,
                 })
                 .to_string(),
@@ -1269,8 +989,15 @@ async fn test_command_injection_prompts_fail_closed_and_do_not_execute() {
         let resp = app.clone().oneshot(req).await.unwrap();
         assert_eq!(
             resp.status(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Injection payload {idx} must fail closed with 503 Service Unavailable"
+            StatusCode::OK,
+            "Injection payload {idx} should be handled as inert data"
+        );
+
+        let body = response_json(resp).await;
+        assert_eq!(
+            body["data"][0]["revised_prompt"],
+            Value::String(payload.trim().to_string()),
+            "prompt must be passed through verbatim (modulo trimming), not interpreted"
         );
 
         let probe_file = probe_dir.join(format!("probe{}", idx + 1));
@@ -1282,64 +1009,5 @@ async fn test_command_injection_prompts_fail_closed_and_do_not_execute() {
     }
 
     let _ = tokio::fs::remove_dir_all(probe_dir).await;
-    let _ = std::fs::remove_dir_all(dir);
-}
-
-#[tokio::test]
-async fn test_codex_endpoint_validates_reference_image_before_failing_closed() {
-    use base64::Engine;
-
-    let (state, dir) = test_state(false);
-    let app = app_router(state);
-
-    // 1. Invalid reference image fails with 400 Bad Request
-    let req_invalid = Request::builder()
-        .method("POST")
-        .uri("/v1/images/generations")
-        .header(header::AUTHORIZATION, "Bearer test-secret-key")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "model": "cx/image-gen",
-                "prompt": "draw landscape",
-                "reference_image": "file:///etc/passwd",
-            })
-            .to_string(),
-        ))
-        .unwrap();
-
-    let resp_invalid = app.clone().oneshot(req_invalid).await.unwrap();
-    assert_eq!(
-        resp_invalid.status(),
-        StatusCode::BAD_REQUEST,
-        "Invalid reference image scheme must be rejected with 400 Bad Request"
-    );
-
-    // 2. Valid reference image passes validation, then fails closed with 503
-    let b64_png = base64::engine::general_purpose::STANDARD.encode(SAMPLE_PNG);
-    let valid_data_url = format!("data:image/png;base64,{b64_png}");
-
-    let req_valid = Request::builder()
-        .method("POST")
-        .uri("/v1/images/generations")
-        .header(header::AUTHORIZATION, "Bearer test-secret-key")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(
-            json!({
-                "model": "cx/image-gen",
-                "prompt": "draw landscape",
-                "reference_image": valid_data_url,
-            })
-            .to_string(),
-        ))
-        .unwrap();
-
-    let resp_valid = app.oneshot(req_valid).await.unwrap();
-    assert_eq!(
-        resp_valid.status(),
-        StatusCode::SERVICE_UNAVAILABLE,
-        "Valid reference image must pass validation and fail closed with 503 Service Unavailable"
-    );
-
     let _ = std::fs::remove_dir_all(dir);
 }

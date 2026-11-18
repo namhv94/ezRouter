@@ -1,7 +1,6 @@
 use axum::{
     body::Body,
     http::{header::AUTHORIZATION, Request, StatusCode},
-    response::IntoResponse,
 };
 use ezrouter::{app_router, config::Config, db::Database, state::AppState};
 use http_body_util::BodyExt;
@@ -21,6 +20,16 @@ fn setup_test_app() -> (axum::Router, AppState, String) {
     .unwrap();
     config.use_mock_provider = true;
     let state = AppState::new(config);
+    // Models come only from DB-configured providers now.
+    let _ = state.db.create_provider(
+        "Test Gemini",
+        "gemini",
+        "openai",
+        "http://127.0.0.1:1",
+        "sk-test",
+        &serde_json::json!(["gemini-2.5-flash"]),
+        true,
+    );
     let app = app_router(state.clone());
     (app, state, test_dir)
 }
@@ -48,7 +57,7 @@ async fn test_rbac_client_vs_admin_on_admin_routes() {
 
     // 3. Client key can access /v1/chat/completions
     let chat_payload = serde_json::json!({
-        "model": "ag/gemini-3.8-flash-high",
+        "model": "gemini/gemini-2.5-flash",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": false
     });
@@ -71,11 +80,8 @@ async fn test_rbac_client_vs_admin_on_admin_routes() {
         ("GET", "/admin/api-keys"),
         ("GET", "/admin/providers"),
         ("GET", "/admin/combos"),
-        ("GET", "/admin/accounts"),
         ("GET", "/admin/settings"),
         ("GET", "/admin/active-requests"),
-        ("GET", "/admin/codex"),
-        ("GET", "/admin/quota-refresh"),
     ];
 
     for (method, uri) in admin_endpoints {
@@ -202,7 +208,7 @@ async fn test_query_token_restriction_and_leak_prevention() {
 
     // 2. Query token is rejected on /v1/chat/completions
     let chat_payload = serde_json::json!({
-        "model": "ag/gemini-3.8-flash-high",
+        "model": "gemini/gemini-2.5-flash",
         "messages": [{"role": "user", "content": "hi"}],
         "stream": false
     });
@@ -253,114 +259,6 @@ async fn test_query_token_restriction_and_leak_prevention() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
-#[tokio::test]
-async fn test_oauth_open_redirect_prevention() {
-    let (app, state, test_dir) = setup_test_app();
-
-    // 1. Untrusted origin in /admin/accounts/oauth/start is stripped/ignored
-    let req = Request::builder()
-        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Fattacker.example")
-        .method("POST")
-        .header(AUTHORIZATION, "Bearer admin-master-key")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let json: Value =
-        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    let state_str = json["state"].as_str().unwrap();
-    assert!(
-        !state_str.contains("attacker.example"),
-        "State should not contain untrusted origin"
-    );
-
-    // 2. Whitelisted origin in /admin/accounts/oauth/start IS preserved
-    let req = Request::builder()
-        .uri("/admin/accounts/oauth/start?origin=https%3A%2F%2Frouter.namhv.vip")
-        .method("POST")
-        .header(AUTHORIZATION, "Bearer admin-master-key")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let json: Value =
-        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
-    let state_str = json["state"].as_str().unwrap();
-    assert!(state_str.starts_with("https://router.namhv.vip|"));
-
-    // 3. Mock OAuth exchange server to test callback flow
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    let mock_oauth_server = axum::Router::new()
-        .route(
-            "/token",
-            axum::routing::post(|| async move {
-                (
-                    StatusCode::OK,
-                    [("content-type", "application/json")],
-                    r#"{"access_token":"mock-token","refresh_token":"rt-safe","expires_in":3600}"#,
-                )
-                    .into_response()
-            }),
-        )
-        .route(
-            "/userinfo",
-            axum::routing::get(|| async move {
-                (
-                    StatusCode::OK,
-                    [("content-type", "application/json")],
-                    r#"{"email":"oauth-tester@namhv.vip","id":"12345"}"#,
-                )
-                    .into_response()
-            }),
-        );
-    tokio::spawn(async move {
-        axum::serve(listener, mock_oauth_server).await.unwrap();
-    });
-
-    std::env::set_var("AG_TOKEN_URL", format!("http://127.0.0.1:{port}/token"));
-    std::env::set_var(
-        "AG_USERINFO_URL",
-        format!("http://127.0.0.1:{port}/userinfo"),
-    );
-    std::env::set_var("AG_GOOGLE_CLIENT_SECRET", "mock-secret");
-
-    // Craft state with attacker.example
-    let ticket = state
-        .account_pool
-        .start_oauth("http://127.0.0.1:20229/auth/callback", None);
-    let raw_state = format!("https://attacker.example|{}", ticket.state);
-    let encoded_state = ezrouter::account::urlencoding_encode(&raw_state);
-
-    let req = Request::builder()
-        .uri(format!(
-            "/auth/callback?code=mock-code&state={encoded_state}"
-        ))
-        .method("GET")
-        .body(Body::empty())
-        .unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::SEE_OTHER);
-    let location = res
-        .headers()
-        .get("location")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(
-        !location.contains("attacker.example"),
-        "Must NOT redirect to attacker domain: {location}"
-    );
-    assert!(
-        location.starts_with("/auth/success"),
-        "Must fall back to local /auth/success: {location}"
-    );
-
-    std::env::remove_var("AG_TOKEN_URL");
-    std::env::remove_var("AG_USERINFO_URL");
-    let _ = std::fs::remove_dir_all(&test_dir);
-}
 
 #[tokio::test]
 async fn test_db_schema_role_migration_and_persistence() {

@@ -101,33 +101,14 @@ async fn test_post_messages_streaming_mock() {
 fn test_normalize_anthropic_model_aliases() {
     use ezrouter::routes::messages::normalize_anthropic_model;
 
+    // External provider model ids pass through unchanged (no ag/ or cx/ remapping).
     assert_eq!(
-        normalize_anthropic_model("claude-3-5-sonnet-20241022"),
-        "ag/claude-sonnet-5-5-high"
+        normalize_anthropic_model("anthropic/claude-3-5-sonnet"),
+        "anthropic/claude-3-5-sonnet"
     );
     assert_eq!(
-        normalize_anthropic_model("claude-3-7-sonnet"),
-        "ag/claude-sonnet-5-5-high"
-    );
-    assert_eq!(
-        normalize_anthropic_model("claude-sonnet-4-20250514"),
-        "ag/claude-sonnet-5-5-high"
-    );
-    assert_eq!(
-        normalize_anthropic_model("claude-3-opus-20240229"),
-        "ag/claude-opus-5-5-high"
-    );
-    assert_eq!(
-        normalize_anthropic_model("claude-3-5-haiku-20241022"),
-        "ag/gemini-3.8-flash-high"
-    );
-    assert_eq!(
-        normalize_anthropic_model("ag/claude-sonnet-5-5-high"),
-        "ag/claude-sonnet-5-5-high"
-    );
-    assert_eq!(
-        normalize_anthropic_model("cx/gpt-6.1-sol"),
-        "cx/gpt-6.1-sol"
+        normalize_anthropic_model("gemini/gemini-2.5-flash"),
+        "gemini/gemini-2.5-flash"
     );
 }
 

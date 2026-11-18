@@ -13,58 +13,6 @@ import {
   IconTrash,
 } from '../icons';
 
-// Pre-seeded list of known Antigravity & OpenAI Codex models
-const DEFAULT_AG_MODELS = [
-  'ag/gemini-4-argon-high',
-  'ag/gemini-4-argon-medium',
-  'ag/gemini-4-argon-low',
-  'ag/gemini-4-argon',
-  'ag/gemini-3.8-flash-high',
-  'ag/gemini-3.8-flash-low',
-  'ag/gemini-3.7-flash-tiered',
-  'ag/gemini-3.7-flash-low',
-  'ag/gemini-pro-agent',
-  'ag/gemini-3.1-pro-low',
-  'ag/claude-sonnet-4-6',
-  'ag/claude-opus-4-6-thinking',
-  'ag/claude-opus-5-5-high',
-  'ag/claude-sonnet-5-5-high',
-];
-
-const DEFAULT_CX_MODELS = [
-  'cx/gpt-6.1-sol',
-  'cx/gpt-6.1-sol-high',
-  'cx/gpt-6.1-sol-medium',
-  'cx/gpt-6.1-sol-low',
-  'cx/gpt-6.1-sol-xhigh',
-  'cx/gpt-6.1-sol-max',
-  'cx/gpt-6-sol',
-  'cx/gpt-6-luna',
-  'cx/gpt-6-astra',
-  'cx/gpt-6-astra-high',
-  'cx/gpt-6-astra-medium',
-  'cx/gpt-6-astra-low',
-  'cx/gpt-6-astra-xhigh',
-  'cx/gpt-6-astra-max',
-  'cx/gpt-5.6-sol',
-  'cx/gpt-5.6-sol-high',
-  'cx/gpt-5.6-sol-medium',
-  'cx/gpt-5.6-sol-low',
-  'cx/gpt-5.6-sol-xhigh',
-  'cx/gpt-5.6-sol-max',
-  'cx/gpt-5.6-sol-ultra',
-  'cx/gpt-5.6-terra',
-  'cx/gpt-5.6-terra-high',
-  'cx/gpt-5.6-terra-medium',
-  'cx/gpt-5.6-terra-low',
-  'cx/gpt-5.6-luna',
-  'cx/gpt-5.6-luna-high',
-  'cx/gpt-5.6-luna-medium',
-  'cx/gpt-5.6-luna-low',
-  'cx/gpt-reserve',
-  'cx/gpt-5.5',
-];
-
 interface PlaygroundTabProps {
   adminKey?: string;
 }
@@ -74,7 +22,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
 
   // Model state
   const [models, setModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_AG_MODELS[0]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [customModel, setCustomModel] = useState<string>('');
   const [isCustomModel, setIsCustomModel] = useState<boolean>(false);
   const [loadingModels, setLoadingModels] = useState<boolean>(false);
@@ -124,15 +72,11 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
         const res = await api.getModels();
         if (isMounted && res?.data && Array.isArray(res.data)) {
           const fetchedIds = res.data.map((m: ModelEntry) => m.id);
-          const allModels = Array.from(
-            new Set([...DEFAULT_AG_MODELS, ...DEFAULT_CX_MODELS, ...fetchedIds])
-          );
-          setModels(allModels);
+          setModels(fetchedIds);
         }
       } catch {
-        // Fallback to default models
         if (isMounted) {
-          setModels([...DEFAULT_AG_MODELS, ...DEFAULT_CX_MODELS]);
+          setModels([]);
         }
       } finally {
         if (isMounted) setLoadingModels(false);
@@ -372,13 +316,8 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
     }
   };
 
-  // Group models for select
-  const allKnownModels = models.length > 0 ? models : [...DEFAULT_AG_MODELS, ...DEFAULT_CX_MODELS];
-  const agModels = allKnownModels.filter((m) => m.startsWith('ag/'));
-  const cxModels = allKnownModels.filter((m) => m.startsWith('cx/'));
-  const otherModels = allKnownModels.filter(
-    (m) => !m.startsWith('ag/') && !m.startsWith('cx/')
-  );
+  // Group models for select (only models reported by the API are offered)
+  const otherModels = models;
 
   return (
     <div className="tab-content" style={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
@@ -392,13 +331,11 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
           <p className="section-desc">
             {locale === 'vi' ? (
               <>
-                Kiểm thử chat completions trực tiếp tới các mô hình Antigravity (<code>ag/*</code>),
-                OpenAI Codex (<code>cx/*</code>) và Upstream qua cổng <code>/v1/chat/completions</code>.
+                Kiểm thử chat completions trực tiếp tới các mô hình Upstream qua cổng <code>/v1/chat/completions</code>.
               </>
             ) : (
               <>
-                Test chat completions directly against Antigravity (<code>ag/*</code>),
-                OpenAI Codex (<code>cx/*</code>), and Upstream models via <code>/v1/chat/completions</code>.
+                Test chat completions directly against Upstream models via <code>/v1/chat/completions</code>.
               </>
             )}
           </p>
@@ -413,7 +350,7 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
               .then((res) => {
                 if (res?.data) {
                   const ids = res.data.map((m: ModelEntry) => m.id);
-                  setModels(Array.from(new Set([...DEFAULT_AG_MODELS, ...DEFAULT_CX_MODELS, ...ids])));
+                  setModels(Array.from(new Set(ids)));
                 }
               })
               .catch(() => {})
@@ -468,20 +405,6 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   disabled={loading}
                 >
-                  <optgroup label={t('playground.groupAg')}>
-                    {agModels.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label={t('playground.groupCx')}>
-                    {cxModels.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </optgroup>
                   {otherModels.length > 0 && (
                     <optgroup label={t('playground.groupOther')}>
                       {otherModels.map((m) => (
@@ -859,11 +782,11 @@ export const PlaygroundTab: React.FC<PlaygroundTabProps> = ({ adminKey }) => {
               <p style={{ fontSize: 12, maxWidth: 360 }}>
                 {locale === 'vi' ? (
                   <>
-                    Chọn mô hình <code>ag/*</code> hoặc <code>cx/*</code>, nhập câu hỏi và bấm nút <strong>Gửi Yêu Cầu</strong> để kiểm thử phản hồi thời gian thực.
+                    Chọn một mô hình Upstream, nhập câu hỏi và bấm nút <strong>Gửi Yêu Cầu</strong> để kiểm thử phản hồi thời gian thực.
                   </>
                 ) : (
                   <>
-                    Select an <code>ag/*</code> or <code>cx/*</code> model, enter your question, and click <strong>Send Request</strong> to test real-time responses.
+                    Select an Upstream model, enter your question, and click <strong>Send Request</strong> to test real-time responses.
                   </>
                 )}
               </p>

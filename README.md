@@ -1,6 +1,6 @@
 # ⚡ ezRouter (Termux fork)
 
-Fork of [namhv94/ezRouter](https://github.com/namhv94/ezRouter) — an ultra-fast LLM router & proxy written in Rust (multi-account quota pooling for Gemini / Codex / Claude, Token Saver engine, embedded Web UI).
+Fork of [namhv94/ezRouter](https://github.com/namhv94/ezRouter) — an ultra-fast LLM router & proxy written in Rust (multi-account quota pooling, Token Saver engine, embedded Web UI). Providers are configured externally via the `/admin/providers` admin interface (plus combos), so the router is external-provider-only via the database.
 
 👉 See the **[original repo](https://github.com/namhv94/ezRouter)** for full documentation, features, benchmarks, and releases.
 

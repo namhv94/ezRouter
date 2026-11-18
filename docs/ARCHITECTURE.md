@@ -1,7 +1,7 @@
 # ezRouter Architecture
 
 ## 1. Overview
-`ezRouter` is a high-performance, memory-safe LLM proxy & router built in Rust. It exposes an OpenAI-compatible HTTP interface while intelligently orchestrating, load balancing, and failing over across multiple backend providers (Google Gemini / Antigravity, OpenAI Codex, Claude, Custom Proxies) with automated quota tracking and real-time token optimization.
+`ezRouter` is a high-performance, memory-safe LLM proxy & router built in Rust. It exposes an OpenAI-compatible HTTP interface while intelligently orchestrating, load balancing, and failing over across multiple backend providers (Claude, Gemini, Custom Proxies) with automated quota tracking and real-time token optimization. Providers are configured externally via the `/admin/providers` admin interface (and combos), so no provider is baked into the binary.
 
 ## 2. Core Principles
 - **Blazing Fast & Low Latency:** Written in 100% Rust on top of Tokio and Axum with zero-copy stream processing.
@@ -16,7 +16,6 @@
    - Admin REST & Server-Sent Events (SSE): `/admin/*`, `/health`, live traffic monitor.
 2. **Provider & Transport Layer:**
    - Multi-account Google OAuth rotation with automated token refresh.
-   - OpenAI Codex OAuth & session management with native streaming and fallback.
    - Combo model router (weighted, round-robin, fallback chains).
 3. **Token Saver Engine:**
    - Heuristic truncation, whitespace normalization, repeated sequence deduplication.

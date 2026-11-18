@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | `/` | GET | Status / UI | Staging banner | Planned | Scaffold has basic text banner |
 | `/health` | GET | Health JSON | Health JSON | Implemented (Scaffold) | Returns status, mode, port, data dir |
-| `/v1/models` | GET | Models list JSON | Models list JSON | Planned | Will return supported Antigravity models |
+| `/v1/models` | GET | Models list JSON | Models list JSON | Planned | Will return supported models from configured providers |
 | `/v1/chat/completions` | POST | OpenAI chat completions (sync + stream) | OpenAI chat completions (sync + stream) | Non-streaming Implemented (Phase 2B) | Streaming rejected with clean 400 in 2B; mock provider for staging/test |
 | `/admin/*` | Various | Web admin interface & auth | Web admin interface | Planned | Phase 3 |
 

@@ -18,9 +18,6 @@ pub fn mask_account_email(value: &str) -> String {
             let prefix: String = local.chars().take(2).collect();
             format!("{prefix}***@{domain}")
         }
-    } else if let Some(suffix) = value.strip_prefix("codex:") {
-        let s: String = suffix.chars().take(8).collect();
-        format!("Codex ({s})")
     } else if (value.starts_with("acc_") || value.starts_with("key_")) && value.chars().count() > 10
     {
         let prefix: String = value.chars().take(4).collect();
@@ -208,11 +205,6 @@ mod tests {
         assert_eq!(mask_account_email("test@gmail.com"), "te***@gmail.com");
         assert_eq!(mask_account_email("ab@gmail.com"), "ab***@gmail.com");
         assert_eq!(mask_account_email("a@gmail.com"), "a***@gmail.com");
-        assert_eq!(
-            mask_account_email("codex:0123456789abcdef"),
-            "Codex (01234567)"
-        );
-        assert_eq!(mask_account_email("codex:short"), "Codex (short)");
         assert_eq!(mask_account_email("my-provider"), "my-provider");
     }
 
@@ -224,7 +216,7 @@ mod tests {
         registry.register(
             id.clone(),
             "TestClient".to_string(),
-            "ag/gemini-3.8-flash-high".to_string(),
+            "gpt-4o".to_string(),
             true,
         );
 
@@ -238,15 +230,15 @@ mod tests {
         // Update routing
         registry.update_routing(
             &id,
-            "Google Antigravity",
-            "ag/gemini-3.8-flash-high",
+            "OpenRouter",
+            "gpt-4o",
             "te***@gmail.com",
         );
 
         let active = registry.get_active();
         assert_eq!(active.items.len(), 1);
         assert_eq!(active.items[0].status, "generating");
-        assert_eq!(active.items[0].provider, "Google Antigravity");
+        assert_eq!(active.items[0].provider, "OpenRouter");
         assert_eq!(active.items[0].account, "te***@gmail.com");
 
         // Finish request

@@ -54,40 +54,38 @@ const checks = [
     detail: 'KPI grid and tone indicators must be scoped under [data-theme="operational"] with monospace tabular-nums',
   },
   {
-    name: 'Overview quota overview and token analytics styled for observability',
+    name: 'Overview model-share quota bars and token analytics styled for observability',
     test: () => {
-      const quotaCard = /\[data-theme="operational"\]\s+\.overview-quota-card/.test(stylesContent);
-      const quotaTrack = /\[data-theme="operational"\]\s+\.quota-track/.test(stylesContent);
-      const quotaGood = /\[data-theme="operational"\]\s+\.quota-good/.test(stylesContent);
+      const quotaTrack = /\[data-theme="operational"\]\s+\.quota-track\s*\{/.test(stylesContent);
+      const quotaTone = /\[data-theme="operational"\]\s+\.quota-fill\.quota-good\s*\{/.test(stylesContent);
       const tokenSummary = /\[data-theme="operational"\]\s+\.token-chart-summary-bar/.test(stylesContent);
       const tokenSvg = /\[data-theme="operational"\]\s+\.token-chart-svg-container/.test(stylesContent);
-      return quotaCard && quotaTrack && quotaGood && tokenSummary && tokenSvg;
+      const jsxQuotaBars = overviewContent.includes('quota-track') && overviewContent.includes('quota-fill');
+      return quotaTrack && quotaTone && tokenSummary && tokenSvg && jsxQuotaBars;
     },
-    detail: 'Quota overview tracks and token analytics must have high-contrast operational rules',
+    detail: 'Model-share quota bars and token analytics must have high-contrast operational rules',
   },
   {
-    name: 'Providers status strip and auto quota compact strip styled',
+    name: 'Providers status strip styled for operational mode',
     test: () => {
-      const statusStrip = /\[data-theme="operational"\]\s+\.status-legend-bar/.test(stylesContent);
-      const statusChip = /\[data-theme="operational"\]\s+\.status-segment-chip/.test(stylesContent);
-      const autoQuota = /\[data-theme="operational"\]\s+\.auto-quota-compact-strip/.test(stylesContent);
-      const intervalBtn = /\[data-theme="operational"\]\s+\.interval-pill-btn\.active/.test(stylesContent);
-      return statusStrip && statusChip && autoQuota && intervalBtn;
+      const statusStrip = /\[data-theme="operational"\]\s+\.status-legend-bar\s*\{/.test(stylesContent);
+      const statusChip = /\[data-theme="operational"\]\s+\.status-segment-chip\s*\{/.test(stylesContent);
+      const jsxStrip = providersContent.includes('status-legend-bar') && providersContent.includes('status-segment-chip');
+      return statusStrip && statusChip && jsxStrip;
     },
-    detail: 'Status strip chips and auto quota compact panel must be styled under [data-theme="operational"]',
+    detail: 'Status legend bar and segment chips must be styled and rendered under [data-theme="operational"]',
   },
   {
-    name: 'Provider cards and account tables scannable and compact',
+    name: 'Provider cards and drawer tables scannable and compact',
     test: () => {
       const visualCard = /\[data-theme="operational"\]\s+\.visual-card/.test(stylesContent);
       const metricsRow = /\[data-theme="operational"\]\s+\.visual-metrics-row/.test(stylesContent);
       const healthRing = /\[data-theme="operational"\]\s+\.health-ring-bg/.test(stylesContent);
-      const microBars = /\[data-theme="operational"\]\s+\.visual-quota-bars/.test(stylesContent);
+      const statNumbers = /\[data-theme="operational"\]\s+\.stat-num-val/.test(stylesContent);
       const drawerTable = /\[data-theme="operational"\]\s+\.details-drawer-content \.table-container/.test(stylesContent);
-      const mobileAcc = /\[data-theme="operational"\]\s+\.mobile-account-card/.test(stylesContent);
-      return visualCard && metricsRow && healthRing && microBars && drawerTable && mobileAcc;
+      return visualCard && metricsRow && healthRing && statNumbers && drawerTable;
     },
-    detail: 'Provider cards, health ring, micro-bars, and drawer tables must have compact operational styling',
+    detail: 'Provider cards, health ring, stat numbers and drawer tables must have compact operational styling',
   },
   {
     name: 'Design constraints: no gradients in operational rules',
@@ -125,27 +123,27 @@ const checks = [
     detail: 'Original legacy rules must remain intact so default dark theme appearance is preserved',
   },
   {
-    name: 'Operational provider account tables mobile fallback (<=640px/<=390px)',
+    name: 'Operational provider tables mobile fallback (<=640px)',
     test: () => {
       const hasMobileBlock = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.details-drawer-content\s+table\s*\{[^}]*display:\s*block/s.test(stylesContent);
       const hasTheadNone = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.details-drawer-content\s+thead\s*\{[^}]*display:\s*none/s.test(stylesContent);
       const hasDataLabel = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.details-drawer-content\s+td\[data-label\]::before/s.test(stylesContent);
       const hasMobileBtnTarget = /@media\s*\([^)]*max-width:\s*640px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.details-drawer-content\s+\.table-actions\s+\.btn[^{]*\{[^}]*min-height:\s*44px/s.test(stylesContent);
-      const providersHasDataLabel = providersContent.includes('data-label={t(\'providers.thAccount\')}');
+      const providersHasDataLabel = providersContent.includes("data-label={t('providers.thNamePrefix')}");
       return hasMobileBlock && hasTheadNone && hasDataLabel && hasMobileBtnTarget && providersHasDataLabel;
     },
-    detail: 'Operational provider account tables must have responsive card layout fallback with data-labels and >=44px touch targets on mobile',
+    detail: 'Operational provider tables must have responsive card layout fallback with data-labels and >=44px touch targets on mobile',
   },
   {
     name: 'Operational theme contrast and semantic token overrides',
     test: () => {
       const hasChartBars = /\[data-theme="operational"\]\s+\.token-bar-comp\s*\{[^}]*fill:\s*#0f766e/s.test(stylesContent);
-      const hasMicroBars = /\[data-theme="operational"\]\s+\.micro-bar-fill\.micro-bar-good\s*\{[^}]*background:\s*#0f766e/s.test(stylesContent);
+      const hasStatValues = /\[data-theme="operational"\]\s+\.stat-num-val\.active\s*\{[^}]*color:\s*#0f766e/s.test(stylesContent);
       const hasOrBadge = /\[data-theme="operational"\]\s+\.openrouter-model-badge\s*\{[^}]*color:\s*#4338ca/s.test(stylesContent);
       const hasRootPrimary = stylesContent.includes('--primary: var(--accent-primary);');
       const hasRootBorder = stylesContent.includes('--border-color: var(--border-subtle);');
       const hasRootBgSurface = stylesContent.includes('--bg-surface-secondary: var(--bg-secondary);');
-      return hasChartBars && hasMicroBars && hasOrBadge && hasRootPrimary && hasRootBorder && hasRootBgSurface;
+      return hasChartBars && hasStatValues && hasOrBadge && hasRootPrimary && hasRootBorder && hasRootBgSurface;
     },
     detail: 'Operational theme must define high-contrast token overrides and semantic variable fallbacks',
   },
@@ -160,26 +158,38 @@ const checks = [
     detail: 'HTML progress height must not override SVG rect height attributes',
   },
   {
-    name: 'Operational Overview section ordering prioritizes Quota over Analytics',
+    name: 'Operational Overview section ordering prioritizes Command Center over Analytics',
     test: () => {
-      const quotaOrder = /\[data-theme="operational"\]\s+\.overview-quota-section\s*\{[^}]*order:\s*2/s.test(stylesContent);
+      const commandOrder = /\[data-theme="operational"\]\s+\.overview-command-center\s*\{[^}]*order:\s*1/s.test(stylesContent);
       const analyticsOrder = /\[data-theme="operational"\]\s+\.overview-analytics-section\s*\{[^}]*order:\s*3/s.test(stylesContent);
+      const modelsOrder = /\[data-theme="operational"\]\s+\.overview-models-section\s*\{[^}]*order:\s*4/s.test(stylesContent);
       const containerGrid = /\[data-theme="operational"\]\s+\.overview-container\s*\{[^}]*display:\s*grid/s.test(stylesContent);
-      const jsxHasSections = overviewContent.includes('overview-quota-section') && overviewContent.includes('overview-analytics-section');
-      return quotaOrder && analyticsOrder && containerGrid && jsxHasSections;
+      const jsxHasSections = overviewContent.includes('overview-command-center') && overviewContent.includes('overview-analytics-section');
+      return commandOrder && analyticsOrder && modelsOrder && containerGrid && jsxHasSections;
     },
-    detail: 'Operational mode must prioritize Quota Overview above Token Analytics via CSS grid order without altering legacy DOM flow',
+    detail: 'Operational mode must order the Command Center above Token Analytics via CSS grid order without altering legacy DOM flow',
   },
   {
-    name: 'Operational Command Center asymmetric vitals hierarchy & mobile 2-column tiles',
+    name: 'Operational Command Center vitals hierarchy & mobile 2-column tiles',
     test: () => {
-      const desktopPoolSpan = /\[data-theme="operational"\]\s+\.kpi-card-pool\s*\{[^}]*grid-column:\s*span\s*2/s.test(stylesContent);
       const desktopErrorsSpan = /\[data-theme="operational"\]\s+\.kpi-card-errors\s*\{[^}]*grid-column:\s*span\s*2/s.test(stylesContent);
+      const desktopFourCol = /\[data-theme="operational"\]\s+\.kpi-grid\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\)/s.test(stylesContent);
       const mobileGrid2Col = /@media\s*\([^)]*max-width:\s*560px\)[^{]*\{[\s\S]*?\[data-theme="operational"\]\s+\.kpi-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*1fr\)/s.test(stylesContent);
-      const jsxHasCardRoles = overviewContent.includes('kpi-card-pool') && overviewContent.includes('kpi-card-errors');
-      return desktopPoolSpan && desktopErrorsSpan && mobileGrid2Col && jsxHasCardRoles;
+      const jsxHasCardRoles = overviewContent.includes('kpi-card-errors') && overviewContent.includes('kpi-card-requests');
+      return desktopErrorsSpan && desktopFourCol && mobileGrid2Col && jsxHasCardRoles;
     },
-    detail: 'Pool and Error vitals must span prominent double columns on desktop and form compact 2-column grid on mobile (<=560px/390px)',
+    detail: 'Error vitals must span prominent double columns on desktop and form a compact 2-column grid on mobile (<=560px)',
+  },
+  {
+    name: 'Bento vitals panel styled for command center overview',
+    test: () => {
+      const bentoCard = /\.bento-vitals-card\s*\{/.test(stylesContent);
+      const bentoBox = /\.bento-vital-box\s*\{/.test(stylesContent);
+      const readyCard = /\[data-theme="operational"\]\s+\.kpi-card-ready\s*\{/.test(stylesContent);
+      const jsxBento = overviewContent.includes('bento-vitals-card') && overviewContent.includes('bento-vital-box');
+      return bentoCard && bentoBox && readyCard && jsxBento;
+    },
+    detail: 'Bento vitals card/boxes and the readiness KPI card must be styled and rendered',
   },
   {
     name: 'Overview Model summary table responsive card fallback on mobile (<=640px)',

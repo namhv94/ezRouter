@@ -1,29 +1,35 @@
 #!/usr/bin/env bash
-set -e
+# Refresh the OpenRouter credit balance shown in the dashboard.
+#
+# The dashboard reads `ui/public/assets/openrouter-credits.json`, which Vite
+# copies verbatim into `ui/dist/assets/` on every build. Writing here (rather
+# than straight into ui/dist) keeps the value across UI rebuilds.
+#
+# Override the defaults with AG_DATA_DIR / AG_UI_PUBLIC_DIR if you deploy
+# somewhere else.
+set -eu
 
-DB_PATH="/home/namhv/.ag-proxy-rust-staging/data.sqlite"
-JSON_OUT="/home/namhv/ag-proxy-rust/ui/dist/assets/openrouter-credits.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+DB_PATH="${AG_DATA_DIR:-$HOME/.ezrouter/data}/data.sqlite"
+JSON_OUT="${AG_UI_PUBLIC_DIR:-${REPO_DIR}/ui/public}/assets/openrouter-credits.json"
 
 if [ ! -f "$DB_PATH" ]; then
   exit 0
 fi
 
-# Query OpenRouter API key from staging database
-KEY=$(sqlite3 "$DB_PATH" "SELECT api_key FROM providers WHERE (type='openrouter' OR prefix='openrouter') AND is_active=1 LIMIT 1;" 2>/dev/null || true)
+# Query the OpenRouter API key from the providers table
+KEY=$(sqlite3 "$DB_PATH" "SELECT api_key FROM providers WHERE (type='openrouter' OR prefix='openrouter') AND is_active=1 AND api_key != '' LIMIT 1;" 2>/dev/null || true)
 
 if [ -z "$KEY" ]; then
   exit 0
 fi
 
-# Fetch credits from OpenRouter API
 RESP=$(curl -s -m 10 -H "Authorization: Bearer $KEY" https://openrouter.ai/api/v1/credits 2>/dev/null || true)
 
 if echo "$RESP" | grep -q '"total_credits"'; then
   DATA=$(echo "$RESP" | jq -c '.data + {updated_at: (now|floor)}')
   mkdir -p "$(dirname "$JSON_OUT")"
   echo "$DATA" > "$JSON_OUT"
-
-  # Also save to SQLite quota_refresh_settings for backend consistency
-  ESCAPED_DATA=$(echo "$DATA" | sed "s/'/''/g")
-  sqlite3 "$DB_PATH" "INSERT OR REPLACE INTO quota_refresh_settings (key, value, updated_at) VALUES ('openrouter_credits', '$ESCAPED_DATA', datetime('now'));" 2>/dev/null || true
 fi

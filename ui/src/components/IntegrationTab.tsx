@@ -13,11 +13,10 @@ import {
 
 export const IntegrationTab: React.FC = () => {
   const { t } = useI18n();
-  const [apiKey, setApiKey] = useState('ag-proxy-key');
-  const [selectedModel, setSelectedModel] = useState<string>('ag/gemini-3.8-flash-high');
+  const [apiKey, setApiKey] = useState('proxy-key');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini');
   const [thinkingLevel, setThinkingLevel] = useState<'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultra'>('default');
-  const [activeTab, setActiveTab] = useState<'hermes' | 'claude' | 'codex' | 'copilot' | 'python' | 'curl' | 'node'>('hermes');
-  const [codexOs, setCodexOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
+  const [activeTab, setActiveTab] = useState<'hermes' | 'claude' | 'copilot' | 'python' | 'curl' | 'node'>('hermes');
   const [claudeOs, setClaudeOs] = useState<'bash' | 'powershell' | 'bat'>('bash');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -50,7 +49,7 @@ export const IntegrationTab: React.FC = () => {
     }
   };
 
-  const activeKey = apiKey.trim() || 'ag-proxy-key';
+  const activeKey = apiKey.trim() || 'proxy-key';
 
   // Snippets
   const hermesConfigSnippet = `# ~/.hermes/config.yaml
@@ -72,50 +71,8 @@ export OPENAI_API_KEY="${activeKey}"
 hermes chat --model ${selectedModel}
 `;
 
-  const codexModel =
-    selectedModel.startsWith('cx/') || selectedModel.startsWith('gpt-')
-      ? selectedModel
-      : 'cx/gpt-5.6-sol';
-
-  const modelSuffixMatch = selectedModel.match(/-(low|medium|high|xhigh|max|ultra)$/i);
-  const effectiveEffort =
-    thinkingLevel !== 'default'
-      ? thinkingLevel
-      : modelSuffixMatch
-      ? modelSuffixMatch[1].toLowerCase()
-      : '';
-
-  const codexOneStepBash = `curl -fsSL ${rootUrl}/setup-codex.sh | bash -s -- ${baseUrl} ${activeKey} ${codexModel}`;
-  const codexOneStepPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/setup-codex.ps1))) -RouterUrl '${baseUrl}' -ApiKey '${activeKey}' -Model '${codexModel}'"`;
-  const codexOneStepBat = `curl -fsSL ${rootUrl}/setup-codex.bat -o setup-codex.bat && setup-codex.bat ${baseUrl} ${activeKey} ${codexModel}`;
-
-  const codexUninstallBash = `curl -fsSL ${rootUrl}/uninstall-codex.sh | bash`;
-  const codexUninstallPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/uninstall-codex.ps1)))"`;
-  const codexUninstallBat = `curl -fsSL ${rootUrl}/uninstall-codex.bat -o uninstall-codex.bat && uninstall-codex.bat`;
-
-  const codexConfigSnippet = `# ~/.codex/config.toml
-# Cấu hình ezRouter cho OpenAI Codex IDE Extension & Codex CLI
-model = "${codexModel}"${effectiveEffort ? `\nmodel_reasoning_effort = "${effectiveEffort}"` : ''}
-model_provider = "ezrouter"
-
-[model_providers.ezrouter]
-name = "ezRouter"
-base_url = "${baseUrl}"
-wire_api = "responses"
-supports_websockets = false
-experimental_bearer_token = "${activeKey}"
-requires_openai_auth = false
-request_max_retries = 4
-stream_max_retries = 10
-stream_idle_timeout_ms = 300000
-`;
-
-  const codexCliSnippet = `# Kiểm tra gọi thử model từ Terminal
-codex -m ${codexModel}${effectiveEffort ? ` -c model_reasoning_effort="${effectiveEffort}"` : ''} "Xin chào! Giới thiệu bản thân ngắn gọn"
-`;
-
   // Claude Code CLI Snippets
-  const claudeModel = 'ag/claude-sonnet-5-5-high';
+  const claudeModel = 'claude-sonnet-4-5';
   const claudeOneStepBash = `curl -fsSL ${rootUrl}/setup-claude-code.sh | bash -s -- ${rootUrl} ${activeKey} ${claudeModel}`;
   const claudeOneStepPowerShell = `powershell -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm ${rootUrl}/setup-claude-code.ps1))) -RouterUrl '${rootUrl}' -ApiKey '${activeKey}' -Model '${claudeModel}'"`;
   const claudeOneStepBat = `curl -fsSL ${rootUrl}/setup-claude-code.bat -o setup-claude-code.bat && setup-claude-code.bat ${rootUrl} ${activeKey} ${claudeModel}`;
@@ -154,20 +111,6 @@ claude
       "model": "claude-3-5-sonnet-20241022",
       "apiBase": "${rootUrl}",
       "apiKey": "${activeKey}"
-    },
-    {
-      "title": "ezRouter - Codex GPT-6.1 Sol",
-      "provider": "openai",
-      "model": "cx/gpt-6.1-sol",
-      "apiBase": "${baseUrl}",
-      "apiKey": "${activeKey}"
-    },
-    {
-      "title": "ezRouter - Gemini 3.8 Flash",
-      "provider": "openai",
-      "model": "ag/gemini-3.8-flash-high",
-      "apiBase": "${baseUrl}",
-      "apiKey": "${activeKey}"
     }
   ]
 }`;
@@ -178,7 +121,7 @@ claude
 //    - Nếu chọn Anthropic: ${rootUrl}
 //    - Nếu chọn OpenAI:    ${baseUrl}
 // 3. API Key: ${activeKey}
-// 4. Model ID: ${selectedModel} (hoặc ag/claude-sonnet-5-5-high, cx/gpt-6.1-sol)`;
+// 4. Model ID: ${selectedModel}`;
 
   const pythonSdkSnippet = `import os
 from openai import OpenAI
@@ -391,7 +334,7 @@ callRouter();
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={() => copyToClipboard('ag-proxy-key', 'api-key-placeholder')}
+              onClick={() => copyToClipboard('proxy-key', 'api-key-placeholder')}
               title={t('integration.copyApiKeyTitle')}
             >
               {copiedId === 'api-key-placeholder' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
@@ -399,7 +342,7 @@ callRouter();
             </button>
           </div>
           <div className="integration-code-highlight" style={{ fontSize: 14 }}>
-            ag-proxy-key
+            proxy-key
           </div>
           <div className="kpi-sub" style={{ marginTop: 8 }}>
             {t('integration.apiKeyDesc')}
@@ -421,7 +364,7 @@ callRouter();
               type="text"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="ag-proxy-key"
+              placeholder="proxy-key"
               style={{ width: '100%' }}
             />
           </div>
@@ -435,34 +378,11 @@ callRouter();
               onChange={(e) => setSelectedModel(e.target.value)}
               style={{ width: '100%' }}
             >
-              <option value="ag/gemini-4-argon-high">ag/gemini-4-argon-high ({t('integration.modelOptGemini4ArgonHigh')})</option>
-              <option value="ag/gemini-4-argon-medium">ag/gemini-4-argon-medium ({t('integration.modelOptGemini4ArgonMedium')})</option>
-              <option value="ag/gemini-4-argon-low">ag/gemini-4-argon-low ({t('integration.modelOptGemini4ArgonLow')})</option>
-              <option value="ag/gemini-4-argon">ag/gemini-4-argon ({t('integration.modelOptGemini4Argon')})</option>
-              <option value="ag/gemini-3.8-flash-high">ag/gemini-3.8-flash-high ({t('integration.modelOptGeminiFlash')})</option>
-              <option value="ag/gemini-pro-agent">ag/gemini-pro-agent ({t('integration.modelOptGeminiProAgent')})</option>
-              <option value="ag/gemini-3.1-pro-low">ag/gemini-3.1-pro-low ({t('integration.modelOptGeminiProLow')})</option>
-              <option value="ag/claude-opus-5-5-high">ag/claude-opus-5-5-high ({t('integration.modelOptClaudeOpus55')})</option>
-              <option value="ag/claude-sonnet-5-5-high">ag/claude-sonnet-5-5-high ({t('integration.modelOptClaudeSonnet55')})</option>
-              <option value="cx/gpt-6.1-sol">cx/gpt-6.1-sol ({t('integration.modelOptCodex61Sol')})</option>
-              <option value="cx/gpt-6.1-sol-high">cx/gpt-6.1-sol-high ({t('integration.modelOptCodex61SolHigh')})</option>
-              <option value="cx/gpt-6.1-sol-medium">cx/gpt-6.1-sol-medium ({t('integration.modelOptCodex61SolMedium')})</option>
-              <option value="cx/gpt-6.1-sol-low">cx/gpt-6.1-sol-low ({t('integration.modelOptCodex61SolLow')})</option>
-              <option value="cx/gpt-6.1-sol-xhigh">cx/gpt-6.1-sol-xhigh ({t('integration.modelOptCodex61SolXHigh')})</option>
-              <option value="cx/gpt-6.1-sol-max">cx/gpt-6.1-sol-max ({t('integration.modelOptCodex61SolMax')})</option>
-              <option value="cx/gpt-6-astra">cx/gpt-6-astra ({t('integration.modelOptCodexAstra')})</option>
-              <option value="cx/gpt-6-astra-high">cx/gpt-6-astra-high ({t('integration.modelOptCodexAstraHigh')})</option>
-              <option value="cx/gpt-6-astra-medium">cx/gpt-6-astra-medium ({t('integration.modelOptCodexAstraMedium')})</option>
-              <option value="cx/gpt-6-astra-low">cx/gpt-6-astra-low ({t('integration.modelOptCodexAstraLow')})</option>
-              <option value="cx/gpt-6-astra-xhigh">cx/gpt-6-astra-xhigh ({t('integration.modelOptCodexAstraXHigh')})</option>
-              <option value="cx/gpt-6-astra-max">cx/gpt-6-astra-max ({t('integration.modelOptCodexAstraMax')})</option>
-              <option value="cx/gpt-5.6-sol">cx/gpt-5.6-sol ({t('integration.modelOptCodexSol')})</option>
-              <option value="cx/gpt-5.6-sol-high">cx/gpt-5.6-sol-high ({t('integration.modelOptCodexSolHigh')})</option>
-              <option value="cx/gpt-5.6-sol-medium">cx/gpt-5.6-sol-medium ({t('integration.modelOptCodexSolMedium')})</option>
-              <option value="cx/gpt-5.6-sol-low">cx/gpt-5.6-sol-low ({t('integration.modelOptCodexSolLow')})</option>
-              <option value="cx/gpt-5.6-sol-xhigh">cx/gpt-5.6-sol-xhigh ({t('integration.modelOptCodexSolXHigh')})</option>
-              <option value="cx/gpt-5.6-sol-max">cx/gpt-5.6-sol-max ({t('integration.modelOptCodexSolMax')})</option>
-              <option value="cx/gpt-5.6-sol-ultra">cx/gpt-5.6-sol-ultra ({t('integration.modelOptCodexSolUltra')})</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet-20241022</option>
+              <option value="deepseek-chat">deepseek-chat</option>
+              <option value="openrouter/anthropic/claude-sonnet-4">openrouter/anthropic/claude-sonnet-4</option>
             </select>
           </div>
 
@@ -496,58 +416,39 @@ callRouter();
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
           <div className="model-spec-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="badge badge-success">Google Antigravity</span>
+              <span className="badge badge-success">OpenRouter</span>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => copyToClipboard('ag/gemini-3.8-flash-high', 'm-ag')}
+                onClick={() => copyToClipboard('openrouter/anthropic/claude-sonnet-4', 'm-or')}
                 title={t('integration.copyModelTitle')}
               >
-                {copiedId === 'm-ag' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'm-ag' ? t('actions.copied') : t('actions.copy')}</span>
+                {copiedId === 'm-or' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                <span>{copiedId === 'm-or' ? t('actions.copied') : t('actions.copy')}</span>
               </button>
             </div>
-            <div className="model-spec-name">ag/gemini-3.8-flash-high</div>
+            <div className="model-spec-name">openrouter/anthropic/claude-sonnet-4</div>
             <p className="model-spec-desc">
-              {t('integration.geminiFlashDesc')}
+              {t('integration.modelSpecA')}
             </p>
           </div>
 
           <div className="model-spec-card">
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="badge badge-primary">OpenAI Codex Flagship</span>
+              <span className="badge badge-primary">OpenAI Compatible</span>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
-                onClick={() => copyToClipboard('cx/gpt-6.1-sol', 'm-cx61')}
+                onClick={() => copyToClipboard('gpt-4o-mini', 'm-gpt')}
                 title={t('integration.copyModelTitle')}
               >
-                {copiedId === 'm-cx61' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'm-cx61' ? t('actions.copied') : t('actions.copy')}</span>
+                {copiedId === 'm-gpt' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
+                <span>{copiedId === 'm-gpt' ? t('actions.copied') : t('actions.copy')}</span>
               </button>
             </div>
-            <div className="model-spec-name">cx/gpt-6.1-sol</div>
+            <div className="model-spec-name">gpt-4o-mini</div>
             <p className="model-spec-desc">
-              {t('integration.codex61SolDesc')}
-            </p>
-          </div>
-
-          <div className="model-spec-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="badge badge-primary">OpenAI Codex</span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => copyToClipboard('cx/gpt-5.6-sol', 'm-cx')}
-                title={t('integration.copyModelTitle')}
-              >
-                {copiedId === 'm-cx' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                <span>{copiedId === 'm-cx' ? t('actions.copied') : t('actions.copy')}</span>
-              </button>
-            </div>
-            <div className="model-spec-name">cx/gpt-5.6-sol</div>
-            <p className="model-spec-desc">
-              {t('integration.codexSolDesc')}
+              {t('integration.modelSpecC')}
             </p>
           </div>
         </div>
@@ -571,14 +472,6 @@ callRouter();
           >
             <IconTerminal size={16} />
             <span>Claude Code CLI</span>
-          </button>
-          <button
-            type="button"
-            className={`integration-tab-btn ${activeTab === 'codex' ? 'active' : ''}`}
-            onClick={() => setActiveTab('codex')}
-          >
-            <IconTerminal size={16} />
-            <span>Codex CLI</span>
           </button>
           <button
             type="button"
@@ -887,229 +780,6 @@ callRouter();
           </div>
         )}
 
-        {/* Tab Content: Codex CLI */}
-        {activeTab === 'codex' && (
-          <div className="integration-tab-pane">
-            <h4 style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
-              {t('integration.codexTitle')}
-            </h4>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
-              {t('integration.codexDesc')}
-            </p>
-
-            {/* 1-Step Setup Box */}
-            <div
-              style={{
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-                background: 'rgba(16, 185, 129, 0.05)',
-                borderRadius: 8,
-                padding: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--success, #10b981)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <IconZap size={16} /> {t('integration.codexOneStepTitle')}
-                </span>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('bash')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexMacLinux')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('powershell')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexWinPs')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('bat')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexWinBat')}
-                  </button>
-                </div>
-              </div>
-
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                {t('integration.codexOneStepDesc')}
-              </p>
-
-              <div className="code-card" style={{ marginBottom: 0 }}>
-                <div className="code-card-header">
-                  <span className="code-file-tag">
-                    {codexOs === 'bash'
-                      ? 'Terminal (macOS / Linux)'
-                      : codexOs === 'powershell'
-                      ? 'PowerShell (Windows)'
-                      : 'Command Prompt (Windows)'}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() =>
-                      copyToClipboard(
-                        codexOs === 'bash'
-                          ? codexOneStepBash
-                          : codexOs === 'powershell'
-                          ? codexOneStepPowerShell
-                          : codexOneStepBat,
-                        'codex-onestep'
-                      )
-                    }
-                  >
-                    {copiedId === 'codex-onestep' ? (
-                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
-                    ) : (
-                      <IconCopy size={14} />
-                    )}
-                    <span>{copiedId === 'codex-onestep' ? t('actions.copied') : t('actions.copy')}</span>
-                  </button>
-                </div>
-                <pre className="code-card-pre">
-                  <code>
-                    {codexOs === 'bash'
-                      ? codexOneStepBash
-                      : codexOs === 'powershell'
-                      ? codexOneStepPowerShell
-                      : codexOneStepBat}
-                  </code>
-                </pre>
-              </div>
-            </div>
-
-            {/* Uninstall / Revert Box */}
-            <div
-              style={{
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                background: 'rgba(239, 68, 68, 0.05)',
-                borderRadius: 8,
-                padding: 16,
-                marginBottom: 16,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--danger, #ef4444)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <IconAlertCircle size={16} /> {t('integration.codexUninstallTitle')}
-                </span>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'bash' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('bash')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexMacLinux')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'powershell' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('powershell')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexWinPs')}
-                  </button>
-                  <button
-                    type="button"
-                    className={`btn btn-sm ${codexOs === 'bat' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => setCodexOs('bat')}
-                    style={{ minHeight: 32, fontSize: 12, padding: '4px 10px' }}
-                  >
-                    {t('integration.codexWinBat')}
-                  </button>
-                </div>
-              </div>
-
-              <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                {t('integration.codexUninstallDesc')}
-              </p>
-
-              <div className="code-card" style={{ marginBottom: 0 }}>
-                <div className="code-card-header">
-                  <span className="code-file-tag">
-                    {codexOs === 'bash'
-                      ? 'Terminal (macOS / Linux)'
-                      : codexOs === 'powershell'
-                      ? 'PowerShell (Windows)'
-                      : 'Command Prompt (Windows)'}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() =>
-                      copyToClipboard(
-                        codexOs === 'bash'
-                          ? codexUninstallBash
-                          : codexOs === 'powershell'
-                          ? codexUninstallPowerShell
-                          : codexUninstallBat,
-                        'codex-uninstall'
-                      )
-                    }
-                  >
-                    {copiedId === 'codex-uninstall' ? (
-                      <IconCheck size={14} style={{ color: 'var(--success)' }} />
-                    ) : (
-                      <IconCopy size={14} />
-                    )}
-                    <span>{copiedId === 'codex-uninstall' ? t('actions.copied') : t('actions.copy')}</span>
-                  </button>
-                </div>
-                <pre className="code-card-pre">
-                  <code>
-                    {codexOs === 'bash'
-                      ? codexUninstallBash
-                      : codexOs === 'powershell'
-                      ? codexUninstallPowerShell
-                      : codexUninstallBat}
-                  </code>
-                </pre>
-              </div>
-            </div>
-
-            <div className="code-card">
-              <div className="code-card-header">
-                <span className="code-file-tag">~/.codex/config.toml (Thủ công / Manual)</span>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => copyToClipboard(codexConfigSnippet, 'codex-toml')}
-                >
-                  {copiedId === 'codex-toml' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'codex-toml' ? t('actions.copied') : t('actions.copy')}</span>
-                </button>
-              </div>
-              <pre className="code-card-pre">
-                <code>{codexConfigSnippet}</code>
-              </pre>
-            </div>
-
-            <div className="code-card" style={{ marginTop: 14 }}>
-              <div className="code-card-header">
-                <span className="code-file-tag">{t('integration.codexCliTag')}</span>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => copyToClipboard(codexCliSnippet, 'codex-cli')}
-                >
-                  {copiedId === 'codex-cli' ? <IconCheck size={14} style={{ color: 'var(--success)' }} /> : <IconCopy size={14} />}
-                  <span>{copiedId === 'codex-cli' ? t('actions.copied') : t('actions.copy')}</span>
-                </button>
-              </div>
-              <pre className="code-card-pre">
-                <code>{codexCliSnippet}</code>
-              </pre>
-            </div>
-          </div>
-        )}
 
         {/* Tab Content: VS Code & GitHub Copilot */}
         {activeTab === 'copilot' && (

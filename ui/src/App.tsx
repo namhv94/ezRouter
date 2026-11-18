@@ -5,8 +5,6 @@ import {
   HealthInfo,
   ModelRequestSummary,
   ProviderResponse,
-  AccountResponse,
-  CodexAccountRecord,
 } from './types';
 import {
   api,
@@ -44,8 +42,6 @@ export const App: React.FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [summaries, setSummaries] = useState<ModelRequestSummary[]>([]);
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
-  const [accounts, setAccounts] = useState<AccountResponse[]>([]);
-  const [codexAccounts, setCodexAccounts] = useState<CodexAccountRecord[]>([]);
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
 
   const [loading, setLoading] = useState<boolean>(false);
@@ -91,28 +87,20 @@ export const App: React.FC = () => {
     setRefreshing(true);
     setError(null);
     try {
-      const [healthRes, statsRes, summariesRes, providersRes, accountsRes, keysRes, codexRes] =
+      const [healthRes, statsRes, summariesRes, providersRes, keysRes] =
         await Promise.allSettled([
           api.getHealth(),
           api.getStats(),
           api.getRequestSummary(),
           api.getProviders(),
-          api.getAccounts(),
           api.getApiKeys(),
-          api.getCodexAccounts(),
         ]);
 
       if (healthRes.status === 'fulfilled') setHealth(healthRes.value);
       if (statsRes.status === 'fulfilled') setStats(statsRes.value);
       if (summariesRes.status === 'fulfilled') setSummaries(summariesRes.value);
       if (providersRes.status === 'fulfilled') setProviders(providersRes.value);
-      if (accountsRes.status === 'fulfilled') setAccounts(accountsRes.value.accounts || []);
       if (keysRes.status === 'fulfilled') setApiKeys(keysRes.value);
-      if (codexRes.status === 'fulfilled') {
-        const cVal = codexRes.value;
-        const list = Array.isArray(cVal) ? cVal : (cVal as any)?.accounts || [];
-        setCodexAccounts(list);
-      }
 
       // Check if critical stats failed with auth error
       if (statsRes.status === 'rejected') {
@@ -159,8 +147,6 @@ export const App: React.FC = () => {
     images: t('nav.images'),
     requests: t('nav.requests'),
     providers: t('nav.providers'),
-    accounts: t('nav.accounts'),
-    codex: t('nav.codex'),
     combos: t('nav.combos'),
     api_keys: t('nav.apiKeys'),
     token_saver: t('nav.tokenSaver'),
@@ -190,10 +176,6 @@ export const App: React.FC = () => {
     );
   }
 
-  const activeAccountsCount = accounts.filter(
-    (a) => a.is_active && a.cooldown_remaining <= 0
-  ).length;
-
   return (
     <div className="app-container" data-theme={theme}>
       <Sidebar
@@ -202,7 +184,6 @@ export const App: React.FC = () => {
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         health={health}
-        activeAccountsCount={activeAccountsCount}
         totalProvidersCount={providers.length}
         totalKeysCount={apiKeys.length}
         theme={theme}
@@ -226,12 +207,9 @@ export const App: React.FC = () => {
             <OverviewTab
               stats={stats}
               summaries={summaries}
-              accounts={accounts}
-              codexAccounts={codexAccounts}
               health={health}
               loading={loading}
               refreshing={refreshing}
-              onRefresh={refreshAllData}
               error={error}
               onSelectTab={setCurrentTab}
             />
@@ -249,10 +227,9 @@ export const App: React.FC = () => {
 
           {(currentTab === 'traffic' || currentTab === 'requests') && <RequestsTab />}
 
-          {(currentTab === 'providers' || currentTab === 'accounts' || currentTab === 'codex') && (
+          {currentTab === 'providers' && (
             <ProvidersTab
               providers={providers}
-              accounts={accounts}
               loading={loading}
               error={error}
               onRefresh={refreshAllData}

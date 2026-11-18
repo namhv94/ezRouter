@@ -2,21 +2,14 @@ import {
   ActiveRequestsResponse,
   AdminStats,
   ApiKey,
-  CodexAccountRecord,
-  CodexAccountsResponse,
-  CodexStatusResponse,
   ComboRecord,
-  CreateAccountRequest,
   CreateApiKeyRequest,
   CreateComboRequest,
   CreateProviderRequest,
   HealthInfo,
-  ListAccountsResponse,
   ModelListResponse,
   ModelRequestSummary,
   ProviderResponse,
-  QuotaRefreshStatus,
-  UpdateQuotaRefreshPayload,
   RequestsResponse,
   TokenAnalyticsResponse,
   UpdateProviderRequest,
@@ -107,7 +100,6 @@ export const api = {
 
   // Stats & Requests
   getStats: (key?: string) => request<AdminStats>('/admin/stats', {}, key),
-  getAccounts: () => request<ListAccountsResponse>('/admin/accounts'),
   getRequestSummary: () => request<ModelRequestSummary[]>('/admin/request-summary'),
   getTokenAnalytics: (period?: string) =>
     request<TokenAnalyticsResponse>(
@@ -177,174 +169,6 @@ export const api = {
     request<any>(`/admin/providers/${encodeURIComponent(id)}/sync-models`, {
       method: 'POST',
     }),
-
-  // Google / Antigravity Accounts
-  createAccount: (data: CreateAccountRequest) =>
-    request<{ id: string; email: string }>('/admin/accounts', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  deleteAccount: (id: string) =>
-    request<{ ok: boolean }>(`/admin/accounts/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
-  resetAccount: (id: string) =>
-    request<{ ok: boolean }>(`/admin/accounts/${encodeURIComponent(id)}/reset`, {
-      method: 'POST',
-    }),
-  toggleAccount: (id: string) =>
-    request<{ ok: boolean; id: string; is_active: boolean }>(
-      `/admin/accounts/${encodeURIComponent(id)}/toggle`,
-      { method: 'POST' }
-    ),
-  refreshAccountQuota: (id: string) =>
-    request<{ account_id: string; quota: any }>(
-      `/admin/accounts/${encodeURIComponent(id)}/refresh-quota`,
-      { method: 'POST' }
-    ),
-  refreshAllAccountsQuota: () =>
-    request<{ ok: boolean; total: number; refreshed: number }>('/admin/accounts/refresh-quota', {
-      method: 'POST',
-    }),
-  getQuotaRefreshStatus: () =>
-    request<QuotaRefreshStatus>('/admin/quota-refresh'),
-  updateQuotaRefreshSettings: (payload: UpdateQuotaRefreshPayload) =>
-    request<QuotaRefreshStatus>('/admin/quota-refresh', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  runQuotaRefresh: () =>
-    request<QuotaRefreshStatus>('/admin/quota-refresh/run', {
-      method: 'POST',
-    }),
-  testAccount: (id: string) =>
-    request<any>(`/admin/accounts/${encodeURIComponent(id)}/test`, {
-      method: 'POST',
-    }),
-  startGoogleOAuth: (origin?: string, redirect_uri?: string) => {
-    const params = new URLSearchParams();
-    if (origin) params.set('origin', origin);
-    if (redirect_uri) params.set('redirect_uri', redirect_uri);
-    const q = params.toString() ? `?${params.toString()}` : '';
-    return request<{
-      ok: boolean;
-      state: string;
-      authorize_url: string;
-      authorization_url: string;
-      redirect_uri: string;
-    }>(`/admin/accounts/oauth/start${q}`, { method: 'POST' });
-  },
-  exchangeGoogleOAuth: (
-    codeOrPayload:
-      | string
-      | {
-          code?: string;
-          callback_url?: string;
-          redirect_uri?: string;
-          state?: string;
-        },
-    redirect_uri?: string,
-    state?: string
-  ) => {
-    const body =
-      typeof codeOrPayload === 'string'
-        ? { code: codeOrPayload, redirect_uri, state }
-        : codeOrPayload;
-    return request<{ ok: boolean; account_id: string; email: string; is_new?: boolean; action?: string }>(
-      '/admin/accounts/oauth/exchange',
-      {
-        method: 'POST',
-        body: JSON.stringify(body),
-      }
-    );
-  },
-
-  // Codex Accounts & OAuth
-  getCodexStatus: () => request<CodexStatusResponse>('/admin/codex'),
-  getCodexAccounts: () =>
-    request<CodexAccountsResponse | CodexAccountRecord[]>('/admin/codex/accounts'),
-  createCodexAccount: (data: { auth_path: string; email?: string }) =>
-    request<CodexAccountRecord>('/admin/codex/accounts', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
-  toggleCodexAccount: (id: string) =>
-    request<{ ok: boolean }>(`/admin/codex/accounts/${encodeURIComponent(id)}/toggle`, {
-      method: 'POST',
-    }),
-  resetCodexAccount: (id: string) =>
-    request<{ ok: boolean }>(`/admin/codex/accounts/${encodeURIComponent(id)}/reset`, {
-      method: 'POST',
-    }),
-  refreshCodexAccountQuota: (id: string) =>
-    request<{ account_id: string; quota: any }>(
-      `/admin/codex/accounts/${encodeURIComponent(id)}/refresh-quota`,
-      { method: 'POST' }
-    ),
-  getCodexResetCredits: (id: string) =>
-    request<{ ok: boolean; id: string; data: any }>(
-      `/admin/codex/accounts/${encodeURIComponent(id)}/reset-credits`
-    ),
-  consumeCodexResetCredit: (id: string, creditId?: string) =>
-    request<{ ok: boolean; id: string; result?: any; quota?: any; error?: string }>(
-      `/admin/codex/accounts/${encodeURIComponent(id)}/consume-reset-credit`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ credit_id: creditId || null }),
-      }
-    ),
-  deleteCodexAccount: (id: string) =>
-    request<{ ok: boolean }>(`/admin/codex/accounts/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    }),
-  refreshCodexQuota: () =>
-    request<{ ok: boolean }>('/admin/codex/refresh-quota', { method: 'POST' }),
-  startCodexOAuth: () =>
-    request<{
-      ticket_id: string;
-      authorize_url: string;
-      state: string;
-      authorization_url: string;
-      redirect_uri: string;
-    }>('/admin/codex/oauth/start', {
-      method: 'POST',
-    }),
-  exchangeCodexOAuth: (ticket_id: string, code: string) => {
-    let cleanCode = code.trim();
-    let callbackUrl: string | undefined = undefined;
-    if (cleanCode.includes('://') || cleanCode.includes('code=') || cleanCode.includes('?')) {
-      callbackUrl = cleanCode;
-      try {
-        const urlStr =
-          cleanCode.startsWith('http://') || cleanCode.startsWith('https://')
-            ? cleanCode
-            : `http://localhost?${cleanCode.replace(/^\?/, '')}`;
-        const parsed = new URL(urlStr);
-        const extracted = parsed.searchParams.get('code');
-        if (extracted) {
-          cleanCode = extracted;
-        }
-        if (!ticket_id) {
-          const stateParam = parsed.searchParams.get('state');
-          if (stateParam) ticket_id = stateParam;
-        }
-      } catch {
-        const m = cleanCode.match(/[?&]code=([^&]+)/);
-        if (m) cleanCode = decodeURIComponent(m[1]);
-      }
-    }
-    return request<CodexAccountRecord>('/admin/codex/oauth/exchange', {
-      method: 'POST',
-      body: JSON.stringify({
-        ticket_id,
-        state: ticket_id,
-        code: cleanCode,
-        ...(callbackUrl ? { callback_url: callbackUrl } : {}),
-      }),
-    });
-  },
-  getCodexOAuthStatus: (ticket_id: string) =>
-    request<any>(`/admin/codex/oauth/status?ticket_id=${encodeURIComponent(ticket_id)}`),
 
   // Combos
   getCombos: () => request<ComboRecord[]>('/admin/combos'),
